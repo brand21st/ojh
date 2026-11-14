@@ -1,14 +1,17 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { AiCreditsCheckoutButton } from "@/components/billing/ai-credits-checkout-button";
 import { StatusBadge } from "@/components/dashboard/status-badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { formatNumber, formatPaise } from "@/lib/format";
 import { api } from "@/lib/hooks/use-api";
 import { cn } from "@/lib/utils";
+import { AI_CREDIT_LEDGER_PAGE_SIZE } from "@/modules/ai-credits/constants";
 import { quoteAiCredits } from "@/modules/ai-credits/quote";
 
 export type AiCreditPackageCard = {
@@ -42,6 +45,9 @@ type LedgerPayload = {
     amountPaise: number | null;
     status: string;
   }>;
+  page?: number;
+  pageSize?: number;
+  total?: number;
 };
 
 function normalizePackage(row: AiCreditPackageCard & Record<string, unknown>): AiCreditPackageCard {
@@ -57,9 +63,12 @@ function normalizePackage(row: AiCreditPackageCard & Record<string, unknown>): A
 }
 
 export function AiCreditsSection({ credits }: { credits?: AiCreditsPayload }) {
+  const [ledgerPage, setLedgerPage] = useState(1);
   const ledger = useQuery({
-    queryKey: ["ai-credits", "ledger"],
-    queryFn: () => api<LedgerPayload>("/api/v1/ai-credits/ledger"),
+    queryKey: ["ai-credits", "ledger", ledgerPage],
+    queryFn: () =>
+      api<LedgerPayload>(`/api/v1/ai-credits/ledger?page=${ledgerPage}&pageSize=${AI_CREDIT_LEDGER_PAGE_SIZE}`),
+    placeholderData: keepPreviousData,
   });
   const packages = useMemo(
     () => (credits?.packages ?? []).map((item) => normalizePackage(item as AiCreditPackageCard & Record<string, unknown>)),
@@ -224,39 +233,50 @@ export function AiCreditsSection({ credits }: { credits?: AiCreditsPayload }) {
         <CardHeader>
           <CardTitle>Credit history</CardTitle>
         </CardHeader>
-        <CardContent>
-          {(ledger.data?.entries ?? []).length === 0 ? (
-            <p className="text-sm text-muted">No AI credit movements yet.</p>
+        <CardContent className="space-y-0 px-0 pb-0">
+          {ledger.isLoading ? (
+            <p className="px-6 pb-6 text-sm text-muted">Loading credit history…</p>
+          ) : (ledger.data?.entries ?? []).length === 0 && (ledger.data?.total ?? 0) === 0 ? (
+            <p className="px-6 pb-6 text-sm text-muted">No AI credit movements yet.</p>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-left text-xs uppercase tracking-wide text-muted">
-                    <th className="pb-3">Date</th>
-                    <th className="pb-3">Description</th>
-                    <th className="pb-3">Credits</th>
-                    <th className="pb-3">Amount</th>
-                    <th className="pb-3">Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(ledger.data?.entries ?? []).map((row) => (
-                    <tr key={row.id} className="border-t border-border">
-                      <td className="py-3">{formatLedgerDate(row.date)}</td>
-                      <td className="py-3">{row.description}</td>
-                      <td className="py-3 tabular-nums">
-                        {row.credits > 0 ? "+" : ""}
-                        {formatNumber(row.credits)}
-                      </td>
-                      <td className="py-3">{row.amountPaise != null ? formatPaise(row.amountPaise) : "—"}</td>
-                      <td className="py-3">
-                        <StatusBadge value={ledgerStatus(row)} />
-                      </td>
+            <>
+              <div className="overflow-x-auto px-6">
+                <table className="w-full min-w-[36rem] text-sm">
+                  <thead>
+                    <tr className="text-left text-xs uppercase tracking-wide text-muted">
+                      <th className="pb-3">Date</th>
+                      <th className="pb-3">Description</th>
+                      <th className="pb-3">Credits</th>
+                      <th className="pb-3">Amount</th>
+                      <th className="pb-3">Status</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody className={ledger.isFetching ? "opacity-60" : undefined}>
+                    {(ledger.data?.entries ?? []).map((row) => (
+                      <tr key={row.id} className="border-t border-border">
+                        <td className="py-3">{formatLedgerDate(row.date)}</td>
+                        <td className="py-3">{row.description}</td>
+                        <td className="py-3 tabular-nums">
+                          {row.credits > 0 ? "+" : ""}
+                          {formatNumber(row.credits)}
+                        </td>
+                        <td className="py-3">{row.amountPaise != null ? formatPaise(row.amountPaise) : "—"}</td>
+                        <td className="py-3">
+                          <StatusBadge value={ledgerStatus(row)} />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <LedgerPager
+                page={ledger.data?.page ?? ledgerPage}
+                pageSize={ledger.data?.pageSize ?? AI_CREDIT_LEDGER_PAGE_SIZE}
+                total={ledger.data?.total ?? ledger.data?.entries.length ?? 0}
+                disabled={ledger.isFetching}
+                onPageChange={setLedgerPage}
+              />
+            </>
           )}
         </CardContent>
       </Card>
@@ -274,4 +294,99 @@ function formatLedgerDate(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "—";
   return date.toLocaleDateString("en-IN", { month: "short", day: "numeric" });
+}
+
+function ledgerPages(page: number, pageCount: number) {
+  if (pageCount <= 7) {
+    return Array.from({ length: pageCount }, (_, index) => index + 1) as Array<number | "ellipsis">;
+  }
+  const pages: Array<number | "ellipsis"> = [1];
+  const start = Math.max(2, page - 1);
+  const end = Math.min(pageCount - 1, page + 2);
+  if (start > 2) pages.push("ellipsis");
+  for (let current = start; current <= end; current += 1) pages.push(current);
+  if (end < pageCount - 1) pages.push("ellipsis");
+  pages.push(pageCount);
+  return pages;
+}
+
+function LedgerPager({
+  page,
+  pageSize,
+  total,
+  disabled,
+  onPageChange,
+}: {
+  page: number;
+  pageSize: number;
+  total: number;
+  disabled?: boolean;
+  onPageChange: (page: number) => void;
+}) {
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
+  const from = total === 0 ? 0 : (page - 1) * pageSize + 1;
+  const to = Math.min(page * pageSize, total);
+  if (total === 0) return null;
+
+  return (
+    <div className="flex flex-col gap-3 border-t border-border px-6 py-3 sm:flex-row sm:items-center sm:justify-between">
+      <p role="status" aria-atomic="true" className="text-sm text-muted">
+        Showing {from}–{to} of {formatNumber(total)}
+      </p>
+      {pageCount > 1 ? (
+        <nav aria-label="Credit history pages" className="flex flex-wrap items-center justify-between gap-2 sm:justify-end">
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            className="min-h-11"
+            disabled={disabled || page <= 1}
+            aria-label="Previous page"
+            onClick={() => onPageChange(page - 1)}
+          >
+            <ChevronLeft className="size-4" aria-hidden="true" />
+            Previous
+          </Button>
+          <div className="hidden items-center gap-1 md:flex">
+            {ledgerPages(page, pageCount).map((item, index) =>
+              item === "ellipsis" ? (
+                <span key={`e-${index}`} className="px-1 text-xs text-muted">
+                  …
+                </span>
+              ) : (
+                <Button
+                  key={item}
+                  type="button"
+                  variant={item === page ? "primary" : "ghost"}
+                  size="sm"
+                  className="min-h-11 min-w-11"
+                  aria-label={`Page ${item}`}
+                  aria-current={item === page ? "page" : undefined}
+                  disabled={disabled}
+                  onClick={() => onPageChange(item)}
+                >
+                  {item}
+                </Button>
+              )
+            )}
+          </div>
+          <span className="text-sm text-muted md:hidden">
+            Page {page} of {pageCount}
+          </span>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            className="min-h-11"
+            disabled={disabled || page >= pageCount}
+            aria-label="Next page"
+            onClick={() => onPageChange(page + 1)}
+          >
+            Next
+            <ChevronRight className="size-4" aria-hidden="true" />
+          </Button>
+        </nav>
+      ) : null}
+    </div>
+  );
 }

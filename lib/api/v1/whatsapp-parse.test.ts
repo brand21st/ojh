@@ -76,11 +76,15 @@ describe("POST /api/v1/orders/whatsapp-parse", () => {
     });
     listAiCreditLedger.mockReset();
     quoteMerchantAiCredits.mockReset();
-    listAiCreditLedger.mockImplementation(async (_supabase: unknown, organizationId: string) =>
-      organizationId === "org-1"
-        ? [{ id: "led-1", description: "AI Credits", credits: 2500, amountPaise: 39900, status: "POSTED" }]
-        : []
-    );
+    listAiCreditLedger.mockImplementation(async (_supabase: unknown, organizationId: string) => ({
+      entries:
+        organizationId === "org-1"
+          ? [{ id: "led-1", description: "AI Credits", credits: 2500, amountPaise: 39900, status: "POSTED" }]
+          : [],
+      page: 1,
+      pageSize: 10,
+      total: organizationId === "org-1" ? 1 : 0,
+    }));
     quoteMerchantAiCredits.mockResolvedValue({
       credits: 500,
       amountPaise: 9900,
@@ -239,7 +243,7 @@ describe("POST /api/v1/orders/whatsapp-parse", () => {
       "GET",
       ["ai-credits", "ledger"]
     )) as { entries: Array<{ id: string }> };
-    expect(listAiCreditLedger).toHaveBeenCalledWith(expect.anything(), "org-1");
+    expect(listAiCreditLedger).toHaveBeenCalledWith(expect.anything(), "org-1", expect.objectContaining({ page: 1 }));
     expect(result.entries).toHaveLength(1);
 
     const other = (await handleCommerceRoutes(
@@ -250,7 +254,7 @@ describe("POST /api/v1/orders/whatsapp-parse", () => {
       "GET",
       ["ai-credits", "ledger"]
     )) as { entries: Array<{ id: string }> };
-    expect(listAiCreditLedger).toHaveBeenCalledWith(expect.anything(), "org-2");
+    expect(listAiCreditLedger).toHaveBeenCalledWith(expect.anything(), "org-2", expect.objectContaining({ page: 1 }));
     expect(other.entries).toHaveLength(0);
   });
 

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   consumeAiCredit,
   fulfillCapturedAiCreditPayment,
+  listAiCreditLedger,
   shouldGrantAiCredits,
   type AiCreditsDb,
 } from "@/modules/ai-credits/service";
@@ -207,5 +208,48 @@ describe("AI credits consume and recharge", () => {
     expect(shouldGrantAiCredits("PENDING", "monthly")).toBe(false);
     expect(shouldGrantAiCredits("CAPTURED", "ai_credits")).toBe(false);
     expect(shouldGrantAiCredits("PENDING", "ai_credits")).toBe(true);
+  });
+
+  it("pages the credit ledger and stays on this workspace", async () => {
+    const rows = Array.from({ length: 12 }, (_, index) => ({
+      id: `row-${index + 1}`,
+      organization_id: index === 0 ? "org-other" : "org-1",
+      type: "USAGE",
+      reason_code: "AI_ERROR_STATUS",
+      delta: -1,
+      created_at: `2026-11-${String(14 - index).padStart(2, "0")}T00:00:00.000Z`,
+      metadata: {},
+      status: "POSTED",
+    }));
+    const calls: Array<{ from: number; to: number }> = [];
+    const supabase = {
+      from() {
+        return {
+          select() {
+            return {
+              eq(_column: string, organizationId: string) {
+                const filtered = rows.filter((row) => row.organization_id === organizationId);
+                return {
+                  order() {
+                    return {
+                      async range(from: number, to: number) {
+                        calls.push({ from, to });
+                        return { data: filtered.slice(from, to + 1), count: filtered.length, error: null };
+                      },
+                    };
+                  },
+                };
+              },
+            };
+          },
+        };
+      },
+    };
+    const page = await listAiCreditLedger(supabase as never, "org-1", { page: 2, pageSize: 10 });
+    expect(calls).toEqual([{ from: 10, to: 19 }]);
+    expect(page.total).toBe(11);
+    expect(page.entries).toHaveLength(1);
+    expect(page.entries[0]?.id).toBe("row-12");
+    expect(page.entries.some((row) => row.id === "row-1")).toBe(false);
   });
 });

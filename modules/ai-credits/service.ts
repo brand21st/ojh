@@ -4,6 +4,8 @@ import { logError } from "@/lib/logger";
 import { createAdminClient, hasAdminClient } from "@/lib/supabase/admin";
 import {
   AI_CREDITS_BILLING_CYCLE,
+  AI_CREDIT_LEDGER_PAGE_SIZE,
+  AI_CREDIT_LEDGER_PAGE_SIZE_MAX,
   AI_CREDIT_REASON_EXTRACTION,
   DEFAULT_AI_CREDIT_PACK_PAISE,
   DEFAULT_AI_CREDIT_PACK_SIZE,
@@ -111,18 +113,44 @@ export async function getAiCreditsSnapshot(
   };
 }
 
-export async function listAiCreditLedger(supabase: SupabaseClient, organizationId: string) {
-  const { data, error } = await supabase
+export type AiCreditLedgerPage = {
+  entries: Array<{
+    id: string;
+    date: string;
+    type: string;
+    reasonCode: string;
+    description: string;
+    credits: number;
+    amountPaise: number | null;
+    status: string;
+  }>;
+  page: number;
+  pageSize: number;
+  total: number;
+};
+
+export async function listAiCreditLedger(
+  supabase: SupabaseClient,
+  organizationId: string,
+  options: { page?: number; pageSize?: number } = {}
+): Promise<AiCreditLedgerPage> {
+  const pageSize = Math.min(
+    AI_CREDIT_LEDGER_PAGE_SIZE_MAX,
+    Math.max(1, Math.trunc(Number(options.pageSize) || AI_CREDIT_LEDGER_PAGE_SIZE))
+  );
+  const page = Math.max(1, Math.trunc(Number(options.page) || 1));
+  const from = (page - 1) * pageSize;
+  const { data, error, count } = await supabase
     .from("ai_credit_ledger")
-    .select("id, type, reason_code, delta, balance_after, status, payment_id, created_at, metadata")
+    .select("id, type, reason_code, delta, balance_after, status, payment_id, created_at, metadata", { count: "exact" })
     .eq("organization_id", organizationId)
     .order("created_at", { ascending: false })
-    .limit(100);
+    .range(from, from + pageSize - 1);
   if (error) {
     logError("ai_credits.ledger_load_failed", { message: error.message, organizationId });
-    return [];
+    return { entries: [], page, pageSize, total: 0 };
   }
-  return (data ?? []).map((row) => {
+  const entries = (data ?? []).map((row) => {
     const metadata = (row.metadata ?? {}) as Record<string, unknown>;
     const amountPaise = asNumber(metadata.amount_paise, NaN);
     return {
@@ -136,6 +164,7 @@ export async function listAiCreditLedger(supabase: SupabaseClient, organizationI
       status: String(row.status ?? "POSTED"),
     };
   });
+  return { entries, page, pageSize, total: count ?? entries.length };
 }
 
 function ledgerDescription(type: string, reason: string) {

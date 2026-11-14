@@ -231,7 +231,9 @@ export async function handleCommerceRoutes(
 
   if (key === "GET ai-credits/ledger") {
     const { listAiCreditLedger } = await import("@/modules/ai-credits/service");
-    return { entries: await listAiCreditLedger(supabase, ctx.organizationId) };
+    const page = Number(request.nextUrl.searchParams.get("page") ?? 1);
+    const pageSize = Number(request.nextUrl.searchParams.get("pageSize") ?? 10);
+    return listAiCreditLedger(supabase, ctx.organizationId, { page, pageSize });
   }
 
   if (key === "POST ai-credits/quote") {

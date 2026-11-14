@@ -12,6 +12,8 @@ export const AI_CREDIT_LOW_BALANCE = 25;
 export const DEFAULT_AI_CREDIT_CUSTOM_MIN = 500;
 export const DEFAULT_AI_CREDIT_CUSTOM_MAX = 10000;
 export const ZERO_AI_CREDITS_MESSAGE = "You're out of AI Credits.";
+export const AI_CREDIT_LEDGER_PAGE_SIZE = 10;
+export const AI_CREDIT_LEDGER_PAGE_SIZE_MAX = 50;
 
 export const DEFAULT_AI_CREDIT_PACKAGES = [
   { slug: "starter", name: "Starter", credits: 500, pricePaise: 9900, isRecommended: false, displayOrder: 10 },

@@ -87,9 +87,12 @@ describe("AI credits API", () => {
   });
 
   it("does not leak another workspace ledger", async () => {
-    listAiCreditLedger.mockImplementation(async (_supabase: unknown, organizationId: string) =>
-      organizationId === "org-1" ? [{ id: "a" }] : []
-    );
+    listAiCreditLedger.mockImplementation(async (_supabase: unknown, organizationId: string) => ({
+      entries: organizationId === "org-1" ? [{ id: "a" }] : [],
+      page: 1,
+      pageSize: 10,
+      total: organizationId === "org-1" ? 1 : 0,
+    }));
     const mine = (await handleCommerceRoutes(
       new NextRequest("http://localhost:3000/api/v1/ai-credits/ledger"),
       {} as never,
@@ -108,5 +111,23 @@ describe("AI credits API", () => {
     )) as { entries: unknown[] };
     expect(mine.entries).toHaveLength(1);
     expect(other.entries).toHaveLength(0);
+    expect(listAiCreditLedger).toHaveBeenCalledWith(
+      expect.anything(),
+      "org-1",
+      expect.objectContaining({ page: 1, pageSize: 10 })
+    );
+  });
+
+  it("forwards ledger page query params", async () => {
+    listAiCreditLedger.mockResolvedValue({ entries: [], page: 2, pageSize: 10, total: 0 });
+    await handleCommerceRoutes(
+      new NextRequest("http://localhost:3000/api/v1/ai-credits/ledger?page=2&pageSize=10"),
+      {} as never,
+      ctx,
+      "GET ai-credits/ledger",
+      "GET",
+      ["ai-credits", "ledger"]
+    );
+    expect(listAiCreditLedger).toHaveBeenCalledWith(expect.anything(), "org-1", { page: 2, pageSize: 10 });
   });
 });
