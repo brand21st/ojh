@@ -7,6 +7,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ClipboardList, Download, Mail, PackagePlus } from "lucide-react";
 import { toast } from "sonner";
 import { DataTable, type DataTableColumn } from "@/components/dashboard/data-table";
+import { ManifestListMailButton } from "@/components/dashboard/manifest-list-mail-button";
 import { PageHeader } from "@/components/dashboard/page-header";
 import { StatusBadge } from "@/components/dashboard/status-badge";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -127,22 +128,26 @@ export default function ManifestsPage() {
       },
       {
         id: "export",
-        header: "",
+        header: "Mail",
         hug: true,
+        width: 168,
         cell: (row) => (
-          <a
-            href={`/api/v1/manifests/${row.id}/export?format=xlsx`}
-            className="inline-flex items-center gap-1 text-sm font-medium text-brand hover:underline"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <Download className="size-3.5" />
-            Handover
-          </a>
+          <div className="flex flex-col items-stretch gap-1.5">
+            <a
+              href={`/api/v1/manifests/${row.id}/export?format=xlsx`}
+              className="inline-flex min-h-8 items-center justify-center gap-1 text-sm font-medium text-brand hover:underline"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <Download className="size-3.5" aria-hidden="true" />
+              Handover
+            </a>
+            <ManifestListMailButton row={row} canSend={canWrite} />
+          </div>
         ),
       }
     );
     return cols;
-  }, [showOffice]);
+  }, [canWrite, showOffice]);
 
   return (
     <div className="space-y-6">
