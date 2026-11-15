@@ -108,6 +108,8 @@ export function permissionForTenantRoute(
     if (slugs[2] === "claim" || slugs[2] === "complete" || slugs[2] === "reprint") return "labels.write";
   }
 
+  if (path === "manifests/email-settings" && method === "PATCH") return "automation.manage";
+
   if (root === "manifests") {
     return method === "GET" ? "manifests.read" : "manifests.write";
   }

@@ -93,10 +93,11 @@ export function wrapIndiaPostAddressLines(
 ) {
   const parts = [line1, line2, line3].map(normalizeStreetPart).filter(Boolean);
   const lines: string[] = [];
+  let overflow = false;
   for (const part of parts) {
     for (const chunk of splitPart(part)) {
       if (lines.length < LINE_COUNT) lines.push(chunk);
-      else lines[lines.length - 1] = `${lines[lines.length - 1]} ${chunk}`.trim();
+      else overflow = true;
     }
   }
   mergeShortOptionalLines(lines);
@@ -106,5 +107,6 @@ export function wrapIndiaPostAddressLines(
     line1: lines[0] ?? "",
     line2: lines[1] || undefined,
     line3: lines[2] || undefined,
+    overflow,
   };
 }

@@ -21,6 +21,7 @@ export type PickupIdentity = {
 
 export type OrganizationLabelSender = {
   name: string;
+  company: string;
   phone: string | null;
   line1: string;
   line2: string;
@@ -51,9 +52,12 @@ export function organizationLabelSender(
   pickup?: PickupIdentity | null,
   shopName?: string | null
 ): OrganizationLabelSender {
-  const line1 = firstStreet(org?.line1, pickup?.line1, org?.line2, pickup?.line2) || "Registered pickup";
+  const line1 = firstStreet(org?.line1, pickup?.line1, org?.line2, pickup?.line2);
+  const name = firstText(org?.name, pickup?.contact_name, pickup?.name, shopName);
+  const company = firstText(org?.name, pickup?.name);
   return {
-    name: firstText(org?.name, pickup?.contact_name, pickup?.name, shopName) || "Merchant",
+    name,
+    company,
     phone: firstText(org?.phone, pickup?.phone) || null,
     line1,
     line2: firstStreet(

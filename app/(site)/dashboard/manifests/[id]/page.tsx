@@ -33,6 +33,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { manifestOfficeLabel } from "@/lib/dashboard/manifests";
+import { ManifestEmailPanel } from "@/components/dashboard/manifest-email-panel";
 import { formatCurrency, formatDate, formatWeightGrams } from "@/lib/format";
 import { api } from "@/lib/hooks/use-api";
 import { useMe } from "@/lib/hooks/use-me";
@@ -50,6 +51,7 @@ export default function ManifestDetailPage() {
   const canWrite = hasPermission((me.data?.role ?? "VIEWER") as MemberRole, "manifests.write");
   const [dialog, setDialog] = useState<Dialogs>(null);
   const [indiaPostExporting, setIndiaPostExporting] = useState(false);
+  const [removeTarget, setRemoveTarget] = useState<ManifestLine | null>(null);
 
   const manifest = useQuery({
     queryKey: ["manifest", id],
@@ -60,9 +62,28 @@ export default function ManifestDetailPage() {
 
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ["manifest", id] });
+    queryClient.invalidateQueries({ queryKey: ["manifest-export-validation", id] });
     queryClient.invalidateQueries({ queryKey: ["manifests"] });
     queryClient.invalidateQueries({ queryKey: ["manifest-eligible"] });
   };
+
+  const exportValidation = useQuery({
+    queryKey: ["manifest-export-validation", id],
+    queryFn: () =>
+      api<{
+        issues: Array<{
+          orderNumber: string;
+          barcode: string;
+          field: string;
+          severity: "error" | "warning";
+          message: string;
+          suggestion: string;
+        }>;
+        errorCount: number;
+        warningCount: number;
+      }>(`/api/v1/manifests/${id}/export-validation`),
+    enabled: Boolean(id),
+  });
 
   const close = useMutation({
     mutationFn: () => api(`/api/v1/manifests/${id}/close`, { method: "POST" }),
@@ -87,6 +108,7 @@ export default function ManifestDetailPage() {
     mutationFn: (shipmentId: string) => api(`/api/v1/manifests/${id}/shipments/${shipmentId}`, { method: "DELETE" }),
     onSuccess: () => {
       toast.success("Shipment removed from the manifest.");
+      setRemoveTarget(null);
       refresh();
     },
     onError: (error: Error) => toast.error(error.message),
@@ -107,37 +129,46 @@ export default function ManifestDetailPage() {
           </Link>
         ),
       },
-      { id: "order", header: "Order", cell: (row) => row.orderNumber ?? "—" },
+      { id: "order", header: "Order", cell: (row) => <span className="whitespace-nowrap">{row.orderNumber ?? "—"}</span> },
       { id: "consignee", header: "Consignee", fill: true, cell: (row) => row.consignee ?? "—" },
       {
         id: "pincode",
         header: "PIN",
         cell: (row) => (
-          <span className="tabular-nums">
-            {row.pincode ?? "—"}
-            {row.city ? <span className="text-muted"> · {row.city}</span> : null}
-            {row.state ? <span className="text-muted"> · {row.state}</span> : null}
-          </span>
+          <div className="min-w-0">
+            <span className="tabular-nums">{row.pincode ?? "—"}</span>
+            {row.city || row.state ? (
+              <span className="block text-xs text-muted">{[row.city, row.state].filter(Boolean).join(", ")}</span>
+            ) : null}
+          </div>
         ),
       },
-      { id: "service", header: "Service", cell: (row) => row.serviceLabel },
-      { id: "weight", header: "Weight", cell: (row) => <span className="tabular-nums">{formatWeightGrams(row.weightGrams)}</span> },
+      { id: "service", header: "Service", cell: (row) => <span className="whitespace-nowrap">{row.serviceLabel}</span> },
+      {
+        id: "weight",
+        header: "Weight",
+        cell: (row) => <span className="whitespace-nowrap tabular-nums">{formatWeightGrams(row.weightGrams)}</span>,
+      },
       {
         id: "cod",
         header: "COD",
-        cell: (row) => (row.codAmount > 0 ? <span className="tabular-nums">{formatCurrency(row.codAmount)}</span> : "—"),
+        cell: (row) =>
+          row.codAmount > 0 ? <span className="whitespace-nowrap tabular-nums">{formatCurrency(row.codAmount)}</span> : "—",
       },
       {
         id: "status",
         header: handedOver ? "India Post scan" : "Status",
-        cell: (row) =>
-          row.scanned === null ? (
-            <StatusBadge value={row.shipmentStatus} />
-          ) : row.scanned ? (
-            <Badge variant="success">Scanned</Badge>
-          ) : (
-            <Badge variant="warning">Awaiting scan</Badge>
-          ),
+        cell: (row) => (
+          <span className="whitespace-nowrap">
+            {row.scanned === null ? (
+              <StatusBadge value={row.shipmentStatus} />
+            ) : row.scanned ? (
+              <Badge variant="success">Scanned</Badge>
+            ) : (
+              <Badge variant="warning">Awaiting scan</Badge>
+            )}
+          </span>
+        ),
       },
     ];
     if (draft && canWrite) {
@@ -150,9 +181,10 @@ export default function ManifestDetailPage() {
             type="button"
             size="icon-xs"
             variant="ghost"
-            aria-label={`Remove ${row.barcode}`}
+            aria-label={`Remove ${row.barcode} from this manifest`}
+            title="Remove from manifest"
             disabled={remove.isPending}
-            onClick={() => remove.mutate(row.shipmentId)}
+            onClick={() => setRemoveTarget(row)}
           >
             <Trash2 className="size-4" />
           </Button>
@@ -187,6 +219,8 @@ export default function ManifestDetailPage() {
   }
 
   const exportHref = (format: string) => `/api/v1/manifests/${id}/export?format=${format}`;
+  const handoverBlocked = exportValidation.isPending || (exportValidation.data?.errorCount ?? 0) > 0;
+  const exportIssues = exportValidation.data?.issues ?? [];
   async function downloadIndiaPostExcel() {
     if (indiaPostExporting) return;
     setIndiaPostExporting(true);
@@ -235,12 +269,20 @@ export default function ManifestDetailPage() {
                 <DropdownMenuItem disabled={indiaPostExporting} onSelect={() => void downloadIndiaPostExcel()}>
                   {indiaPostExporting ? "Exporting India Post Excel…" : "Export India Post Excel"}
                 </DropdownMenuItem>
-                <DropdownMenuItem asChild>
-                  <a href={exportHref("xlsx")}>Handover list (.xlsx)</a>
-                </DropdownMenuItem>
-                <DropdownMenuItem asChild>
-                  <a href={exportHref("csv")}>CSV</a>
-                </DropdownMenuItem>
+                {handoverBlocked ? (
+                  <DropdownMenuItem disabled>Handover list (.xlsx)</DropdownMenuItem>
+                ) : (
+                  <DropdownMenuItem asChild>
+                    <a href={exportHref("xlsx")}>Handover list (.xlsx)</a>
+                  </DropdownMenuItem>
+                )}
+                {handoverBlocked ? (
+                  <DropdownMenuItem disabled>CSV</DropdownMenuItem>
+                ) : (
+                  <DropdownMenuItem asChild>
+                    <a href={exportHref("csv")}>CSV</a>
+                  </DropdownMenuItem>
+                )}
                 <DropdownMenuItem asChild>
                   <a href={exportHref("pdf")} target="_blank" rel="noreferrer">
                     PDF handover sheet{draft ? " (draft)" : ""}
@@ -316,6 +358,70 @@ export default function ManifestDetailPage() {
         </Card>
       ) : null}
 
+      <ManifestEmailPanel
+        manifestId={id}
+        manifestNumber={data.number ?? "Draft manifest"}
+        merchantName={me.data?.organization?.name ?? "Merchant"}
+        shipmentCount={data.shipmentCount}
+        officeId={data.officeId}
+        filenameHint={`manifest_${(data.number ?? "draft").replace(/[^A-Za-z0-9._-]/g, "_")}_india_post.xlsx`}
+        canSend={canWrite && (data.status === "CLOSED" || data.status === "HANDED_OVER")}
+      />
+
+      {exportIssues.some((issue) => issue.field.toLowerCase().includes("sender")) ? (
+        <Card>
+          <CardHeader className="gap-2">
+            <CardTitle>Sender Details Incomplete</CardTitle>
+            <CardDescription>
+              Your India Post sender address is missing required information. Update Settings so bulk booking can
+              send the merchant address.
+            </CardDescription>
+            <Link href="/dashboard/settings" className={buttonVariants({ variant: "secondary", className: "w-fit" })}>
+              Update Sender Details
+            </Link>
+          </CardHeader>
+        </Card>
+      ) : null}
+
+      {exportIssues.length ? (
+        <Card>
+          <CardHeader className="gap-2">
+            <CardTitle>Handover check</CardTitle>
+            <CardDescription>
+              {exportValidation.data?.errorCount
+                ? `${exportValidation.data.errorCount} shipment${exportValidation.data.errorCount === 1 ? "" : "s"} must be corrected before the handover Excel or CSV can download.`
+                : "These warnings do not block the download."}
+            </CardDescription>
+          </CardHeader>
+          <div className="overflow-x-auto px-6 pb-6">
+            <table className="w-full min-w-[640px] text-left text-sm">
+              <thead className="text-muted">
+                <tr>
+                  <th className="py-2 pr-3 font-medium">Order</th>
+                  <th className="py-2 pr-3 font-medium">Barcode</th>
+                  <th className="py-2 pr-3 font-medium">Field</th>
+                  <th className="py-2 pr-3 font-medium">Status</th>
+                  <th className="py-2 font-medium">What to fix</th>
+                </tr>
+              </thead>
+              <tbody>
+                {exportIssues.map((issue, index) => (
+                  <tr key={`${issue.barcode}-${issue.field}-${index}`} className="border-t border-border">
+                    <td className="py-2 pr-3">{issue.orderNumber || "—"}</td>
+                    <td className="py-2 pr-3">{issue.barcode || "—"}</td>
+                    <td className="py-2 pr-3">{issue.field}</td>
+                    <td className="py-2 pr-3">{issue.severity === "error" ? "Needs correction" : "Warning"}</td>
+                    <td className="py-2">
+                      {issue.message} {issue.suggestion}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      ) : null}
+
       <DataTable
         columns={columns}
         data={data.lines}
@@ -342,6 +448,32 @@ export default function ManifestDetailPage() {
             </Button>
             <Button type="button" onClick={() => close.mutate()} disabled={close.isPending}>
               Close manifest
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(removeTarget)} onOpenChange={(open) => (open ? null : setRemoveTarget(null))}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Remove this shipment?</DialogTitle>
+            <DialogDescription>
+              {removeTarget?.barcode}
+              {removeTarget?.orderNumber ? ` (order ${removeTarget.orderNumber})` : ""} comes off this draft manifest.
+              You can add it again with Add shipments.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" variant="secondary" onClick={() => setRemoveTarget(null)}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              disabled={remove.isPending}
+              aria-busy={remove.isPending}
+              onClick={() => removeTarget && remove.mutate(removeTarget.shipmentId)}
+            >
+              {remove.isPending ? "Removing…" : "Remove shipment"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -560,7 +692,7 @@ function AddShipmentsDialog({
             Cancel
           </Button>
           <Button type="button" onClick={() => add.mutate()} disabled={!selected.size || add.isPending}>
-            Add {selected.size || ""} shipment{selected.size === 1 ? "" : "s"}
+            {selected.size ? `Add ${selected.size} shipment${selected.size === 1 ? "" : "s"}` : "Add shipments"}
           </Button>
         </DialogFooter>
       </DialogContent>

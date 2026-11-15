@@ -79,6 +79,10 @@ export async function processJob(queue: string, payload: JobPayload) {
     else if (queue === "invoice-generation") await generateInvoice(supabase, payload);
     else if (queue === "sales-invoice-issue") await issueSalesInvoiceJob(supabase, payload);
     else if (queue === "manifest-generation") await generateManifest(supabase, payload);
+    else if (queue === "manifest-email") {
+      const { deliverManifestEmailJob } = await import("@/modules/manifest-email/deliver");
+      await deliverManifestEmailJob(supabase, payload);
+    }
     else if (queue === "tracking-sync") await syncTracking(supabase, payload);
     else if (queue === "shopify-sync") await shopifySync(supabase, payload);
     else if (queue === "shopify-address-correction") await shopifyAddressCorrection(supabase, payload);

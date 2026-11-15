@@ -216,7 +216,7 @@ export async function exportManifestIndiaPostExcel(supabase: SupabaseClient, org
   const sender = organizationLabelSender(org, pickup, shop?.shop_name);
   const context: ManifestExcelContext = {
     sender,
-    senderCompany: String(org?.name || pickup?.name || sender.name || ""),
+    senderCompany: sender.company,
     customerId: String(connection?.bulk_customer_id ?? "").trim(),
     officeId: String(connection?.pickup_dropoff_office_id ?? "").replace(/\D/g, ""),
     fallbackContractId: String(connection?.contract_id ?? "").trim(),

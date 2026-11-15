@@ -3,6 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { TenantContext } from "@/lib/api/context";
 import { AppError, ERROR_CODES } from "@/lib/api/errors";
 import { manifestCsv, manifestFileBase, manifestXlsx } from "@/modules/manifests/export";
+import { manifestExportErrorCount, validateManifestExport } from "@/modules/manifests/validate-export";
 import { exportManifestIndiaPostExcel } from "@/modules/manifests/india-post-excel";
 import { renderManifestPdf } from "@/modules/manifests/pdf";
 import {
@@ -25,6 +26,12 @@ import {
   reopenManifest,
   sweepEligible,
 } from "@/modules/manifests/service";
+import {
+  listManifestEmailDeliveries,
+  retryManifestEmail,
+  sendManifestEmail,
+} from "@/modules/manifest-email/service";
+import { getManifestEmailSettings, updateManifestEmailSettings } from "@/modules/manifest-email/settings";
 
 async function readHandover(request: NextRequest) {
   const type = request.headers.get("content-type") ?? "";
@@ -49,7 +56,7 @@ export async function handleManifestRoutes(
   slugs: string[]
 ) {
   if (slugs[0] !== "manifests") return null;
-  const [, id, action, childId] = slugs;
+  const [, id, action, childId, extra] = slugs;
   const org = ctx.organizationId;
 
   if (!id) {
@@ -68,6 +75,13 @@ export async function handleManifestRoutes(
     return listEligible(supabase, org);
   }
 
+  if (id === "email-settings" && !action && method === "GET") {
+    return getManifestEmailSettings(supabase, org);
+  }
+  if (id === "email-settings" && !action && method === "PATCH") {
+    return updateManifestEmailSettings(supabase, org, ctx.userId, await request.json().catch(() => ({})));
+  }
+
   if (!action && method === "GET") return getManifest(supabase, org, id);
 
   if (action === "shipments" && !childId && method === "POST") {
@@ -77,6 +91,17 @@ export async function handleManifestRoutes(
   if (action === "shipments" && childId && method === "DELETE") {
     return removeShipment(supabase, org, id, childId, ctx.userId);
   }
+  if (action === "email" && method === "POST") {
+    const body = (await request.json().catch(() => ({}))) as { recipients?: unknown; confirmResend?: boolean };
+    return sendManifestEmail(supabase, org, id, ctx.userId, body);
+  }
+  if (action === "email-deliveries" && !childId && method === "GET") {
+    return listManifestEmailDeliveries(supabase, org, id);
+  }
+  if (action === "email-deliveries" && childId && extra === "retry" && method === "POST") {
+    return retryManifestEmail(supabase, org, id, childId, ctx.userId);
+  }
+
   if (action === "close" && method === "POST") return closeManifest(supabase, org, id, ctx.userId);
   if (action === "reopen" && method === "POST") return reopenManifest(supabase, org, id, ctx.userId);
   if (action === "handover" && method === "POST") {
@@ -97,11 +122,32 @@ export async function handleManifestRoutes(
     });
   }
 
+  if (action === "export-validation" && method === "GET") {
+    const manifest = await getManifest(supabase, org, id);
+    const sender = await getManifestSender(supabase, org);
+    const issues = validateManifestExport(manifest, sender);
+    return {
+      issues,
+      errorCount: manifestExportErrorCount(issues),
+      warningCount: issues.filter((item) => item.severity === "warning").length,
+    };
+  }
+
   if (action === "export" && method === "GET") {
     const parsed = manifestExportFormat.safeParse(request.nextUrl.searchParams.get("format") ?? undefined);
     if (!parsed.success) throw new AppError(ERROR_CODES.VALIDATION_ERROR, "Choose xlsx, csv or pdf.");
     const manifest = await getManifest(supabase, org, id);
     const sender = await getManifestSender(supabase, org);
+    if (parsed.data !== "pdf") {
+      const issues = validateManifestExport(manifest, sender);
+      if (manifestExportErrorCount(issues) > 0) {
+        throw new AppError(
+          ERROR_CODES.CONFLICT,
+          "Fix the listed shipments before downloading this handover file.",
+          { issues }
+        );
+      }
+    }
     const base = manifestFileBase(manifest);
     if (parsed.data === "csv") {
       return new NextResponse(manifestCsv(manifest, sender), {

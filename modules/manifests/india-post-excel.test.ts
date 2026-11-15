@@ -110,16 +110,17 @@ describe("manifest India Post Excel", () => {
       "KL TRENDS SP",
       1
     );
-    expect(cells).toHaveLength(48);
+    expect(cells).toHaveLength(49);
     const bytes = await articleDetailsWorkbook([cells]);
     const sheets = await readWorkbook(bytes);
     expect(sheets.map((sheet) => sheet.name)).toEqual(["ArticleDetails", "Information"]);
     expect(sheets[0]!.rows[0]).toEqual(ARTICLE_DETAILS_HEADERS.map((header) => header.trim()));
-    expect(sheets[0]!.rows[1]![1]).toBe(BARCODE);
-    expect(sheets[0]!.rows[1]![16]).toBe("cod");
-    expect(sheets[0]!.rows[1]![17]).toBe("1199");
-    expect(sheets[0]!.rows[1]![24]).toBe("0");
-    expect(sheets[0]!.rows[1]![47]).toBe("");
+    const col = (header: (typeof ARTICLE_DETAILS_HEADERS)[number]) => ARTICLE_DETAILS_HEADERS.indexOf(header);
+    expect(sheets[0]!.rows[1]![col("BARCODE NO")]).toBe(BARCODE);
+    expect(sheets[0]!.rows[1]![col("CODR/COD")]).toBe("cod");
+    expect(sheets[0]!.rows[1]![col("VALUE FOR CODR/COD")]).toBe("1199");
+    expect(sheets[0]!.rows[1]![col("PRIORITY FLAG")]).toBe("0");
+    expect(sheets[0]!.rows[1]![col("SENDER ADD LINE 3")]).toBe("");
 
     const zip = await JSZip.loadAsync(bytes);
     const sheet = await zip.file("xl/worksheets/sheet1.xml")!.async("string");
@@ -129,7 +130,7 @@ describe("manifest India Post Excel", () => {
     expect(sheet).toContain('<c r="D2" t="b"><v>0</v></c>');
     expect(sheet).toContain('<c r="E2" t="b"><v>0</v></c>');
     expect(sheet).toContain('<c r="L2" t="b"><v>0</v></c>');
-    expect(sheet).toContain('<c r="Y2" t="b"><v>0</v></c>');
+    expect(sheet).toContain('<c r="Z2" t="b"><v>0</v></c>');
     expect(sheet).toContain('<c r="G2" t="str"><v>700162</v></c>');
     expect(sheet).toContain('<c r="M2" t="str"><v>8089117541</v></c>');
     expect(sheet).toContain('<c r="N2" t="str"><v>7998188311</v></c>');

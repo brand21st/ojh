@@ -15,6 +15,8 @@ import {
 import { getAutomationSettings } from "@/modules/automation/service";
 import { createBackgroundJob } from "@/modules/jobs/service";
 import { organizationLabelSender } from "@/modules/organizations/label-sender";
+import { latestManifestEmailStatuses } from "@/modules/manifest-email/list-status";
+import type { DeliveryStatus } from "@/modules/manifest-email/types";
 import { indiaPostServiceLabel } from "@/types/domain";
 
 export type ManifestRow = {
@@ -53,6 +55,9 @@ export type ManifestSummary = {
   handedOverTo: string | null;
   handoverNotes: string | null;
   hasProof: boolean;
+  emailStatus: DeliveryStatus | null;
+  emailDeliveryId: string | null;
+  emailRetryable: boolean;
 };
 
 export type ManifestLine = {
@@ -101,6 +106,8 @@ export type ManifestDetail = ManifestSummary & {
 
 export type ManifestSender = {
   name: string;
+  company: string;
+  line1: string;
   customerId: string | null;
   city: string | null;
   state: string | null;
@@ -181,6 +188,9 @@ export function mapManifest(row: ManifestRow): ManifestSummary {
     handedOverTo: row.handed_over_to,
     handoverNotes: row.handover_notes,
     hasProof: Boolean(row.proof_path),
+    emailStatus: null,
+    emailDeliveryId: null,
+    emailRetryable: false,
   };
 }
 
@@ -450,8 +460,23 @@ export async function listManifests(supabase: SupabaseClient, organizationId: st
     unscannedHandedOver(supabase, organizationId),
   ]);
 
+  const items = ((data ?? []) as ManifestRow[]).map(mapManifest);
+  const emailByManifest = await latestManifestEmailStatuses(
+    supabase,
+    organizationId,
+    items.map((row) => row.id)
+  );
+
   return {
-    items: ((data ?? []) as ManifestRow[]).map(mapManifest),
+    items: items.map((row) => {
+      const email = emailByManifest[row.id];
+      return {
+        ...row,
+        emailStatus: email?.status ?? null,
+        emailDeliveryId: email?.id ?? null,
+        emailRetryable: email?.retryable ?? false,
+      };
+    }),
     page: query.page,
     pageSize: query.pageSize,
     total: count ?? 0,
@@ -637,6 +662,8 @@ export async function getManifestSender(supabase: SupabaseClient, organizationId
   const label = organizationLabelSender(org, pickup);
   return {
     name: text(org?.name) ?? label.name,
+    company: label.company,
+    line1: label.line1,
     customerId: text(connection?.bulk_customer_id),
     city: label.city,
     state: label.state,
@@ -695,6 +722,16 @@ export async function closeManifest(supabase: SupabaseClient, organizationId: st
     number: row.manifest_number,
     shipmentCount: row.shipment_count,
   });
+  try {
+    const { enqueueAutoManifestEmail } = await import("@/modules/manifest-email/service");
+    await enqueueAutoManifestEmail(supabase, organizationId, row, userId);
+  } catch (error) {
+    logError("manifest_email.auto_enqueue_failed", {
+      organizationId,
+      manifestId,
+      message: error instanceof Error ? error.message : "enqueue failed",
+    });
+  }
   return mapManifest(row);
 }
 

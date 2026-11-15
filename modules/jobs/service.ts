@@ -48,14 +48,18 @@ export async function createBackgroundJob(
   }
 
   try {
-    await enqueueJob(input.jobType, {
-      organizationId: input.organizationId,
-      jobId: data.id,
-      entityType: input.entityType,
-      entityId: input.entityId,
-      shipmentIds: input.shipmentIds,
-      userId: input.userId,
-    });
+    await enqueueJob(
+      input.jobType,
+      {
+        organizationId: input.organizationId,
+        jobId: data.id,
+        entityType: input.entityType,
+        entityId: input.entityId,
+        shipmentIds: input.shipmentIds,
+        userId: input.userId,
+      },
+      input.jobType === "manifest-email" ? { jobId: `manifest-email:${data.id}` } : undefined
+    );
   } catch (queueError) {
     logError("queue.enqueue_failed", {
       jobId: data.id,
