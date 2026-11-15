@@ -51,6 +51,7 @@ export default function ManifestDetailPage() {
   const canWrite = hasPermission((me.data?.role ?? "VIEWER") as MemberRole, "manifests.write");
   const [dialog, setDialog] = useState<Dialogs>(null);
   const [indiaPostExporting, setIndiaPostExporting] = useState(false);
+  const [removeTarget, setRemoveTarget] = useState<ManifestLine | null>(null);
 
   const manifest = useQuery({
     queryKey: ["manifest", id],
@@ -107,6 +108,7 @@ export default function ManifestDetailPage() {
     mutationFn: (shipmentId: string) => api(`/api/v1/manifests/${id}/shipments/${shipmentId}`, { method: "DELETE" }),
     onSuccess: () => {
       toast.success("Shipment removed from the manifest.");
+      setRemoveTarget(null);
       refresh();
     },
     onError: (error: Error) => toast.error(error.message),
@@ -127,37 +129,46 @@ export default function ManifestDetailPage() {
           </Link>
         ),
       },
-      { id: "order", header: "Order", cell: (row) => row.orderNumber ?? "—" },
+      { id: "order", header: "Order", cell: (row) => <span className="whitespace-nowrap">{row.orderNumber ?? "—"}</span> },
       { id: "consignee", header: "Consignee", fill: true, cell: (row) => row.consignee ?? "—" },
       {
         id: "pincode",
         header: "PIN",
         cell: (row) => (
-          <span className="tabular-nums">
-            {row.pincode ?? "—"}
-            {row.city ? <span className="text-muted"> · {row.city}</span> : null}
-            {row.state ? <span className="text-muted"> · {row.state}</span> : null}
-          </span>
+          <div className="min-w-0">
+            <span className="tabular-nums">{row.pincode ?? "—"}</span>
+            {row.city || row.state ? (
+              <span className="block text-xs text-muted">{[row.city, row.state].filter(Boolean).join(", ")}</span>
+            ) : null}
+          </div>
         ),
       },
-      { id: "service", header: "Service", cell: (row) => row.serviceLabel },
-      { id: "weight", header: "Weight", cell: (row) => <span className="tabular-nums">{formatWeightGrams(row.weightGrams)}</span> },
+      { id: "service", header: "Service", cell: (row) => <span className="whitespace-nowrap">{row.serviceLabel}</span> },
+      {
+        id: "weight",
+        header: "Weight",
+        cell: (row) => <span className="whitespace-nowrap tabular-nums">{formatWeightGrams(row.weightGrams)}</span>,
+      },
       {
         id: "cod",
         header: "COD",
-        cell: (row) => (row.codAmount > 0 ? <span className="tabular-nums">{formatCurrency(row.codAmount)}</span> : "—"),
+        cell: (row) =>
+          row.codAmount > 0 ? <span className="whitespace-nowrap tabular-nums">{formatCurrency(row.codAmount)}</span> : "—",
       },
       {
         id: "status",
         header: handedOver ? "India Post scan" : "Status",
-        cell: (row) =>
-          row.scanned === null ? (
-            <StatusBadge value={row.shipmentStatus} />
-          ) : row.scanned ? (
-            <Badge variant="success">Scanned</Badge>
-          ) : (
-            <Badge variant="warning">Awaiting scan</Badge>
-          ),
+        cell: (row) => (
+          <span className="whitespace-nowrap">
+            {row.scanned === null ? (
+              <StatusBadge value={row.shipmentStatus} />
+            ) : row.scanned ? (
+              <Badge variant="success">Scanned</Badge>
+            ) : (
+              <Badge variant="warning">Awaiting scan</Badge>
+            )}
+          </span>
+        ),
       },
     ];
     if (draft && canWrite) {
@@ -170,9 +181,10 @@ export default function ManifestDetailPage() {
             type="button"
             size="icon-xs"
             variant="ghost"
-            aria-label={`Remove ${row.barcode}`}
+            aria-label={`Remove ${row.barcode} from this manifest`}
+            title="Remove from manifest"
             disabled={remove.isPending}
-            onClick={() => remove.mutate(row.shipmentId)}
+            onClick={() => setRemoveTarget(row)}
           >
             <Trash2 className="size-4" />
           </Button>
@@ -441,6 +453,32 @@ export default function ManifestDetailPage() {
         </DialogContent>
       </Dialog>
 
+      <Dialog open={Boolean(removeTarget)} onOpenChange={(open) => (open ? null : setRemoveTarget(null))}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Remove this shipment?</DialogTitle>
+            <DialogDescription>
+              {removeTarget?.barcode}
+              {removeTarget?.orderNumber ? ` (order ${removeTarget.orderNumber})` : ""} comes off this draft manifest.
+              You can add it again with Add shipments.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" variant="secondary" onClick={() => setRemoveTarget(null)}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              disabled={remove.isPending}
+              aria-busy={remove.isPending}
+              onClick={() => removeTarget && remove.mutate(removeTarget.shipmentId)}
+            >
+              {remove.isPending ? "Removing…" : "Remove shipment"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <HandoverDialog
         open={dialog === "handover"}
         manifestId={id}
@@ -654,7 +692,7 @@ function AddShipmentsDialog({
             Cancel
           </Button>
           <Button type="button" onClick={() => add.mutate()} disabled={!selected.size || add.isPending}>
-            Add {selected.size || ""} shipment{selected.size === 1 ? "" : "s"}
+            {selected.size ? `Add ${selected.size} shipment${selected.size === 1 ? "" : "s"}` : "Add shipments"}
           </Button>
         </DialogFooter>
       </DialogContent>

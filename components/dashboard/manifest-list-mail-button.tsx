@@ -67,6 +67,9 @@ export function ManifestListMailButton({
   const showRetry = canSend && closable && failed && row.emailRetryable && Boolean(row.emailDeliveryId);
   const showSendAgain = canSend && closable && alreadyAccepted;
 
+  // Drafts can't be emailed yet; a disabled button on every draft row is just noise.
+  if (!closable && !row.emailStatus) return null;
+
   return (
     <div className="flex min-h-9 flex-col items-stretch gap-1" onClick={(event) => event.stopPropagation()}>
       {row.emailStatus === "SENT" ? (
@@ -126,20 +129,6 @@ export function ManifestListMailButton({
           disabled={send.isPending}
           aria-busy={send.isPending}
           onClick={openSend}
-        >
-          <Mail className="size-3.5" aria-hidden="true" />
-          Send mail
-        </Button>
-      ) : null}
-
-      {!closable ? (
-        <Button
-          type="button"
-          variant="secondary"
-          size="xs"
-          className="h-8 min-h-8"
-          disabled
-          title="Close the manifest before emailing it."
         >
           <Mail className="size-3.5" aria-hidden="true" />
           Send mail
