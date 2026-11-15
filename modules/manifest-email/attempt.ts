@@ -17,6 +17,7 @@ export type ManifestEmailRepository = {
   manifest(organizationId: string, manifestId: string): Promise<ManifestEmailGate | null>;
   loadAttachment(path: string): Promise<Buffer | null>;
   storeAttachment(path: string, bytes: Buffer): Promise<void>;
+  merchantContact(organizationId: string): Promise<{ email: string; phone: string }>;
 };
 
 export type ManifestEmailDeps = {
@@ -136,8 +137,11 @@ export async function executeManifestEmailDelivery(
     return empty;
   }
 
+  const contact = await repo.merchantContact(row.organizationId);
   const rendered = renderManifestEmail({
     merchantName: row.merchantName,
+    merchantEmail: contact.email || row.replyTo || "",
+    merchantPhone: contact.phone,
     manifestNumber: row.manifestNumber,
     manifestDate: row.manifestDate,
     shipmentCount: row.shipmentCount,

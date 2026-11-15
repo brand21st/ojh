@@ -14,6 +14,7 @@ import {
 } from "@/modules/manifest-email/recipients";
 import { readManifestEmailSettings } from "@/modules/manifest-email/settings";
 import { mapDelivery } from "@/modules/manifest-email/store";
+import { loadMerchantMailContact } from "@/modules/manifest-email/contact";
 import { MANIFEST_EMAIL_TEMPLATE_VERSION, renderManifestEmail } from "@/modules/manifest-email/template";
 import type { EmailDelivery } from "@/modules/manifest-email/types";
 import { toPublicDelivery } from "@/modules/manifest-email/types";
@@ -37,8 +38,7 @@ function writer(supabase: SupabaseClient) {
 }
 
 async function merchantName(supabase: SupabaseClient, organizationId: string) {
-  const { data } = await supabase.from("organizations").select("name").eq("id", organizationId).maybeSingle();
-  return String(data?.name ?? "Merchant").replace(/[\r\n]+/g, " ").trim().slice(0, 200) || "Merchant";
+  return (await loadMerchantMailContact(supabase, organizationId)).name;
 }
 
 async function loadManifest(supabase: SupabaseClient, organizationId: string, manifestId: string) {

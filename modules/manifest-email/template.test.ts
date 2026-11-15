@@ -7,6 +7,8 @@ describe("manifest email template", () => {
     const merchant = `Asha <script>alert("x")</script> & Co`;
     const rendered = renderManifestEmail({
       merchantName: merchant,
+      merchantEmail: `hello+"<script>"@store.example`,
+      merchantPhone: "98765 43210\n<script>",
       manifestNumber: "MF-20261115-001",
       manifestDate: "2026-11-15",
       shipmentCount: 118,
@@ -19,9 +21,29 @@ describe("manifest email template", () => {
     expect(rendered.text).toContain("MF-20261115-001");
     expect(rendered.text).toContain("118");
     expect(rendered.text).toContain("Kolenchery SO");
+    expect(rendered.text).toContain("Merchant Email: hello+\"<script>\"@store.example");
+    expect(rendered.text).toContain("Merchant Phone: 98765 43210 <script>");
+    expect(rendered.html).toContain("Merchant Email");
+    expect(rendered.html).toContain("Merchant Phone");
+    expect(rendered.html).toContain(escapeHtml(`hello+"<script>"@store.example`));
+    expect(rendered.html).toContain(escapeHtml("98765 43210 <script>"));
     expect(rendered.text.toLowerCase()).not.toContain("has booked");
     expect(rendered.text.toLowerCase()).not.toContain("physically received");
     expect(rendered.html).toContain("www.postbus.in");
+  });
+
+  it("shows a dash when merchant email or phone is missing", () => {
+    const rendered = renderManifestEmail({
+      merchantName: "Kerlaz Stores",
+      merchantEmail: "  ",
+      merchantPhone: "",
+      manifestNumber: "MF-1",
+      manifestDate: "2026-11-15",
+      shipmentCount: 1,
+      officeName: "Tirur HO",
+    });
+    expect(rendered.text).toContain("Merchant Email: —");
+    expect(rendered.text).toContain("Merchant Phone: —");
   });
 
   it("uses the existing India Post Excel filename", () => {

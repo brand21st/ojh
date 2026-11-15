@@ -88,6 +88,9 @@ function memory(initial: EmailDelivery, manifestStatus = "CLOSED", closedAt: str
     async storeAttachment(path, bytes) {
       files.set(path, Buffer.from(bytes));
     },
+    async merchantContact() {
+      return { email: "merchant@example.com", phone: "9876543210" };
+    },
   };
   return { repo, read: () => row, set: (patch: Partial<EmailDelivery>) => { row = { ...row, ...patch }; } };
 }
@@ -103,6 +106,10 @@ describe("manifest email delivery", () => {
     expect(sent?.status).toBe("SENT");
     expect(send).toHaveBeenCalledOnce();
     expect(send.mock.calls[0][0].filename).toBe("manifest_MF-20261115-001_india_post.xlsx");
+    expect(send.mock.calls[0][0].text).toContain("Merchant Email: merchant@example.com");
+    expect(send.mock.calls[0][0].text).toContain("Merchant Phone: 9876543210");
+    expect(send.mock.calls[0][0].html).toContain("merchant@example.com");
+    expect(send.mock.calls[0][0].html).toContain("9876543210");
     expect(state.read().attachmentChecksum).toBe(createHash("sha256").update(excel).digest("hex"));
 
     state.set({ status: "RETRYING", smtpPhase: null });

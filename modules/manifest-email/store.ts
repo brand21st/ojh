@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { MANIFEST_EMAIL_BUCKET, XLSX_MIME } from "@/modules/manifest-email/config";
+import { loadMerchantMailContact } from "@/modules/manifest-email/contact";
 import type { EmailDelivery, ManifestEmailGate, SmtpPhase } from "@/modules/manifest-email/types";
 
 type DeliveryDb = {
@@ -186,6 +187,10 @@ export function createDeliveryRepository(supabase: SupabaseClient) {
         upsert: true,
       });
       if (error) throw new Error(error.message);
+    },
+    async merchantContact(organizationId: string) {
+      const contact = await loadMerchantMailContact(supabase, organizationId);
+      return { email: contact.email, phone: contact.phone };
     },
   };
 }

@@ -2,6 +2,8 @@ export const MANIFEST_EMAIL_TEMPLATE_VERSION = "manifest-email-v1";
 
 export type ManifestEmailContent = {
   merchantName: string;
+  merchantEmail?: string;
+  merchantPhone?: string;
   manifestNumber: string;
   manifestDate: string;
   shipmentCount: number;
@@ -35,6 +37,8 @@ export function formatManifestDate(value: string) {
 
 export function renderManifestEmail(content: ManifestEmailContent) {
   const merchant = plainText(content.merchantName) || "Merchant";
+  const email = plainText(content.merchantEmail ?? "") || "—";
+  const phone = plainText(content.merchantPhone ?? "") || "—";
   const number = plainText(content.manifestNumber) || "Manifest";
   const date = formatManifestDate(content.manifestDate);
   const office = plainText(content.officeName) || "Not specified";
@@ -48,6 +52,8 @@ export function renderManifestEmail(content: ManifestEmailContent) {
     "",
     "Manifest Details",
     `Merchant Name: ${merchant}`,
+    `Merchant Email: ${email}`,
+    `Merchant Phone: ${phone}`,
     `Manifest Number: ${number}`,
     `Manifest Date: ${date}`,
     `Total Shipments: ${count}`,
@@ -63,13 +69,19 @@ export function renderManifestEmail(content: ManifestEmailContent) {
     "",
     "Best regards,",
     merchant,
+    email === "—" ? null : email,
+    phone === "—" ? null : phone,
     "Shipment Management via PostBus",
     "",
     "Powered by PostBus",
     "www.postbus.in",
-  ].join("\n");
+  ]
+    .filter((line): line is string => line !== null)
+    .join("\n");
 
   const merchantHtml = escapeHtml(merchant);
+  const emailHtml = escapeHtml(email);
+  const phoneHtml = escapeHtml(phone);
   const html = `<!DOCTYPE html>
 <html lang="en">
 <body style="margin:0;padding:0;background:#ffffff;color:#18181b;font-family:Arial,Helvetica,sans-serif;">
@@ -89,6 +101,8 @@ export function renderManifestEmail(content: ManifestEmailContent) {
               <p style="margin:0 0 16px;">Please find attached the shipment manifest submitted by <strong>${merchantHtml}</strong> for processing at your booking office.</p>
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e4e4e7;border-radius:8px;">
                 <tr><td style="padding:12px 16px;font-size:13px;color:#71717a;">Merchant Name</td><td style="padding:12px 16px;font-size:14px;">${merchantHtml}</td></tr>
+                <tr><td style="padding:12px 16px;font-size:13px;color:#71717a;border-top:1px solid #e4e4e7;">Merchant Email</td><td style="padding:12px 16px;font-size:14px;border-top:1px solid #e4e4e7;">${emailHtml}</td></tr>
+                <tr><td style="padding:12px 16px;font-size:13px;color:#71717a;border-top:1px solid #e4e4e7;">Merchant Phone</td><td style="padding:12px 16px;font-size:14px;border-top:1px solid #e4e4e7;">${phoneHtml}</td></tr>
                 <tr><td style="padding:12px 16px;font-size:13px;color:#71717a;border-top:1px solid #e4e4e7;">Manifest Number</td><td style="padding:12px 16px;font-size:14px;border-top:1px solid #e4e4e7;">${escapeHtml(number)}</td></tr>
                 <tr><td style="padding:12px 16px;font-size:13px;color:#71717a;border-top:1px solid #e4e4e7;">Manifest Date</td><td style="padding:12px 16px;font-size:14px;border-top:1px solid #e4e4e7;">${escapeHtml(date)}</td></tr>
                 <tr><td style="padding:12px 16px;font-size:13px;color:#71717a;border-top:1px solid #e4e4e7;">Total Shipments</td><td style="padding:12px 16px;font-size:14px;border-top:1px solid #e4e4e7;">${count}</td></tr>
@@ -98,7 +112,7 @@ export function renderManifestEmail(content: ManifestEmailContent) {
               <p style="margin:12px 0 0;">Kindly review the attached manifest and proceed with the applicable booking office procedures.</p>
               <p style="margin:12px 0 0;">For any clarification regarding the shipments, please contact the merchant using the authorized contact information provided.</p>
               <p style="margin:16px 0 0;">Thank you for your assistance.</p>
-              <p style="margin:16px 0 0;">Best regards,<br><strong>${merchantHtml}</strong><br>Shipment Management via <strong>PostBus</strong></p>
+              <p style="margin:16px 0 0;">Best regards,<br><strong>${merchantHtml}</strong>${email === "—" ? "" : `<br>${emailHtml}`}${phone === "—" ? "" : `<br>${phoneHtml}`}<br>Shipment Management via <strong>PostBus</strong></p>
             </td>
           </tr>
           <tr>
