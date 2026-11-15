@@ -364,7 +364,7 @@ export default function ManifestDetailPage() {
               Your India Post sender address is missing required information. Update Settings so bulk booking can
               send the merchant address.
             </CardDescription>
-            <Link href="/dashboard/settings" className={buttonVariants({ variant: "outline", className: "w-fit" })}>
+            <Link href="/dashboard/settings" className={buttonVariants({ variant: "secondary", className: "w-fit" })}>
               Update Sender Details
             </Link>
           </CardHeader>
