@@ -229,6 +229,7 @@ export const JOB_TYPES = [
   "accounting-rebuild",
   "bulk-excel-import",
   "booking-queue-dispatch",
+  "manifest-email",
 ] as const;
 export type JobType = (typeof JOB_TYPES)[number];
 

@@ -25,6 +25,12 @@ import {
   reopenManifest,
   sweepEligible,
 } from "@/modules/manifests/service";
+import {
+  listManifestEmailDeliveries,
+  retryManifestEmail,
+  sendManifestEmail,
+} from "@/modules/manifest-email/service";
+import { getManifestEmailSettings, updateManifestEmailSettings } from "@/modules/manifest-email/settings";
 
 async function readHandover(request: NextRequest) {
   const type = request.headers.get("content-type") ?? "";
@@ -49,7 +55,7 @@ export async function handleManifestRoutes(
   slugs: string[]
 ) {
   if (slugs[0] !== "manifests") return null;
-  const [, id, action, childId] = slugs;
+  const [, id, action, childId, extra] = slugs;
   const org = ctx.organizationId;
 
   if (!id) {
@@ -68,6 +74,13 @@ export async function handleManifestRoutes(
     return listEligible(supabase, org);
   }
 
+  if (id === "email-settings" && !action && method === "GET") {
+    return getManifestEmailSettings(supabase, org);
+  }
+  if (id === "email-settings" && !action && method === "PATCH") {
+    return updateManifestEmailSettings(supabase, org, ctx.userId, await request.json().catch(() => ({})));
+  }
+
   if (!action && method === "GET") return getManifest(supabase, org, id);
 
   if (action === "shipments" && !childId && method === "POST") {
@@ -77,6 +90,17 @@ export async function handleManifestRoutes(
   if (action === "shipments" && childId && method === "DELETE") {
     return removeShipment(supabase, org, id, childId, ctx.userId);
   }
+  if (action === "email" && method === "POST") {
+    const body = (await request.json().catch(() => ({}))) as { recipients?: unknown; confirmResend?: boolean };
+    return sendManifestEmail(supabase, org, id, ctx.userId, body);
+  }
+  if (action === "email-deliveries" && !childId && method === "GET") {
+    return listManifestEmailDeliveries(supabase, org, id);
+  }
+  if (action === "email-deliveries" && childId && extra === "retry" && method === "POST") {
+    return retryManifestEmail(supabase, org, id, childId, ctx.userId);
+  }
+
   if (action === "close" && method === "POST") return closeManifest(supabase, org, id, ctx.userId);
   if (action === "reopen" && method === "POST") return reopenManifest(supabase, org, id, ctx.userId);
   if (action === "handover" && method === "POST") {

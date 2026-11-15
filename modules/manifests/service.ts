@@ -695,6 +695,16 @@ export async function closeManifest(supabase: SupabaseClient, organizationId: st
     number: row.manifest_number,
     shipmentCount: row.shipment_count,
   });
+  try {
+    const { enqueueAutoManifestEmail } = await import("@/modules/manifest-email/service");
+    await enqueueAutoManifestEmail(supabase, organizationId, row, userId);
+  } catch (error) {
+    logError("manifest_email.auto_enqueue_failed", {
+      organizationId,
+      manifestId,
+      message: error instanceof Error ? error.message : "enqueue failed",
+    });
+  }
   return mapManifest(row);
 }
 

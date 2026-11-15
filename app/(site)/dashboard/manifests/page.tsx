@@ -4,12 +4,12 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ClipboardList, Download, PackagePlus } from "lucide-react";
+import { ClipboardList, Download, Mail, PackagePlus } from "lucide-react";
 import { toast } from "sonner";
 import { DataTable, type DataTableColumn } from "@/components/dashboard/data-table";
 import { PageHeader } from "@/components/dashboard/page-header";
 import { StatusBadge } from "@/components/dashboard/status-badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { MANIFEST_STATUS_LABEL, manifestOfficeLabel } from "@/lib/dashboard/manifests";
 import { formatDate } from "@/lib/format";
@@ -150,12 +150,18 @@ export default function ManifestsPage() {
         title="Manifests"
         description="Labelled shipments join today's draft for their India Post booking office. Close the draft before pickup, then mark it handed over."
         actions={
-          canWrite ? (
-            <Button type="button" onClick={() => sweep.mutate()} disabled={sweep.isPending}>
-              <PackagePlus className="size-4" />
-              Add ready shipments
-            </Button>
-          ) : null
+          <div className="flex flex-wrap items-center gap-2">
+            <Link href="/dashboard/manifests/settings" className={buttonVariants({ variant: "secondary" })}>
+              <Mail className="size-4" />
+              Email settings
+            </Link>
+            {canWrite ? (
+              <Button type="button" onClick={() => sweep.mutate()} disabled={sweep.isPending}>
+                <PackagePlus className="size-4" />
+                Add ready shipments
+              </Button>
+            ) : null}
+          </div>
         }
       />
 
