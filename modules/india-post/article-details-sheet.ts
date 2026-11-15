@@ -6,8 +6,8 @@ import { INDIA_POST_FILE_BOOKING_MAX, INDIA_POST_JSON_BOOKING_MAX } from "@/modu
 
 /**
  * India Post bulk-customer upload workbook ("ArticleDetails" + "Information").
- * Column order and header spelling follow the India Post template exactly,
- * including the trailing space in "LENGTH ", so the file uploads unchanged.
+ * ArticleDetails has the 49-column header order from MF-DRAFT-20261114-21840020_fixed.xlsx,
+ * including DECLARED VALUE and the trailing space in "LENGTH ".
  */
 
 export const ARTICLE_DETAILS_SHEET = "ArticleDetails";
@@ -32,6 +32,7 @@ export const ARTICLE_DETAILS_HEADERS = [
   "VALUE OF PREPAYMENT",
   "CODR/COD",
   "VALUE FOR CODR/COD",
+  "DECLARED VALUE",
   "INSURANCE TYPE",
   "VALUE OF INSURANCE",
   "SHAPE OF ARTICLE",
@@ -119,6 +120,7 @@ export function articleDetailsRow(article: DraftArticle, serial: number): SheetC
     "VALUE OF PREPAYMENT": amount(article.prepaymentValue),
     "CODR/COD": cod ? (article.codKind === "CODR" ? "codr" : "cod") : "",
     "VALUE FOR CODR/COD": cod ? article.codAmount : null,
+    "DECLARED VALUE": amount(article.declaredValue ?? (article.insuranceType === "DOP" ? article.insuranceValue : undefined)),
     "INSURANCE TYPE": cell(article.insuranceType),
     "VALUE OF INSURANCE": amount(article.insuranceValue),
     "SHAPE OF ARTICLE": cell(article.shape).toUpperCase(),
@@ -221,6 +223,7 @@ export const ARTICLE_DETAILS_COLUMN_KINDS: Record<(typeof ARTICLE_DETAILS_HEADER
   "VALUE OF PREPAYMENT": "text",
   "CODR/COD": "text",
   "VALUE FOR CODR/COD": "styledNumber",
+  "DECLARED VALUE": "number",
   "INSURANCE TYPE": "text",
   "VALUE OF INSURANCE": "text",
   "SHAPE OF ARTICLE": "text",

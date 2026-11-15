@@ -8,6 +8,7 @@ describe("wrapIndiaPostAddressLines", () => {
       line1: "12 Market Road",
       line2: "Near park",
       line3: undefined,
+      overflow: false,
     });
   });
 
@@ -39,5 +40,16 @@ describe("wrapIndiaPostAddressLines", () => {
     expect(wrapped.line2?.length ?? 0).toBeLessThanOrEqual(INDIA_POST_ADDRESS_LINE_MAX);
     expect((wrapped.line2 ?? "") + (wrapped.line3 ?? "")).toContain("municipal");
     expect(wrapped.line3?.length ?? 0).toBeLessThanOrEqual(INDIA_POST_ADDRESS_LINE_MAX);
+    expect(wrapped.overflow).toBe(false);
+  });
+
+  it("reports overflow instead of gluing a fourth chunk onto line 3", () => {
+    const chunk = "A".repeat(INDIA_POST_ADDRESS_LINE_MAX);
+    const wrapped = wrapIndiaPostAddressLines(`${chunk}${chunk}${chunk} leftover words`);
+    expect(wrapped.line1).toHaveLength(INDIA_POST_ADDRESS_LINE_MAX);
+    expect(wrapped.line2).toHaveLength(INDIA_POST_ADDRESS_LINE_MAX);
+    expect(wrapped.line3).toHaveLength(INDIA_POST_ADDRESS_LINE_MAX);
+    expect(wrapped.line3).not.toContain("leftover");
+    expect(wrapped.overflow).toBe(true);
   });
 });

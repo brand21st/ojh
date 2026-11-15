@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { TenantContext } from "@/lib/api/context";
-import { classifyMultiArticleOutcome } from "@/modules/india-post/booking-apply";
+import { classifyMultiArticleOutcome, splitIndiaPostBookingResult } from "@/modules/india-post/booking-apply";
+import { CEPT_SUBMIT_INTENT_AT, metadataWithCeptBookingIds } from "@/modules/india-post/booking-intent";
 import {
   INDIA_POST_BOOKING_LOCK_TTL_MAX_SECONDS,
   INDIA_POST_BOOKING_LOCK_TTL_SECONDS,
@@ -183,6 +184,39 @@ describe("multi-article response classification", () => {
       expect(out.failed.size).toBe(0);
       expect(out.recovery.size).toBe(3);
     }
+  });
+
+  it("books 95 of 100 and fails the other 5 without sending the rest to recovery", () => {
+    const submitted = Array.from({ length: 100 }, (_, index) => `EA${String(index).padStart(9, "0")}IN`);
+    const out = classifyMultiArticleOutcome(submitted, {
+      custom_id: "cust-1",
+      mail_booking_dom_id: 44021,
+      valid_articles: submitted.slice(0, 95).map((barcode) => ({ barcode_no: barcode, calculated_tariff: 31 })),
+      error_articles: submitted.slice(95).map((barcode) => ({ barcode_no: barcode, errors: ["Invalid pincode"] })),
+    });
+    expect(out.booked.size).toBe(95);
+    expect(out.failed.size).toBe(5);
+    expect(out.recovery.size).toBe(0);
+    expect(out.recoveryReason).toBeNull();
+    const split = splitIndiaPostBookingResult({
+      custom_id: "cust-1",
+      mail_booking_dom_id: 44021,
+      valid_articles: [{ barcode_no: submitted[0], calculated_tariff: 31 }],
+      error_articles: [],
+    });
+    const accepted = split.valid.get(submitted[0]!);
+    expect(accepted?.customId).toBe("cust-1");
+    expect(accepted?.mailBookingDomId).toBe("44021");
+    expect(
+      metadataWithCeptBookingIds(
+        { [CEPT_SUBMIT_INTENT_AT]: "2026-11-14T00:00:00.000Z" },
+        { customId: accepted?.customId, mailBookingDomId: accepted?.mailBookingDomId }
+      )
+    ).toEqual({
+      [CEPT_SUBMIT_INTENT_AT]: "2026-11-14T00:00:00.000Z",
+      ceptCustomId: "cust-1",
+      ceptMailBookingDomId: "44021",
+    });
   });
 
   it("keeps the existing rule that a duplicate-article rejection counts as booked", () => {

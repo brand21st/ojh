@@ -27,6 +27,7 @@ describe("organizationLabelSender", () => {
     );
     expect(sender).toEqual({
       name: "Khelon",
+      company: "Khelon",
       phone: "9876543210",
       line1: "NH 85",
       line2: "Near SO",
@@ -36,13 +37,14 @@ describe("organizationLabelSender", () => {
     });
   });
 
-  it("falls back to pickup then shop then Merchant", () => {
+  it("falls back to pickup then shop and does not invent Merchant", () => {
     expect(organizationLabelSender(null, { contact_name: "Desk", line1: "Bay 2" }).name).toBe("Desk");
     expect(organizationLabelSender(null, { line1: "Registered pickup", line2: "NH 85" }).line1).toBe("NH 85");
     expect(organizationLabelSender({ line1: "Registered pickup" }, { line1: "Bay 2" }).line1).toBe("Bay 2");
     expect(organizationLabelSender(null, null, "Priya Stores").name).toBe("Priya Stores");
-    expect(organizationLabelSender(null, null, null).name).toBe("Merchant");
-    expect(organizationLabelSender(null, null, null).line1).toBe("Registered pickup");
+    expect(organizationLabelSender(null, null, null).name).toBe("");
+    expect(organizationLabelSender(null, null, null).company).toBe("");
+    expect(organizationLabelSender(null, null, null).line1).toBe("");
   });
 });
 

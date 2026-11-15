@@ -131,6 +131,9 @@ describe("indiaPostMobile", () => {
   it("accepts a 10 digit Indian mobile", () => {
     expect(indiaPostMobile("+91 98765 43210")).toBe("9876543210");
     expect(indiaPostMobile("919876543210")).toBe("9876543210");
+    expect(indiaPostMobile("+919632306200")).toBe("9632306200");
+    expect(indiaPostMobile("919632306200")).toBe("9632306200");
+    expect(indiaPostMobile("9108938854")).toBe("9108938854");
     expect(indiaPostMobile("09876543210")).toBe("9876543210");
   });
 
@@ -279,9 +282,11 @@ describe("indiaPostBookingArticle", () => {
       widthCm: 15,
       heightCm: 10,
       senderName: "kerlaz",
+      senderCompany: "kerlaz",
       senderLine1: "Registered pickup",
       senderCity: "Ernakulam",
       senderState: "Kerala",
+      senderPin: "682311",
       senderMobile: "9876543210",
       receiverName: "Vishnu Priya",
       receiverLine1: "Sulakkarai",
@@ -313,9 +318,11 @@ describe("indiaPostBookingArticle", () => {
       widthCm: 15,
       heightCm: 10,
       senderName: "kerlaz",
+      senderCompany: "kerlaz",
       senderLine1: "Registered pickup",
       senderCity: "Ernakulam",
       senderState: "Kerala",
+      senderPin: "682311",
       senderMobile: "9876543210",
       receiverName: "Vishnu Priya",
       receiverLine1: "Sulakkarai",

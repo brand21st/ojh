@@ -1,3 +1,22 @@
+/** CEPT response identifiers. Stored beside the submit intent; they do not replace it. */
+export const CEPT_CUSTOM_ID = "ceptCustomId";
+export const CEPT_MAIL_BOOKING_DOM_ID = "ceptMailBookingDomId";
+
+export function metadataWithCeptBookingIds(
+  metadata: unknown,
+  ids: { customId?: string | null; mailBookingDomId?: string | null }
+) {
+  const base =
+    metadata && typeof metadata === "object" && !Array.isArray(metadata)
+      ? { ...(metadata as Record<string, unknown>) }
+      : {};
+  const customId = ids.customId?.trim();
+  const mailBookingDomId = ids.mailBookingDomId?.trim();
+  if (customId) base[CEPT_CUSTOM_ID] = customId;
+  if (mailBookingDomId) base[CEPT_MAIL_BOOKING_DOM_ID] = mailBookingDomId;
+  return base;
+}
+
 /** Durable proof that a CEPT booking POST was about to be sent. Stored on shipments.metadata. */
 export const CEPT_SUBMIT_INTENT_AT = "ceptSubmitIntentAt";
 /** Merchant confirmed a second CEPT POST after an unknown first outcome. */

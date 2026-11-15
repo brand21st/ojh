@@ -36,6 +36,7 @@ const SAMPLE: Record<(typeof ARTICLE_DETAILS_HEADERS)[number], string | number |
   "VALUE OF PREPAYMENT": "",
   "CODR/COD": "cod",
   "VALUE FOR CODR/COD": 1199,
+  "DECLARED VALUE": "",
   "INSURANCE TYPE": "",
   "VALUE OF INSURANCE": "",
   "SHAPE OF ARTICLE": "NROL",
@@ -105,7 +106,7 @@ describe("India Post ArticleDetails sheet", () => {
       row: withArticleKeys(parsed.rows[0]!.mapped),
     });
     const cells = articleDetailsRow(draft, 1);
-    expect(cells).toHaveLength(48);
+    expect(cells).toHaveLength(49);
     expect(cells).toEqual(ARTICLE_DETAILS_HEADERS.map((header) => emptyToNull(SAMPLE[header]) ?? cellDefault(header)));
   });
 
@@ -120,7 +121,7 @@ describe("India Post ArticleDetails sheet", () => {
     expect(sheets[0]!.rows.map((row) => row[0])).toEqual(["SERIAL NUMBER", "1", "2"]);
     const xml = await (await JSZip.loadAsync(bytes)).file("xl/worksheets/sheet1.xml")!.async("string");
     expect(xml).toContain('<c r="D2" t="b"><v>0</v></c>');
-    expect(xml).toContain('<c r="Y2" t="b"><v>1</v></c>');
+    expect(xml).toContain('<c r="Z2" t="b"><v>1</v></c>');
     // Same cell shapes as the India Post template: text as t="str", formatted numbers with s="1".
     expect(xml).toContain('<c r="G2" t="str"><v>700162</v></c>');
     expect(xml).toContain('<c r="R2" s="1"><v>1199</v></c>');
@@ -178,5 +179,7 @@ describe("India Post ArticleDetails sheet", () => {
 
 /** Blank cells the sample leaves empty come back as "" (text) or null (number/flag). */
 function cellDefault(header: string) {
-  return ["VALUE OF PREPAYMENT", "VALUE OF INSURANCE", "ALT ADDRESS FLAG"].includes(header) ? null : "";
+  return ["VALUE OF PREPAYMENT", "VALUE OF INSURANCE", "DECLARED VALUE", "ALT ADDRESS FLAG"].includes(header)
+    ? null
+    : "";
 }

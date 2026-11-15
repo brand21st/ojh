@@ -1,3 +1,4 @@
+import { wrapIndiaPostAddressLines } from "@/modules/india-post/address-lines";
 import { isValidIndiaPostS10 } from "@/modules/india-post/barcode";
 import {
   indiaPostBookingArticleType,
@@ -409,6 +410,36 @@ export function validateIndiaPostArticle(draft: DraftArticle): ValidationIssue[]
         "receiver_add_line_1",
         receiverCombined,
         `Receiver address lines combined must not exceed ${INDIA_POST_ADDRESS_COMBINED_MAX} characters.`,
+        shopify
+      )
+    );
+  }
+
+  const senderStreet = wrapIndiaPostAddressLines(draft.sender.line1, draft.sender.line2, draft.sender.line3, draft.sender.city);
+  if (senderStreet.overflow) {
+    issues.push(
+      issue(
+        draft,
+        "sender_add_line_1",
+        draft.sender.line1,
+        "Shorten the sender address. It does not fit in three lines of 80 characters, so booking would drop delivery text.",
+        config
+      )
+    );
+  }
+  const receiverStreet = wrapIndiaPostAddressLines(
+    draft.receiver.line1,
+    draft.receiver.line2,
+    draft.receiver.line3,
+    draft.receiver.city
+  );
+  if (receiverStreet.overflow) {
+    issues.push(
+      issue(
+        draft,
+        "receiver_add_line_1",
+        draft.receiver.line1,
+        "Shorten the receiver address. It does not fit in three lines of 80 characters, so booking would drop delivery text.",
         shopify
       )
     );

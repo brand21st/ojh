@@ -76,6 +76,7 @@ export type DraftArticle = {
   codKind?: "COD" | "CODR" | "";
   insuranceType?: string;
   insuranceValue?: number;
+  declaredValue?: number;
   ack?: boolean;
   reg?: boolean;
   prepaymentCode?: string;

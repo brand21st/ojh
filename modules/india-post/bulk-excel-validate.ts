@@ -103,6 +103,7 @@ const ARTICLE_KEYS = [
   "physical_weight",
   "codr_cod",
   "value_for_codr_cod",
+  "declared_value",
   "pickup_dropoff_office_id",
   "drop_off_pincode",
   "length",

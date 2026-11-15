@@ -101,6 +101,8 @@ export type ManifestDetail = ManifestSummary & {
 
 export type ManifestSender = {
   name: string;
+  company: string;
+  line1: string;
   customerId: string | null;
   city: string | null;
   state: string | null;
@@ -637,6 +639,8 @@ export async function getManifestSender(supabase: SupabaseClient, organizationId
   const label = organizationLabelSender(org, pickup);
   return {
     name: text(org?.name) ?? label.name,
+    company: label.company,
+    line1: label.line1,
     customerId: text(connection?.bulk_customer_id),
     city: label.city,
     state: label.state,

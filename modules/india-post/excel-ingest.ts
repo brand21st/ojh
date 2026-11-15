@@ -46,6 +46,7 @@ const ARTICLE_HEADERS: Record<string, string> = {
   "VALUE OF PREPAYMENT": "value_of_prepayment",
   "CODR/COD": "codr_cod",
   "VALUE FOR CODR/COD": "value_for_codr_cod",
+  "DECLARED VALUE": "declared_value",
   "INSURANCE TYPE": "insurance_type",
   "VALUE OF INSURANCE": "value_of_insurance",
   ACK: "ack",

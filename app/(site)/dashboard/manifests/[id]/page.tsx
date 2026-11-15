@@ -61,9 +61,28 @@ export default function ManifestDetailPage() {
 
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ["manifest", id] });
+    queryClient.invalidateQueries({ queryKey: ["manifest-export-validation", id] });
     queryClient.invalidateQueries({ queryKey: ["manifests"] });
     queryClient.invalidateQueries({ queryKey: ["manifest-eligible"] });
   };
+
+  const exportValidation = useQuery({
+    queryKey: ["manifest-export-validation", id],
+    queryFn: () =>
+      api<{
+        issues: Array<{
+          orderNumber: string;
+          barcode: string;
+          field: string;
+          severity: "error" | "warning";
+          message: string;
+          suggestion: string;
+        }>;
+        errorCount: number;
+        warningCount: number;
+      }>(`/api/v1/manifests/${id}/export-validation`),
+    enabled: Boolean(id),
+  });
 
   const close = useMutation({
     mutationFn: () => api(`/api/v1/manifests/${id}/close`, { method: "POST" }),
@@ -188,6 +207,8 @@ export default function ManifestDetailPage() {
   }
 
   const exportHref = (format: string) => `/api/v1/manifests/${id}/export?format=${format}`;
+  const handoverBlocked = exportValidation.isPending || (exportValidation.data?.errorCount ?? 0) > 0;
+  const exportIssues = exportValidation.data?.issues ?? [];
   async function downloadIndiaPostExcel() {
     if (indiaPostExporting) return;
     setIndiaPostExporting(true);
@@ -236,12 +257,20 @@ export default function ManifestDetailPage() {
                 <DropdownMenuItem disabled={indiaPostExporting} onSelect={() => void downloadIndiaPostExcel()}>
                   {indiaPostExporting ? "Exporting India Post Excel…" : "Export India Post Excel"}
                 </DropdownMenuItem>
-                <DropdownMenuItem asChild>
-                  <a href={exportHref("xlsx")}>Handover list (.xlsx)</a>
-                </DropdownMenuItem>
-                <DropdownMenuItem asChild>
-                  <a href={exportHref("csv")}>CSV</a>
-                </DropdownMenuItem>
+                {handoverBlocked ? (
+                  <DropdownMenuItem disabled>Handover list (.xlsx)</DropdownMenuItem>
+                ) : (
+                  <DropdownMenuItem asChild>
+                    <a href={exportHref("xlsx")}>Handover list (.xlsx)</a>
+                  </DropdownMenuItem>
+                )}
+                {handoverBlocked ? (
+                  <DropdownMenuItem disabled>CSV</DropdownMenuItem>
+                ) : (
+                  <DropdownMenuItem asChild>
+                    <a href={exportHref("csv")}>CSV</a>
+                  </DropdownMenuItem>
+                )}
                 <DropdownMenuItem asChild>
                   <a href={exportHref("pdf")} target="_blank" rel="noreferrer">
                     PDF handover sheet{draft ? " (draft)" : ""}
@@ -326,6 +355,60 @@ export default function ManifestDetailPage() {
         filenameHint={`manifest_${(data.number ?? "draft").replace(/[^A-Za-z0-9._-]/g, "_")}_india_post.xlsx`}
         canSend={canWrite && (data.status === "CLOSED" || data.status === "HANDED_OVER")}
       />
+
+      {exportIssues.some((issue) => issue.field.toLowerCase().includes("sender")) ? (
+        <Card>
+          <CardHeader className="gap-2">
+            <CardTitle>Sender Details Incomplete</CardTitle>
+            <CardDescription>
+              Your India Post sender address is missing required information. Update Settings so bulk booking can
+              send the merchant address.
+            </CardDescription>
+            <Link href="/dashboard/settings" className={buttonVariants({ variant: "outline", className: "w-fit" })}>
+              Update Sender Details
+            </Link>
+          </CardHeader>
+        </Card>
+      ) : null}
+
+      {exportIssues.length ? (
+        <Card>
+          <CardHeader className="gap-2">
+            <CardTitle>Handover check</CardTitle>
+            <CardDescription>
+              {exportValidation.data?.errorCount
+                ? `${exportValidation.data.errorCount} shipment${exportValidation.data.errorCount === 1 ? "" : "s"} must be corrected before the handover Excel or CSV can download.`
+                : "These warnings do not block the download."}
+            </CardDescription>
+          </CardHeader>
+          <div className="overflow-x-auto px-6 pb-6">
+            <table className="w-full min-w-[640px] text-left text-sm">
+              <thead className="text-muted">
+                <tr>
+                  <th className="py-2 pr-3 font-medium">Order</th>
+                  <th className="py-2 pr-3 font-medium">Barcode</th>
+                  <th className="py-2 pr-3 font-medium">Field</th>
+                  <th className="py-2 pr-3 font-medium">Status</th>
+                  <th className="py-2 font-medium">What to fix</th>
+                </tr>
+              </thead>
+              <tbody>
+                {exportIssues.map((issue, index) => (
+                  <tr key={`${issue.barcode}-${issue.field}-${index}`} className="border-t border-border">
+                    <td className="py-2 pr-3">{issue.orderNumber || "—"}</td>
+                    <td className="py-2 pr-3">{issue.barcode || "—"}</td>
+                    <td className="py-2 pr-3">{issue.field}</td>
+                    <td className="py-2 pr-3">{issue.severity === "error" ? "Needs correction" : "Warning"}</td>
+                    <td className="py-2">
+                      {issue.message} {issue.suggestion}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      ) : null}
 
       <DataTable
         columns={columns}

@@ -1,25 +1,44 @@
 import { indiaPostAcceptedArticleId } from "@/modules/india-post/barcode";
 import { indiaPostArticleErrorText, isIndiaPostDuplicateArticleMessage } from "@/modules/india-post/error-text";
 
+export type IndiaPostBookingArticleRow = {
+  barcode_no?: string;
+  article_number?: string;
+  calculated_tariff?: number;
+  custom_id?: string;
+  mail_booking_dom_id?: string | number;
+  errors?: string[];
+};
+
 export type IndiaPostBookingResponse = {
   success?: boolean;
   batch_id?: string;
   correlation_id?: string;
-  valid_articles?: Array<{
-    barcode_no?: string;
-    article_number?: string;
-    calculated_tariff?: number;
-    errors?: string[];
-  }>;
-  error_articles?: Array<{
-    barcode_no?: string;
-    errors?: string[];
-  }>;
+  custom_id?: string;
+  mail_booking_dom_id?: string | number;
+  valid_articles?: IndiaPostBookingArticleRow[];
+  error_articles?: IndiaPostBookingArticleRow[];
+};
+
+function ceptText(value: unknown) {
+  const text = value == null ? "" : String(value).trim();
+  return text || null;
+}
+
+export type IndiaPostAcceptedArticle = {
+  barcode: string;
+  tariff?: number;
+  articleId: string;
+  duplicate?: boolean;
+  customId: string | null;
+  mailBookingDomId: string | null;
 };
 
 export function splitIndiaPostBookingResult(result: IndiaPostBookingResponse | null | undefined) {
-  const valid = new Map<string, { barcode: string; tariff?: number; articleId: string; duplicate?: boolean }>();
+  const valid = new Map<string, IndiaPostAcceptedArticle>();
   const failed = new Map<string, string>();
+  const batchCustomId = ceptText(result?.custom_id);
+  const batchMailId = ceptText(result?.mail_booking_dom_id);
   for (const article of result?.valid_articles ?? []) {
     const barcode = String(article.barcode_no ?? "").toUpperCase();
     if (!barcode) continue;
@@ -27,6 +46,8 @@ export function splitIndiaPostBookingResult(result: IndiaPostBookingResponse | n
       barcode,
       tariff: article.calculated_tariff,
       articleId: indiaPostAcceptedArticleId(article, barcode),
+      customId: ceptText(article.custom_id) ?? batchCustomId,
+      mailBookingDomId: ceptText(article.mail_booking_dom_id) ?? batchMailId,
     });
   }
   for (const article of result?.error_articles ?? []) {
@@ -38,6 +59,8 @@ export function splitIndiaPostBookingResult(result: IndiaPostBookingResponse | n
         barcode,
         articleId: indiaPostAcceptedArticleId(article, barcode),
         duplicate: true,
+        customId: ceptText(article.custom_id) ?? batchCustomId,
+        mailBookingDomId: ceptText(article.mail_booking_dom_id) ?? batchMailId,
       });
       continue;
     }

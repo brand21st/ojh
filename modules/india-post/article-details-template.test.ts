@@ -74,7 +74,7 @@ describe("India Post template asset", () => {
   it("carries no customer rows, only the header", async () => {
     const sheet = (await parts(TEMPLATE))[SHEET];
     expect(sheet.match(/<row /g)).toHaveLength(1);
-    expect(sheet).toContain('<dimension ref="A1:AV1"/>');
+    expect(sheet).toContain('<dimension ref="A1:AW1"/>');
     expect(sheet).not.toMatch(/[6-9]\d{9}/);
   });
 });
@@ -99,10 +99,10 @@ describe("generated workbook", () => {
     const headerRow = (xml: string) => /<row r="1">[\s\S]*?<\/row>/.exec(xml)![0];
     expect(headerRow(generated)).toBe(headerRow(template));
     expect(headerRow(generated)).toContain('<v xml:space="preserve">LENGTH </v>');
-    expect(generated).toContain('<dimension ref="A1:AV3"/>');
-    expect(generated).toContain('sqref="A1:AV3"');
+    expect(generated).toContain('<dimension ref="A1:AW3"/>');
+    expect(generated).toContain('sqref="A1:AW3"');
     expect(generated.slice(0, generated.indexOf("<sheetData>"))).toBe(
-      template.slice(0, template.indexOf("<sheetData>")).replace("A1:AV1", "A1:AV3")
+      template.slice(0, template.indexOf("<sheetData>")).replace("A1:AW1", "A1:AW3")
     );
   });
 
@@ -119,7 +119,7 @@ describe("generated workbook", () => {
     });
     expect(sheet).toContain('<c r="A2"><v>1</v></c>');
     expect(sheet).toContain('<c r="C2" s="1"><v>500</v></c>');
-    expect(sheet).toContain('<c r="Y2" t="b"><v>1</v></c>');
+    expect(sheet).toContain('<c r="Z2" t="b"><v>1</v></c>');
     expect(sheet).toContain('<c r="G2" t="str"><v>682001</v></c>');
   });
 
@@ -164,7 +164,7 @@ describe("generated workbook", () => {
     const bytes = await articleDetailsWorkbook(Array.from({ length: 5000 }, () => sampleRow()));
     expect(Date.now() - started).toBeLessThan(8000);
     const sheet = (await parts(bytes))[SHEET];
-    expect(sheet).toContain('<dimension ref="A1:AV5001"/>');
+    expect(sheet).toContain('<dimension ref="A1:AW5001"/>');
   });
 });
 

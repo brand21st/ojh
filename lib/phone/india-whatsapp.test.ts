@@ -16,7 +16,14 @@ describe("extractIndiaMobileDigits", () => {
   it("accepts +91 and 91 prefixes", () => {
     expect(extractIndiaMobileDigits("+91 98765 43210")).toBe("9876543210");
     expect(extractIndiaMobileDigits("919876543210")).toBe("9876543210");
+    expect(extractIndiaMobileDigits("+919632306200")).toBe("9632306200");
+    expect(extractIndiaMobileDigits("919632306200")).toBe("9632306200");
     expect(extractIndiaMobileDigits("09876543210")).toBe("9876543210");
+  });
+
+  it("keeps a 10-digit mobile that starts with 91", () => {
+    expect(extractIndiaMobileDigits("9108938854")).toBe("9108938854");
+    expect(extractIndiaMobileDigits("9632306200")).toBe("9632306200");
   });
 
   it("rejects non-Indian lengths and invalid first digits", () => {

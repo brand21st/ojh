@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { extractIndiaMobileDigits } from "@/lib/phone/india-whatsapp";
 import type { TenantContext } from "@/lib/api/context";
 import { getAutomationSettings } from "@/modules/automation/service";
 import { isIndiaPostAcceptedStatus } from "@/modules/india-post/booking-status";
@@ -234,7 +235,7 @@ export async function upsertWooCommerceOrder(
         .from("customers")
         .update({
           name: mapped.customer.name,
-          phone: mapped.customer.phone,
+          phone: wooAddressPhone(mapped.customer.phone).phone,
           email: mapped.customer.email,
         })
         .eq("id", order.customer_id);
@@ -283,7 +284,7 @@ export async function upsertWooCommerceOrder(
     .insert({
       organization_id: input.organizationId,
       name: mapped.customer.name,
-      phone: mapped.customer.phone,
+      phone: wooAddressPhone(mapped.customer.phone).phone,
       email: mapped.customer.email,
     })
     .select("id")
@@ -567,6 +568,13 @@ async function applyWooParcelHydrate(
   }
 }
 
+/** Stores a 10-digit Indian mobile and keeps the merchant's original text for audit. */
+export function wooAddressPhone(raw: string | null | undefined) {
+  const original = raw?.trim() || null;
+  const normalized = extractIndiaMobileDigits(original);
+  return { phone: normalized ?? original, original_phone: original };
+}
+
 function addressRow(address: {
   name: string;
   phone: string | null;
@@ -579,7 +587,7 @@ function addressRow(address: {
 }) {
   return {
     name: address.name,
-    phone: address.phone,
+    ...wooAddressPhone(address.phone),
     line1: address.line1,
     line2: address.line2,
     city: address.city,

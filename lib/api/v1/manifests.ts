@@ -3,6 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { TenantContext } from "@/lib/api/context";
 import { AppError, ERROR_CODES } from "@/lib/api/errors";
 import { manifestCsv, manifestFileBase, manifestXlsx } from "@/modules/manifests/export";
+import { manifestExportErrorCount, validateManifestExport } from "@/modules/manifests/validate-export";
 import { exportManifestIndiaPostExcel } from "@/modules/manifests/india-post-excel";
 import { renderManifestPdf } from "@/modules/manifests/pdf";
 import {
@@ -121,11 +122,32 @@ export async function handleManifestRoutes(
     });
   }
 
+  if (action === "export-validation" && method === "GET") {
+    const manifest = await getManifest(supabase, org, id);
+    const sender = await getManifestSender(supabase, org);
+    const issues = validateManifestExport(manifest, sender);
+    return {
+      issues,
+      errorCount: manifestExportErrorCount(issues),
+      warningCount: issues.filter((item) => item.severity === "warning").length,
+    };
+  }
+
   if (action === "export" && method === "GET") {
     const parsed = manifestExportFormat.safeParse(request.nextUrl.searchParams.get("format") ?? undefined);
     if (!parsed.success) throw new AppError(ERROR_CODES.VALIDATION_ERROR, "Choose xlsx, csv or pdf.");
     const manifest = await getManifest(supabase, org, id);
     const sender = await getManifestSender(supabase, org);
+    if (parsed.data !== "pdf") {
+      const issues = validateManifestExport(manifest, sender);
+      if (manifestExportErrorCount(issues) > 0) {
+        throw new AppError(
+          ERROR_CODES.CONFLICT,
+          "Fix the listed shipments before downloading this handover file.",
+          { issues }
+        );
+      }
+    }
     const base = manifestFileBase(manifest);
     if (parsed.data === "csv") {
       return new NextResponse(manifestCsv(manifest, sender), {

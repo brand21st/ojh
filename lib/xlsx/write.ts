@@ -56,7 +56,8 @@ function sheetXml({ rows, widths, freezeHeader }: SheetInput) {
           const style = r === 0 ? ' s="1"' : "";
           if (typeof value === "boolean") return `<c r="${ref}" t="b"${style}><v>${value ? 1 : 0}</v></c>`;
           if (typeof value === "number" && Number.isFinite(value)) return `<c r="${ref}"${style}><v>${value}</v></c>`;
-          return `<c r="${ref}" t="inlineStr"${style}><is><t xml:space="preserve">${escapeXml(String(value))}</t></is></c>`;
+          const text = /^[=+\-@\t\r]/.test(String(value)) ? `'${String(value)}` : String(value);
+          return `<c r="${ref}" t="inlineStr"${style}><is><t xml:space="preserve">${escapeXml(text)}</t></is></c>`;
         })
         .join("");
       return `<row r="${r + 1}">${cells}</row>`;

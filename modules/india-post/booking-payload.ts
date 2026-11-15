@@ -31,6 +31,7 @@ function optionalText(value?: string | null) {
 
 function streetFields(party: { line1: string; line2?: string; line3?: string; city?: string }) {
   const street = wrapIndiaPostAddressLines(party.line1, party.line2, party.line3, party.city);
+  // Validated articles already fit. The slice only guards a line that is already within the cap.
   return {
     line1: street.line1.slice(0, INDIA_POST_ADDRESS_LINE_MAX),
     line2: optionalText(street.line2),
@@ -158,6 +159,7 @@ export function indiaPostBookingArticle(input: {
   senderLine2?: string | null;
   senderCity: string;
   senderState: string;
+  senderPin?: string | null;
   senderMobile: string;
   receiverName: string;
   receiverLine1: string;
@@ -182,13 +184,13 @@ export function indiaPostBookingArticle(input: {
     widthCm: Math.max(0, Number(input.widthCm) || 0),
     heightCm: Math.max(0, Number(input.heightCm) || 0),
     sender: {
-      name: indiaPostRequiredText(input.senderName, "Merchant"),
-      company: indiaPostRequiredText(input.senderCompany, input.senderName || "Merchant"),
-      line1: indiaPostRequiredText(input.senderLine1, "Registered pickup"),
+      name: (input.senderName ?? "").trim(),
+      company: (input.senderCompany ?? "").trim(),
+      line1: (input.senderLine1 ?? "").trim(),
       line2: input.senderLine2 ?? undefined,
-      city: indiaPostRequiredText(input.senderCity, input.senderCity || "City"),
-      state: indiaPostRequiredText(input.senderState, input.senderState || "State"),
-      pincode: input.originPin,
+      city: (input.senderCity ?? "").trim(),
+      state: (input.senderState ?? "").trim(),
+      pincode: String(input.senderPin ?? input.originPin ?? "").trim(),
       mobile: input.senderMobile,
     },
     receiver: {

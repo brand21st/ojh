@@ -176,7 +176,7 @@ async function exportContext(supabase: SupabaseClient, organizationId: string) {
   const sender = organizationLabelSender(org, pickup, shop?.shop_name);
   return {
     sender,
-    senderCompany: String(org?.name || pickup?.name || sender.name || ""),
+    senderCompany: sender.company,
     storeName: String(org?.name || shop?.shop_name || "store"),
     limit: normalizeExcelBookingLimit((connection as { excel_booking_limit?: unknown } | null)?.excel_booking_limit),
   };

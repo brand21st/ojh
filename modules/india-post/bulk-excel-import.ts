@@ -48,6 +48,7 @@ import { isIndiaPostAcceptedStatus } from "@/modules/india-post/booking-status";
 import { createBackgroundJob } from "@/modules/jobs/service";
 import { createManualOrder } from "@/modules/orders/service";
 import { shipmentCollectFromOrder } from "@/modules/orders/payment";
+import { indiaPostMerchantSenderFields } from "@/modules/india-post/merchant-sender";
 import { organizationLabelSender } from "@/modules/organizations/label-sender";
 import { retryShipment } from "@/modules/shipments/service";
 import { DEFAULT_INDIA_POST_SERVICE, type MemberRole } from "@/types/domain";
@@ -195,9 +196,9 @@ async function storeDefaults(
   const contract = (contracts ?? []).find(
     (row) => row.is_active !== false && String(row.service_code) === serviceCode
   );
-  const sender = organizationLabelSender(org, pickup, shop?.shop_name);
+  const sender = indiaPostMerchantSenderFields(organizationLabelSender(org, pickup, shop?.shop_name));
   let officeId = "";
-  let originPin = sender.pincode || String(pickup?.pincode ?? "");
+  let originPin = sender.senderPin || String(pickup?.pincode ?? "");
   try {
     const provider = indiaPostFromRow(connection);
     const origin = await resolveIndiaPostOrigin(provider, connection, pickup, originPin || "110001");
@@ -220,14 +221,14 @@ async function storeDefaults(
     contractId: String(contract?.contract_id ?? connection.contract_id ?? ""),
     officeId,
     originPin,
-    senderName: sender.name,
-    senderCompany: org?.name || sender.name,
-    senderLine1: sender.line1,
-    senderLine2: sender.line2,
-    senderCity: sender.city || "",
-    senderState: sender.state || "",
-    senderPin: sender.pincode || originPin,
-    senderMobile: sender.phone || "",
+    senderName: sender.senderName,
+    senderCompany: sender.senderCompany,
+    senderLine1: sender.senderLine1,
+    senderLine2: sender.senderLine2,
+    senderCity: sender.senderCity,
+    senderState: sender.senderState,
+    senderPin: sender.senderPin || originPin,
+    senderMobile: sender.senderMobile,
     allocatableBarcodes,
     usedBarcodes: new Set((shipments ?? []).map((row) => String(row.barcode).toUpperCase())),
     parcelDefaults: parcelDefaultsFromConnection(connection),

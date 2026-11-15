@@ -31,6 +31,7 @@ import {
 import { cachedOfficeLookup, resolveIndiaPostOrigin } from "@/modules/india-post/origin";
 import { indiaPostFromRow } from "@/modules/india-post/provider";
 import { persistIndiaPostTokens } from "@/modules/india-post/session";
+import { indiaPostMerchantSenderFields, pickupForShipment } from "@/modules/india-post/merchant-sender";
 import { organizationLabelSender } from "@/modules/organizations/label-sender";
 import { DEFAULT_INDIA_POST_SERVICE } from "@/types/domain";
 import { shopifyPendingBookingBlocked } from "@/lib/dashboard/records";
@@ -46,6 +47,7 @@ import { trustedFirstBarcodeProof } from "@/modules/india-post/booking-provenanc
 import {
   metadataConsumingCeptForceResubmit,
   metadataWithCeptForceResubmit,
+  metadataWithCeptBookingIds,
   metadataWithCeptSubmitIntent,
   readCeptForceResubmitAt,
   readCeptForceResubmitConsumedAt,
@@ -115,12 +117,29 @@ export async function persistBookedShipment(
     tariff?: number | null;
     batchId?: string | null;
     correlationId?: string | null;
+    customId?: string | null;
+    mailBookingDomId?: string | null;
     bookedAt?: string | null;
     persistDefaults?: { dims: boolean; weight: boolean };
     payload?: Record<string, string | number>;
   }
 ) {
   const bookedAt = input.bookedAt || new Date().toISOString();
+  let metadata: Record<string, unknown> | undefined;
+  if (input.customId || input.mailBookingDomId) {
+    const current = await supabase
+      .from("shipments")
+      .select("metadata")
+      .eq("id", input.shipmentId)
+      .eq("organization_id", input.organizationId)
+      .maybeSingle();
+    if (!current.error) {
+      metadata = metadataWithCeptBookingIds(current.data?.metadata, {
+        customId: input.customId,
+        mailBookingDomId: input.mailBookingDomId,
+      });
+    }
+  }
   const { data, error } = await supabase
     .from("shipments")
     .update({
@@ -133,6 +152,7 @@ export async function persistBookedShipment(
       booked_at: bookedAt,
       last_error: null,
       last_error_code: null,
+      ...(metadata ? { metadata } : {}),
       ...(input.persistDefaults?.dims && input.payload
         ? {
             length_cm: input.payload.length,
@@ -365,7 +385,7 @@ async function runIndiaPostBookingAttempt(
 
   const { data: shipments } = await supabase
     .from("shipments")
-    .select("*, orders(*), customers(*), addresses:shipping_address_id(*)")
+    .select("*, orders(*), customers(*), addresses:shipping_address_id(*), pickup_location_id")
     .eq("organization_id", input.organizationId)
     .in("id", input.shipmentIds);
   if (!shipments?.length) {
@@ -411,6 +431,24 @@ async function runIndiaPostBookingAttempt(
     .order("is_default", { ascending: false })
     .limit(1)
     .maybeSingle();
+  const selectedPickupIds = [
+    ...new Set(
+      shipments
+        .map((row) => String((row as { pickup_location_id?: string | null }).pickup_location_id ?? "").trim())
+        .filter(Boolean)
+    ),
+  ];
+  const extraPickups =
+    selectedPickupIds.length > 0
+      ? (
+          await supabase
+            .from("pickup_locations")
+            .select("*")
+            .eq("organization_id", input.organizationId)
+            .in("id", selectedPickupIds)
+        ).data ?? []
+      : [];
+  const pickups = [...extraPickups, ...(pickup ? [pickup] : [])];
   const { data: org } = await supabase
     .from("organizations")
     .select("name, phone, line1, line2, city, state, pincode")
@@ -421,7 +459,10 @@ async function runIndiaPostBookingAttempt(
     .select("shop_name")
     .eq("organization_id", input.organizationId)
     .maybeSingle();
-  const senderIdentity = organizationLabelSender(org, pickup, shop?.shop_name);
+  const senderForPickup = (shipmentPickupId?: string | null) =>
+    indiaPostMerchantSenderFields(
+      organizationLabelSender(org, pickupForShipment(shipmentPickupId, pickups, pickup), shop?.shop_name)
+    );
 
   const { data: contracts } = await supabase
     .from("india_post_contracts")
@@ -664,16 +705,22 @@ async function runIndiaPostBookingAttempt(
     }
 
     const destPincode = address?.pincode ?? "";
+    const merchantSender = senderForPickup((shipment as { pickup_location_id?: string | null }).pickup_location_id);
+    const shipmentPickup = pickupForShipment(
+      (shipment as { pickup_location_id?: string | null }).pickup_location_id,
+      pickups,
+      pickup
+    );
     let origin;
     try {
       origin = await resolveIndiaPostOrigin(
         offices,
         connection,
         {
-          ...pickup,
-          pincode: senderIdentity.pincode || pickup?.pincode,
-          city: senderIdentity.city || pickup?.city,
-          state: senderIdentity.state || pickup?.state,
+          ...shipmentPickup,
+          pincode: merchantSender.senderPin || shipmentPickup?.pincode,
+          city: merchantSender.senderCity || shipmentPickup?.city,
+          state: merchantSender.senderState || shipmentPickup?.state,
         },
         destPincode
       );
@@ -704,14 +751,14 @@ async function runIndiaPostBookingAttempt(
           lengthCm: Number(shipment.length_cm) || 0,
           widthCm: Number(shipment.width_cm) || 0,
           heightCm: Number(shipment.height_cm) || 0,
-          senderName: senderIdentity.name,
-          senderCompany: org?.name || pickup?.name || senderIdentity.name,
-          senderLine1: senderIdentity.line1,
-          senderLine2: senderIdentity.line2,
-          senderCity: senderIdentity.city || origin.city,
-          senderState: senderIdentity.state || origin.state,
-          senderPin: origin.pincode,
-          senderMobile: indiaPostMobile(senderIdentity.phone) || "",
+          senderName: merchantSender.senderName,
+          senderCompany: merchantSender.senderCompany,
+          senderLine1: merchantSender.senderLine1,
+          senderLine2: merchantSender.senderLine2,
+          senderCity: merchantSender.senderCity,
+          senderState: merchantSender.senderState,
+          senderPin: merchantSender.senderPin,
+          senderMobile: merchantSender.senderMobile,
           receiverName: address?.name ?? "",
           receiverCompany: address?.company_name || address?.name || "",
           receiverLine1: address?.line1 ?? "",
@@ -809,7 +856,6 @@ async function runIndiaPostBookingAttempt(
     barcode = shipmentBarcode(claimed.barcode) || barcode;
 
     try {
-      const senderMobile = indiaPostMobile(senderIdentity.phone);
       const receiverMobile = indiaPostMobile(address?.phone);
       const missingDims = !(
         Number(shipment.length_cm) > 0 &&
@@ -832,14 +878,14 @@ async function runIndiaPostBookingAttempt(
         lengthCm: Number(shipment.length_cm) || 0,
         widthCm: Number(shipment.width_cm) || 0,
         heightCm: Number(shipment.height_cm) || 0,
-        senderName: senderIdentity.name,
-        senderCompany: org?.name || pickup?.name || senderIdentity.name,
-        senderLine1: senderIdentity.line1,
-        senderLine2: senderIdentity.line2,
-        senderCity: senderIdentity.city || origin.city,
-        senderState: senderIdentity.state || origin.state,
-        senderPin: origin.pincode,
-        senderMobile: senderMobile || "",
+        senderName: merchantSender.senderName,
+        senderCompany: merchantSender.senderCompany,
+        senderLine1: merchantSender.senderLine1,
+        senderLine2: merchantSender.senderLine2,
+        senderCity: merchantSender.senderCity,
+        senderState: merchantSender.senderState,
+        senderPin: merchantSender.senderPin,
+        senderMobile: merchantSender.senderMobile,
         receiverName: address?.name ?? "",
         receiverCompany: address?.company_name || address?.name || "",
         receiverLine1: address?.line1 ?? "",
@@ -1212,6 +1258,8 @@ async function runIndiaPostBookingAttempt(
           tariff: ok.tariff,
           batchId: split.batchId,
           correlationId: split.correlationId,
+          customId: ok.customId,
+          mailBookingDomId: ok.mailBookingDomId,
           persistDefaults: item.persistDefaults,
           payload: item.payload,
         });

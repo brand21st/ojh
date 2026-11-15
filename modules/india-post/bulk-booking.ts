@@ -23,6 +23,7 @@ import { createManualOrder } from "@/modules/orders/service";
 import { shipmentCollectFromOrder } from "@/modules/orders/payment";
 import { bookingBoxWeightGrams, hasDeclaredBookingWeight } from "@/modules/orders/weight";
 import { applyWorkspaceParcelDefaults, parcelDefaultsFromConnection } from "@/modules/india-post/parcel-defaults";
+import { indiaPostMerchantSenderFields } from "@/modules/india-post/merchant-sender";
 import { organizationLabelSender } from "@/modules/organizations/label-sender";
 import { createShipmentsForOrders } from "@/modules/shipments/service";
 import { isIndiaPostAcceptedStatus } from "@/modules/india-post/booking-status";
@@ -175,7 +176,9 @@ export async function validateOrdersForBooking(
     .eq("is_active", true);
   const contractByService = new Map((contracts ?? []).map((row) => [row.service_code as string, row.contract_id as string]));
 
-  const sender = organizationLabelSender(store.org, store.pickup, store.shop?.shop_name);
+  const sender = indiaPostMerchantSenderFields(
+    organizationLabelSender(store.org, store.pickup, store.shop?.shop_name)
+  );
   const provider = indiaPostFromRow(store.connection);
   const aiAddressCheck = await isAiAddressCheckEnabled(supabase, ctx.organizationId);
   const refreshedAddresses = new Map<string, Awaited<ReturnType<typeof refreshAddressPrebooking>>>();
@@ -210,9 +213,9 @@ export async function validateOrdersForBooking(
       store.connection,
       {
         ...store.pickup,
-        pincode: sender.pincode || store.pickup?.pincode,
-        city: sender.city || store.pickup?.city,
-        state: sender.state || store.pickup?.state,
+        pincode: sender.senderPin || store.pickup?.pincode,
+        city: sender.senderCity || store.pickup?.city,
+        state: sender.senderState || store.pickup?.state,
       },
       destSample
     );
@@ -387,14 +390,14 @@ export async function validateOrdersForBooking(
       lengthCm: Number(existing?.length_cm) || 0,
       widthCm: Number(existing?.width_cm) || 0,
       heightCm: Number(existing?.height_cm) || 0,
-      senderName: sender.name,
-      senderCompany: store.org?.name || store.pickup?.name || sender.name,
-      senderLine1: sender.line1,
-      senderLine2: sender.line2,
-      senderCity: sender.city || origin.city,
-      senderState: sender.state || origin.state,
-      senderPin: origin.pincode,
-      senderMobile: indiaPostMobile(sender.phone) || "",
+      senderName: sender.senderName,
+      senderCompany: sender.senderCompany,
+      senderLine1: sender.senderLine1,
+      senderLine2: sender.senderLine2,
+      senderCity: sender.senderCity,
+      senderState: sender.senderState,
+      senderPin: sender.senderPin,
+      senderMobile: sender.senderMobile,
       receiverName: address?.name ?? "",
       receiverCompany: address?.company_name || address?.name || "",
       receiverLine1: address?.line1 ?? "",
@@ -578,11 +581,13 @@ export async function validateExcelBuffer(
     .eq("is_active", true)
     .maybeSingle();
   const contractId = contract?.contract_id || store.connection.contract_id;
-  const sender = organizationLabelSender(store.org, store.pickup, store.shop?.shop_name);
+  const sender = indiaPostMerchantSenderFields(
+    organizationLabelSender(store.org, store.pickup, store.shop?.shop_name)
+  );
   const provider = indiaPostFromRow(store.connection);
   let origin;
   try {
-    origin = await resolveIndiaPostOrigin(provider, store.connection, store.pickup, sender.pincode || "110001");
+    origin = await resolveIndiaPostOrigin(provider, store.connection, store.pickup, sender.senderPin || "110001");
   } catch (error) {
     const message = error instanceof Error ? error.message : "Pickup office is not configured.";
     return {

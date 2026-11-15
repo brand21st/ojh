@@ -24,14 +24,14 @@ function party(input: {
   taxReference?: string | null;
 }): DraftParty {
   const name = text(input.name);
-  const company = text(input.company) || name;
+  const company = text(input.company);
   const street = wrapIndiaPostAddressLines(input.line1, input.line2, input.line3, input.city);
   return {
     name,
     company,
-    line1: street.line1,
-    line2: street.line2,
-    line3: street.line3,
+    line1: street.overflow ? text(input.line1) : street.line1,
+    line2: street.overflow ? text(input.line2) || undefined : street.line2,
+    line3: street.overflow ? text(input.line3) || undefined : street.line3,
     city: text(input.city),
     state: text(input.state) || undefined,
     pincode: text(input.pincode),
@@ -116,7 +116,7 @@ export function mapShipmentToArticle(input: {
     }),
     receiver: party({
       name: input.receiverName,
-      company: input.receiverCompany,
+      company: input.receiverCompany || input.receiverName,
       line1: input.receiverLine1,
       line2: input.receiverLine2,
       line3: input.receiverLine3,
@@ -223,6 +223,7 @@ export function mapExcelRowToArticle(input: {
     codKind: isCod ? (codRaw === "codr" ? "CODR" : "COD") : "",
     insuranceType: row.insurance_type.trim().toUpperCase(),
     insuranceValue: Number(row.value_of_insurance) || 0,
+    declaredValue: Number(row.declared_value) || undefined,
     ack: flag(row.ack),
     reg: flag(row.reg),
     prepaymentCode: row.prepayment_code.trim().toUpperCase(),

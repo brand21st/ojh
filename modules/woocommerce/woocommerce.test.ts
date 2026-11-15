@@ -4,6 +4,7 @@ import { isBlockedIp, nextStoreRedirect, parsePublicStoreUrl, pinnedLookup } fro
 import { encryptSecret, decryptSecret } from "@/lib/security/crypto";
 import { shipmentCollectFromOrder } from "@/modules/orders/payment";
 import { merchantWooError, WooCommerceRequestError, wooRequest, wooRequestUrl } from "@/modules/woocommerce/client";
+import { wooAddressPhone } from "@/modules/woocommerce/orders";
 import { decideWooAuthCallback, publicWooConnection, WOO_ORDER_TOPICS } from "@/modules/woocommerce/connect";
 import { mapWooOrder, mergeWooMeasures, wooParcelFromLines, type WooRemoteOrder } from "@/modules/woocommerce/map-order";
 import { mapWooPayment } from "@/modules/woocommerce/payment";
@@ -357,5 +358,18 @@ describe("WooCommerce client", () => {
         }
       )
     ).rejects.toThrow(/reconnect your store/);
+  });
+});
+
+describe("wooAddressPhone", () => {
+  it("stores a 10-digit number and keeps the original country-code text", () => {
+    expect(wooAddressPhone("919632306200")).toEqual({ phone: "9632306200", original_phone: "919632306200" });
+    expect(wooAddressPhone("+919632306200")).toEqual({ phone: "9632306200", original_phone: "+919632306200" });
+    expect(wooAddressPhone("9108938854")).toEqual({ phone: "9108938854", original_phone: "9108938854" });
+  });
+
+  it("does not invent digits for an invalid number", () => {
+    expect(wooAddressPhone("12345")).toEqual({ phone: "12345", original_phone: "12345" });
+    expect(wooAddressPhone("")).toEqual({ phone: null, original_phone: null });
   });
 });

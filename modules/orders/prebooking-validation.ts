@@ -349,6 +349,7 @@ export function formattingSuggestion(address: StoredShippingFields) {
   }
   if (!removed && !messy) return null;
   const wrapped = wrapIndiaPostAddressLines(kept.join(", "));
+  if (wrapped.overflow) return null;
   const next = [wrapped.line1, wrapped.line2 ?? "", wrapped.line3 ?? ""];
   if (next.every((line, index) => collapse(line) === original[index])) return null;
   return {
@@ -451,16 +452,26 @@ export async function assessPrebookingAddress(
   }
   const fitted = wrapIndiaPostAddressLines(current.line1, current.line2, current.line3, current.city);
   if (
-    fitted.line1 !== collapse(current.line1) ||
-    (fitted.line2 ?? "") !== collapse(current.line2) ||
-    (fitted.line3 ?? "") !== collapse(current.line3)
+    !fitted.overflow &&
+    (fitted.line1 !== collapse(current.line1) ||
+      (fitted.line2 ?? "") !== collapse(current.line2) ||
+      (fitted.line3 ?? "") !== collapse(current.line3))
   ) {
     current = { ...current, line1: fitted.line1, line2: fitted.line2 ?? "", line3: fitted.line3 ?? "" };
     autoCorrected = true;
   }
   const classified = classifyStoredShippingAddress(current);
   const issues: PrebookingIssue[] = classified.issues.map((issue) => ({ ...issue, field: issue.field || "address" }));
+  if (fitted.overflow) {
+    issues.push({
+      code: "address_overflow",
+      field: "line1",
+      message: "This address is longer than India Post allows (three lines of 80 characters). Shorten it before booking.",
+      blocking: true,
+    });
+  }
   let status: AddressValidationStatus = classified.status;
+  if (fitted.overflow && status !== "INVALID") status = "NEEDS_REVIEW";
   if (status !== "INVALID" && missingHouse(current)) {
     status = "NEEDS_REVIEW";
     issues.push({
@@ -522,8 +533,10 @@ export async function assessPrebookingAddress(
       const contact = contactFromStored(next);
       const suggestion = await requestAiAddressSuggestion(contact);
       const applied = suggestion ? applyAiAddressSuggestion(contact, suggestion) : null;
-      if (applied) {
-        const wrapped = wrapIndiaPostAddressLines(applied.line1, applied.line2, applied.line3, applied.city);
+      const wrapped = applied
+        ? wrapIndiaPostAddressLines(applied.line1, applied.line2, applied.line3, applied.city)
+        : null;
+      if (applied && wrapped && !wrapped.overflow) {
         const lines = { line1: wrapped.line1, line2: wrapped.line2 ?? "", line3: wrapped.line3 ?? "" };
         const changed =
           streetLines(lines).join("|") !== streetLines(contact).join("|") ||

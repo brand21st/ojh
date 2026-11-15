@@ -363,6 +363,9 @@ export function normalizeShopifyShipping(order: ShopifyShippingSource): Normaliz
   const line1Parts = landmarkAt > 0 ? parts.slice(0, landmarkAt) : parts;
   const line2Parts = landmarkAt > 0 ? parts.slice(landmarkAt) : [];
   const wrapped = wrapIndiaPostAddressLines(line1Parts.join(", "), line2Parts.join(", "));
+  const street = wrapped.overflow
+    ? { line1: line1Parts.join(", "), line2: line2Parts.join(", "), line3: "" }
+    : { line1: wrapped.line1, line2: wrapped.line2 ?? "", line3: wrapped.line3 ?? "" };
   const countryCode = collapse(shipping.country_code || shipping.country || "IN").toUpperCase() || "IN";
   const country = countryCode === "INDIA" ? "IN" : countryCode;
 
@@ -372,9 +375,9 @@ export function normalizeShopifyShipping(order: ShopifyShippingSource): Normaliz
     phone: phone.phone,
     phoneSource: phone.source,
     originalPhone: phone.original,
-    line1: wrapped.line1,
-    line2: wrapped.line2 ?? "",
-    line3: wrapped.line3 ?? "",
+    line1: street.line1,
+    line2: street.line2,
+    line3: street.line3,
     city,
     state,
     pincode,
@@ -397,9 +400,9 @@ export function normalizeShopifyShipping(order: ShopifyShippingSource): Normaliz
     originalPhone: phone.original,
     phoneSource: phone.source,
     company: collapse(shipping.company),
-    line1: wrapped.line1,
-    line2: wrapped.line2 ?? "",
-    line3: wrapped.line3 ?? "",
+    line1: street.line1,
+    line2: street.line2,
+    line3: street.line3,
     city,
     state,
     pincode,

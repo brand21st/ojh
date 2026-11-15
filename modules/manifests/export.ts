@@ -1,3 +1,4 @@
+import { indiaPostMobile } from "@/modules/india-post/endpoints";
 import { writeWorkbook } from "@/lib/xlsx/write";
 import type { ManifestDetail, ManifestSender } from "@/modules/manifests/service";
 
@@ -37,6 +38,11 @@ function cm(value: number | null) {
   return value != null && value > 0 ? value : "";
 }
 
+/** 10-digit national number when the stored value is a valid Indian mobile; otherwise the original text. */
+function mobileCell(phone?: string | null) {
+  return indiaPostMobile(phone) ?? phone ?? "";
+}
+
 export function manifestExportRows(manifest: ManifestDetail, sender: Pick<ManifestSender, "city" | "state" | "pincode" | "phone">) {
   return manifest.lines.map((line, index) => [
     index + 1,
@@ -55,7 +61,7 @@ export function manifestExportRows(manifest: ManifestDetail, sender: Pick<Manife
     line.line1 ?? "",
     line.line2 ?? "",
     line.line3 ?? "",
-    line.phone ?? "",
+    mobileCell(line.phone),
     line.email ?? "",
     cm(line.lengthCm),
     cm(line.widthCm),
@@ -63,7 +69,7 @@ export function manifestExportRows(manifest: ManifestDetail, sender: Pick<Manife
     sender.city ?? "",
     sender.state ?? "",
     sender.pincode ?? "",
-    sender.phone ?? "",
+    mobileCell(sender.phone),
     manifest.officeId ?? "",
   ]);
 }

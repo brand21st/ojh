@@ -51,3 +51,13 @@ describe("csv", () => {
     expect(toCsv([["=SUM(A1)", 'x"y', 5]])).toBe(`'=SUM(A1),"x""y",5\r\n`);
   });
 });
+
+describe("xlsx formula injection", () => {
+  it("prefixes a leading formula character so Excel stores it as text", async () => {
+    const bytes = await writeWorkbook([{ name: "Manifest", rows: [["Order"], ["=HYPERLINK(1)"], ["+cmd"], ["safe"]] }]);
+    const sheets = await readWorkbook(bytes);
+    expect(sheets[0]!.rows[1]![0]).toBe("'=HYPERLINK(1)");
+    expect(sheets[0]!.rows[2]![0]).toBe("'+cmd");
+    expect(sheets[0]!.rows[3]![0]).toBe("safe");
+  });
+});
