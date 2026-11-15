@@ -1,3 +1,4 @@
+import { createTransport } from "nodemailer";
 import { manifestEmailEnabled, manifestSmtpConfig } from "@/modules/manifest-email/config";
 
 export type OutboundManifestMail = {
@@ -27,13 +28,6 @@ export type SmtpFailure = {
 export type SmtpTransport = {
   sendMail: (message: Record<string, unknown>) => Promise<{ messageId?: string; response?: string }>;
 };
-
-function loadNodemailer(): { createTransport: (options: Record<string, unknown>) => SmtpTransport } {
-  const load = new Function("name", "return require(name)") as (name: string) => {
-    createTransport: (options: Record<string, unknown>) => SmtpTransport;
-  };
-  return load("nodemailer");
-}
 
 export function formatMailbox(name: string, email: string) {
   const safe = name.replace(/[\r\n<>"]/g, "").trim() || "PostBus Manifest Service";
@@ -69,7 +63,7 @@ export function classifySmtpFailure(error: unknown, phase: "CONNECTING" | "SUBMI
       : { kind: "permanent", code: `SMTP_${responseCode}`, message };
   }
   if (CONNECT_CODES.has(code)) return { kind: "retry", code, message };
-  if (phase === "SUBMITTED" && (AMBIGUOUS_CODES.has(code) || code === "SMTP_ERROR")) {
+  if (phase === "SUBMITTED" && AMBIGUOUS_CODES.has(code)) {
     return { kind: "unknown", code, message };
   }
   if (AMBIGUOUS_CODES.has(code)) return { kind: "retry", code, message };
@@ -78,7 +72,7 @@ export function classifySmtpFailure(error: unknown, phase: "CONNECTING" | "SUBMI
 
 export function createManifestMailTransport(): SmtpTransport {
   const smtp = manifestSmtpConfig();
-  return loadNodemailer().createTransport({
+  return createTransport({
     host: smtp.host,
     port: smtp.port,
     secure: smtp.secure,
@@ -86,12 +80,12 @@ export function createManifestMailTransport(): SmtpTransport {
     connectionTimeout: 15_000,
     greetingTimeout: 15_000,
     socketTimeout: 30_000,
-  });
+  }) as SmtpTransport;
 }
 
 export async function sendManifestMail(
   mail: OutboundManifestMail,
-  transport: SmtpTransport = createManifestMailTransport()
+  transport?: SmtpTransport
 ): Promise<MailAccepted> {
   if (!manifestEmailEnabled()) {
     throw Object.assign(new Error("Manifest email is turned off on this server."), { code: "MANIFEST_EMAIL_DISABLED" });
@@ -100,7 +94,7 @@ export async function sendManifestMail(
   if (!smtp.host || !smtp.fromEmail) {
     throw Object.assign(new Error("The mail server is not configured."), { code: "SMTP_NOT_CONFIGURED" });
   }
-  const info = await transport.sendMail({
+  const info = await (transport ?? createManifestMailTransport()).sendMail({
     from: formatMailbox(smtp.fromName, smtp.fromEmail),
     to: mail.to,
     cc: mail.cc.length ? mail.cc : undefined,

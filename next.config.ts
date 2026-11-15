@@ -17,7 +17,7 @@ const nextConfig: NextConfig = {
   allowedDevOrigins: ["127.0.0.1"],
   poweredByHeader: false,
   compress: true,
-  serverExternalPackages: ["bullmq", "ioredis", "@napi-rs/canvas", "sharp"],
+  serverExternalPackages: ["bullmq", "ioredis", "@napi-rs/canvas", "sharp", "nodemailer"],
   turbopack: {
     resolveAlias: {
       "@napi-rs/canvas": { browser: canvasStub },

@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { describe, expect, it, vi } from "vitest";
 import { classifySmtpFailure, formatMailbox, sanitizeMailError } from "@/modules/manifest-email/smtp";
 
 describe("manifest smtp outcomes", () => {
@@ -22,5 +23,17 @@ describe("manifest smtp outcomes", () => {
     process.env.MANIFEST_SMTP_PASSWORD = "super-secret-pass";
     expect(sanitizeMailError(new Error("auth failed for super-secret-pass"))).not.toContain("super-secret-pass");
     delete process.env.MANIFEST_SMTP_PASSWORD;
+  });
+
+  it("loads nodemailer as a Node import, not a Function require", () => {
+    const source = readFileSync("modules/manifest-email/smtp.ts", "utf8");
+    expect(source).not.toMatch(/new Function\([\s\S]*require/);
+    expect(source).toMatch(/from ["']nodemailer["']/);
+  });
+
+  it("retries a missing-require crash instead of treating it as maybe-sent", () => {
+    expect(
+      classifySmtpFailure(Object.assign(new Error("require is not defined"), { code: "SMTP_ERROR" }), "SUBMITTED").kind
+    ).toBe("retry");
   });
 });
