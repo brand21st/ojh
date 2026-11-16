@@ -12,7 +12,6 @@ import {
   FileText,
   Grid2X2,
   HelpCircle,
-  Layers3,
   Minus,
   MousePointer2,
   Plus,
@@ -70,7 +69,7 @@ import {
   marqueeRect,
   type SlotBox,
 } from "@/modules/labels/multi-up/align";
-import { nextGroupFromList, sheetGroups } from "@/modules/labels/multi-up/group";
+import { nextGroupFromList } from "@/modules/labels/multi-up/group";
 import { MAX_LABELS } from "@/modules/labels/multi-up/request";
 import {
   labelCopyCount,
@@ -114,7 +113,6 @@ type TemplateResponse = { template: LabelTemplate };
 type SheetChoice = MultiPrintPaperId | "custom";
 type CopyRow = { orderId: string; copies: number };
 type LayoutMode = "preset" | "manual";
-type WorkflowStep = "labels" | "layout" | "review";
 
 const emptyMargins = { topMm: 0, rightMm: 0, bottomMm: 0, leftMm: 0 };
 const CANVAS_ZOOM_MIN = 0.25;
@@ -203,9 +201,9 @@ function OrderIdChip({
         aria-pressed={false}
         onClick={() => onSelect(number)}
         className={cn(
-          "rounded-full border px-2.5 py-1.5 text-xs font-medium transition-all duration-200",
+          "h-7 max-w-full cursor-pointer whitespace-nowrap rounded-full border px-2.5 text-xs font-medium transition-[color,background-color,border-color,transform,box-shadow] duration-200 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 motion-safe:active:scale-95",
           chip.printed
-            ? "border-zinc-200 bg-zinc-100 text-zinc-500 hover:border-zinc-300 hover:bg-zinc-200"
+            ? "border-zinc-200 bg-zinc-100 text-zinc-600 hover:border-zinc-300 hover:bg-zinc-200"
             : "border-border bg-card text-foreground hover:border-zinc-300 hover:bg-surface-soft"
         )}
       >
@@ -216,23 +214,23 @@ function OrderIdChip({
   return (
     <div
       className={cn(
-        "inline-flex h-[29px] items-center overflow-hidden rounded-full border shadow-sm",
-        chip.printed ? "border-zinc-200 bg-zinc-100 text-zinc-500" : "border-brand/30 bg-rose-50 text-brand-dark"
+        "inline-flex h-7 max-w-full items-center overflow-hidden rounded-full border shadow-sm transition-[color,background-color,border-color,transform,box-shadow] duration-200 ease-out",
+        chip.printed ? "border-zinc-200 bg-zinc-100 text-zinc-600" : "border-brand/30 bg-rose-50 text-brand-dark"
       )}
     >
       <button
         type="button"
         aria-pressed="true"
         onClick={() => onSelect(number)}
-        className="px-2.5 py-1.5 text-xs font-medium transition-all duration-200"
+        className="h-7 min-w-0 cursor-pointer truncate px-2.5 text-xs font-medium whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 motion-safe:active:scale-95"
       >
         {number}
       </button>
       <button
         type="button"
         className={cn(
-          "mr-1 flex size-5 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-red-100 hover:text-red-700",
-          chip.printed ? "text-zinc-400" : "text-brand-dark/70"
+          "mr-0.5 flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-full transition-colors duration-200 hover:bg-red-100 hover:text-red-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand motion-safe:active:scale-95",
+          chip.printed ? "text-zinc-500" : "text-brand-dark"
         )}
         onClick={() => onRemove(number)}
         aria-label={`Remove ${number} from print order`}
@@ -379,7 +377,6 @@ export function MultiPrintScreen() {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const previewBlob = useRef<Blob | null>(null);
   const [busy, setBusy] = useState<"preview" | "download" | "print" | null>(null);
-  const [workflowStep, setWorkflowStep] = useState<WorkflowStep>("labels");
   const [showPdfPreview, setShowPdfPreview] = useState(false);
   const [previewDialogOpen, setPreviewDialogOpen] = useState(false);
   const [manual, setManual] = useState(false);
@@ -1196,15 +1193,15 @@ export function MultiPrintScreen() {
 
   const outputActions = (
     <>
-      <Button type="button" variant="secondary" onClick={preview} disabled={Boolean(busy) || !items.length || layout?.ok === false}>
+      <Button type="button" size="sm" variant="secondary" className="h-8 motion-safe:active:scale-[0.98]" onClick={preview} disabled={Boolean(busy) || !items.length || layout?.ok === false}>
         <Eye />
         {busy === "preview" ? "Building…" : "Preview PDF"}
       </Button>
-      <Button type="button" variant="secondary" onClick={download} disabled={Boolean(busy) || !items.length || layout?.ok === false}>
+      <Button type="button" size="sm" variant="secondary" className="h-8 motion-safe:active:scale-[0.98]" onClick={download} disabled={Boolean(busy) || !items.length || layout?.ok === false}>
         <Download />
         Download PDF
       </Button>
-      <Button type="button" onClick={print} disabled={Boolean(busy) || !canPrint}>
+      <Button type="button" size="sm" className="h-8 motion-safe:active:scale-[0.98]" onClick={print} disabled={Boolean(busy) || !canPrint}>
         <Printer />
         {busy === "print" ? "Sending…" : "Print"}
       </Button>
@@ -1212,104 +1209,86 @@ export function MultiPrintScreen() {
   );
 
   return (
-    <div className="space-y-5 pb-20 sm:pb-0">
+    <div className="space-y-4 pb-[calc(5.25rem+env(safe-area-inset-bottom))] md:pb-0">
       <PageHeader
-        title="Multi print labels"
-        description="Choose generated labels, arrange them on a sheet, then preview or print one PDF."
-        actions={<div className="hidden items-center gap-2 lg:flex">{outputActions}</div>}
+        title="Multi print"
+        description="Pick orders, choose how many fit on a page, then print one PDF."
+        actions={<div className="hidden items-center gap-2 md:flex">{outputActions}</div>}
       />
 
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4" aria-live="polite">
-        {[
-          { label: "Selected", value: `${labelCount} labels`, icon: FileText },
-          { label: "Sheets", value: layout?.ok ? String(pages) : "—", icon: Layers3 },
-          { label: "Layout", value: presetCaption(chosenFourBySix, layoutMode === "preset" ? "No label fit" : "Manual"), icon: Grid2X2 },
-          {
-            label: "Printer",
-            value: canPrint ? "Ready" : station.data?.connected ? "Check paper" : "Offline",
-            icon: Printer,
-          },
-        ].map(({ label: statLabel, value, icon: Icon }) => (
-          <div key={statLabel} className="flex items-center gap-3 rounded-xl border border-border bg-card px-3 py-2.5 shadow-sm">
-            <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-surface-soft text-muted">
-              <Icon className="size-4" />
-            </span>
-            <span className="min-w-0">
-              <span className="block text-[11px] font-medium uppercase tracking-wide text-muted">{statLabel}</span>
-              <span className="block truncate text-sm font-semibold text-ink">{value}</span>
-            </span>
-          </div>
-        ))}
+      <div
+        className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-xl border border-border bg-card px-4 py-3 text-sm"
+        aria-live="polite"
+      >
+        <p>
+          <span className="text-muted">Selected </span>
+          <span className="font-semibold text-ink">{labelCount} {labelCount === 1 ? "label" : "labels"}</span>
+        </p>
+        <p>
+          <span className="text-muted">Sheets </span>
+          <span className="font-semibold text-ink">{layout?.ok ? pages : "—"}</span>
+        </p>
+        <p className="min-w-0">
+          <span className="text-muted">Layout </span>
+          <span className="font-semibold text-ink">{presetCaption(chosenFourBySix, layoutMode === "preset" ? "No label fit" : "Manual")}</span>
+        </p>
+        <p className="flex min-w-0 items-center gap-2 md:ml-auto">
+          <span className={cn("size-2 shrink-0 rounded-full", canPrint ? "bg-emerald-600" : "bg-zinc-400")} aria-hidden />
+          <span className="text-ink">{printerMessage}</span>
+        </p>
       </div>
 
-      <div className="grid items-start gap-5 xl:grid-cols-[340px_minmax(0,1fr)]">
-        <Card className="xl:sticky xl:top-4 xl:max-h-[calc(100vh-2rem)] xl:overflow-hidden">
-          <CardHeader className="border-b border-border p-4">
-            <CardTitle>Prepare your sheets</CardTitle>
-            <CardDescription>Three quick steps. Your choices stay in place while you move between them.</CardDescription>
-            <div className="mt-2 grid grid-cols-3 gap-1 rounded-xl border border-border bg-surface-soft p-1" role="tablist" aria-label="Multi print workflow">
-              {([
-                ["labels", "1", "Labels"],
-                ["layout", "2", "Arrange"],
-                ["review", "3", "Review"],
-              ] as const).map(([step, number, labelText]) => {
-                const complete = step === "labels" ? labelCount > 0 : step === "layout" ? Boolean(layout?.ok && labelCount) : Boolean(previewUrl);
-                return (
-                  <button
-                    key={step}
-                    type="button"
-                    role="tab"
-                    aria-selected={workflowStep === step}
-                    onClick={() => setWorkflowStep(step)}
-                    className={cn(
-                      "flex min-w-0 items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-xs font-semibold transition-all duration-200",
-                      workflowStep === step ? "bg-card text-ink shadow-sm" : "text-muted hover:text-foreground"
-                    )}
-                  >
-                    <span className={cn("flex size-5 items-center justify-center rounded-full text-[10px]", complete ? "bg-emerald-100 text-emerald-700" : "bg-zinc-200 text-zinc-600")}>
-                      {complete ? <CheckCircle2 className="size-3.5" /> : number}
-                    </span>
-                    <span className="truncate">{labelText}</span>
-                  </button>
-                );
-              })}
-            </div>
+      <div className="grid items-start gap-4 lg:grid-cols-[minmax(18rem,22rem)_minmax(0,1fr)]">
+        <Card className="lg:sticky lg:top-4 lg:max-h-[calc(100vh-6.5rem)] lg:overflow-hidden">
+          <CardHeader className="border-b border-border p-3">
+            <CardTitle className="text-sm">Build the sheet</CardTitle>
+            <CardDescription className="text-xs">Pick orders and a page size. The preview updates as you go.</CardDescription>
           </CardHeader>
-
-          <CardContent className="max-h-[calc(100vh-13rem)] space-y-4 overflow-y-auto p-4">
-            {workflowStep === "labels" ? (
-              <>
-                <div>
-                  <div className="flex items-center justify-between gap-2">
-                    <h2 className="text-sm font-semibold text-ink">1. Choose labels</h2>
-                    <Badge variant="brand">{labelCount} selected</Badge>
-                  </div>
-                  <p className="mt-1 text-xs leading-5 text-muted">Only orders with a generated label appear here. Selecting a chip fills one sheet using the current quantity preset.</p>
+          <CardContent className="space-y-3 p-3 lg:max-h-[calc(100vh-9.5rem)] lg:overflow-y-auto">
+                <div className="flex items-center justify-between gap-2">
+                  <h2 className="text-sm font-semibold text-ink">1. Pick orders</h2>
+                  <Badge variant="brand" className="h-5 px-2 py-0 text-[11px]">{labelCount} selected</Badge>
                 </div>
 
-                <div className="flex gap-2">
-                  <Input value={draftOrder} onChange={(event) => setDraftOrder(event.target.value)} placeholder="Enter Order ID" aria-label="Order ID" />
-                  <Input className="w-16" value={draftCopies} onChange={(event) => setDraftCopies(event.target.value)} aria-label="Copies" title="Copies" />
-                  <Button type="button" size="icon" variant="secondary" onClick={() => addItem(draftOrder)} aria-label="Add order" title="Add order">
+                <form
+                  className="grid grid-cols-[1fr_3.25rem_4.75rem] items-end gap-1.5"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    addItem(draftOrder);
+                  }}
+                >
+                  <label className="space-y-1 text-xs font-medium text-ink">
+                    Order ID
+                    <Input className="h-8 px-2.5 text-xs" value={draftOrder} onChange={(event) => setDraftOrder(event.target.value)} placeholder="e.g. 1042" autoComplete="off" />
+                  </label>
+                  <label className="space-y-1 text-xs font-medium text-ink">
+                    Copies
+                    <Input className="h-8 px-2 text-xs" value={draftCopies} onChange={(event) => setDraftCopies(event.target.value)} inputMode="numeric" />
+                  </label>
+                  <Button type="submit" size="sm" className="h-8 px-2.5 motion-safe:active:scale-95" aria-label="Add order">
                     <Plus />
+                    Add
                   </Button>
-                </div>
+                </form>
 
                 <div className="space-y-2">
                   <div className="flex items-center justify-between gap-2">
-                    <p className="text-xs font-medium text-muted">Generated labels</p>
+                    <p className="text-xs font-medium text-ink">Generated labels</p>
                     {labels.isPending ? null : (
                       <p className="text-xs font-semibold text-ink">
                         {chipCountLine(todayCount, earlierCount, printedCount) || `${labeledOrders.length} order IDs`}
                       </p>
                     )}
                   </div>
-                  <Input
-                    value={labelSearch}
-                    onChange={(event) => setLabelSearch(event.target.value)}
-                    placeholder="Search order ID"
-                    aria-label="Search generated labels"
-                  />
+                  <label className="block space-y-1 text-xs font-medium text-ink">
+                    Search
+                    <Input
+                      className="h-8 px-2.5 text-xs"
+                      value={labelSearch}
+                      onChange={(event) => setLabelSearch(event.target.value)}
+                      placeholder="Order ID"
+                    />
+                  </label>
                   {labels.isPending ? (
                     <div className="flex flex-wrap gap-2">
                       {Array.from({ length: 8 }, (_, index) => <Skeleton key={index} className="h-8 w-16 rounded-full" />)}
@@ -1322,7 +1301,8 @@ export function MultiPrintScreen() {
                       </Button>
                     </div>
                   ) : labeledOrders.length ? (
-                    <div className="space-y-2.5">
+                    <>
+                    <div className="max-h-40 space-y-2 overflow-y-auto pr-0.5">
                       {([
                         ["Today", labeledOrderGroups.today],
                         ["Earlier", labeledOrderGroups.earlier],
@@ -1331,7 +1311,7 @@ export function MultiPrintScreen() {
                         .filter(([, chips]) => chips.length)
                         .map(([title, chips]) => (
                           <div key={title} className="space-y-1">
-                            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">{title}</p>
+                            <p className="text-xs font-semibold uppercase tracking-wide text-muted">{title}</p>
                             <div className="flex flex-wrap gap-1.5">
                               {chips.map((chip) => (
                                 <OrderIdChip
@@ -1345,6 +1325,7 @@ export function MultiPrintScreen() {
                             </div>
                           </div>
                         ))}
+                    </div>
                       <div className="flex items-center justify-between gap-2">
                         <p className="text-xs text-muted">
                           Showing {loadedLabelRows.length} of {labelsTotal}
@@ -1361,7 +1342,7 @@ export function MultiPrintScreen() {
                           </Button>
                         ) : null}
                       </div>
-                    </div>
+                    </>
                   ) : (
                     <div className="rounded-xl border border-dashed border-border bg-surface-soft p-4 text-center">
                       <FileText className="mx-auto size-5 text-muted" />
@@ -1375,63 +1356,54 @@ export function MultiPrintScreen() {
 
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
-                    <p className="text-xs font-medium text-muted">Print order</p>
+                    <p className="text-xs font-medium text-ink">On this print</p>
                     {items.length ? (
-                      <button type="button" className="text-xs font-medium text-brand hover:underline" onClick={() => setItems([])}>
+                      <button type="button" className="h-7 cursor-pointer px-1.5 text-xs font-medium text-brand underline-offset-2 transition-colors duration-200 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1" onClick={() => setItems([])}>
                         Clear all
                       </button>
                     ) : null}
                   </div>
                   {items.length ? (
-                    <ul className="space-y-1.5">
+                    <ul className="space-y-1">
                       {items.map((item, index) => (
-                        <li key={`${item.orderId}-${index}`} className="flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-2">
-                          <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-surface-soft text-[11px] font-semibold text-muted">{index + 1}</span>
-                          <span className="min-w-0 flex-1 truncate text-sm font-medium">{item.orderId}</span>
-                          <span className="text-xs text-muted">×{item.copies}</span>
+                        <li key={`${item.orderId}-${index}`} className="flex h-8 items-center gap-1.5 rounded-lg border border-border bg-card px-2 transition-colors duration-200">
+                          <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-surface-soft text-[11px] font-semibold text-muted">{index + 1}</span>
+                          <span className="min-w-0 flex-1 truncate whitespace-nowrap text-xs font-medium">{item.orderId}</span>
+                          <span className="shrink-0 text-[11px] text-muted">×{item.copies}</span>
                           <button
                             type="button"
-                            className="rounded-md p-1 text-muted transition-colors hover:bg-red-50 hover:text-red-700"
+                            className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted transition-colors duration-200 hover:bg-red-50 hover:text-red-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand motion-safe:active:scale-95"
                             onClick={() => setItems((current) => current.filter((_, itemIndex) => itemIndex !== index))}
                             aria-label={`Remove ${item.orderId}`}
                             title="Remove"
                           >
-                            <X className="size-3.5" />
+                            <X className="size-3" />
                           </button>
                         </li>
                       ))}
                     </ul>
                   ) : (
-                    <p className="rounded-xl bg-surface-soft px-3 py-3 text-xs text-muted">Select an Order ID above to start your first sheet.</p>
+                    <p className="rounded-lg bg-surface-soft px-2.5 py-2 text-xs text-muted">Select an order. It shows up here and on the sheet.</p>
                   )}
                 </div>
 
-                <Button type="button" className="w-full" disabled={!items.length} onClick={() => setWorkflowStep("layout")}>
-                  Arrange sheets
-                  <ChevronRight />
-                </Button>
-              </>
-            ) : null}
-
-            {workflowStep === "layout" ? (
-              <>
-                <div>
+                <div className="border-t border-border pt-3">
                   <div className="flex items-center justify-between gap-2">
-                    <h2 className="text-sm font-semibold text-ink">2. Arrange sheet</h2>
-                    <Badge variant={presetOn ? "brand" : "outline"}>
+                    <h2 className="text-sm font-semibold text-ink">2. Page setup</h2>
+                    <Badge variant={presetOn ? "brand" : "outline"} className="h-5 max-w-[11rem] truncate px-2 py-0 text-[11px]">
                       {presetCaption(chosenFourBySix, layoutMode === "preset" ? "No label fit" : "Manual")}
                     </Badge>
                   </div>
-                  <p className="mt-1 text-xs leading-5 text-muted">
-                    Paper size is independent of the label template ({Math.round(slotLabel?.widthMm ?? LABEL_4X6.widthMm)} × {Math.round(slotLabel?.heightMm ?? LABEL_4X6.heightMm)} mm). Quantity presets use that size at 100%. The A4 2×2 option only scales a 4×6 template down to fit.
+                  <p className="mt-1 text-xs leading-4 text-muted">
+                    Label {Math.round(slotLabel?.widthMm ?? LABEL_4X6.widthMm)} × {Math.round(slotLabel?.heightMm ?? LABEL_4X6.heightMm)} mm. Drag labels on the preview if you need a custom arrangement.
                   </p>
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="block space-y-1.5 text-xs font-medium text-muted">
+                  <label className="block space-y-1 text-xs font-medium text-ink">
                     Label template
                     <select
-                      className="h-10 w-full rounded-[var(--radius-input)] border border-border bg-card px-3 text-sm text-foreground"
+                      className="h-8 w-full cursor-pointer rounded-[var(--radius-input)] border border-border bg-card px-2.5 text-xs text-foreground transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1"
                       value={selectedId}
                       onChange={(event) => {
                         setJustSavedDefault(false);
@@ -1481,17 +1453,11 @@ export function MultiPrintScreen() {
                   ) : null}
                 </div>
 
-                <div className="space-y-3 rounded-xl border border-border bg-surface-soft p-3">
-                  <div>
-                    <p className="text-sm font-semibold text-ink">Multi-Print</p>
-                    <p className="mt-0.5 text-xs leading-5 text-muted">
-                      Choose paper, then a quantity that physically fits the selected template. Positions initialize once; you can still move and align labels after that.
-                    </p>
-                  </div>
-                  <label className="block space-y-1.5 text-xs font-medium text-muted">
+                <div className="space-y-2 rounded-xl border border-border bg-surface-soft p-2.5">
+                  <label className="block space-y-1 text-xs font-medium text-ink">
                     Paper
                     <select
-                      className="h-10 w-full rounded-[var(--radius-input)] border border-border bg-card px-3 text-sm text-foreground"
+                      className="h-8 w-full cursor-pointer rounded-[var(--radius-input)] border border-border bg-card px-2.5 text-xs text-foreground transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1"
                       value={paper}
                       onChange={(event) => {
                         const next = event.target.value as SheetChoice;
@@ -1513,14 +1479,14 @@ export function MultiPrintScreen() {
                   </label>
                   {paper === "custom" ? (
                     <div className="grid grid-cols-2 gap-2">
-                      <label className="space-y-1 text-xs text-muted">Width (mm)<Input value={customWidth} onChange={(event) => setCustomWidth(event.target.value)} /></label>
-                      <label className="space-y-1 text-xs text-muted">Height (mm)<Input value={customHeight} onChange={(event) => setCustomHeight(event.target.value)} /></label>
+                      <label className="space-y-1 text-xs text-muted">Width (mm)<Input className="h-8 px-2 text-xs" value={customWidth} onChange={(event) => setCustomWidth(event.target.value)} /></label>
+                      <label className="space-y-1 text-xs text-muted">Height (mm)<Input className="h-8 px-2 text-xs" value={customHeight} onChange={(event) => setCustomHeight(event.target.value)} /></label>
                     </div>
                   ) : null}
                   <div className="space-y-1.5">
-                    <p className="text-xs font-medium text-muted">Available presets</p>
+                    <p className="text-xs font-medium text-ink">How many on a page</p>
                     {fourBySixPresets.length ? (
-                      <div className="flex flex-col gap-1.5" role="radiogroup" aria-label="Label quantity preset">
+                      <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Label quantity preset">
                         {fourBySixPresets.map((item) => {
                           const selectedPreset = presetOn && chosenFourBySix?.id === item.id;
                           const copy = presetChoiceCopy(item);
@@ -1530,29 +1496,17 @@ export function MultiPrintScreen() {
                               type="button"
                               role="radio"
                               aria-checked={selectedPreset}
+                              aria-label={`${copy.title}. ${copy.hint}`}
+                              title={copy.hint}
                               className={cn(
-                                "flex w-full items-center gap-3 rounded-xl border px-3 py-2 text-left transition-all duration-200",
+                                "h-7 max-w-full cursor-pointer whitespace-nowrap rounded-full border px-2.5 text-xs font-semibold transition-[color,background-color,border-color,transform,box-shadow] duration-200 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 motion-safe:active:scale-95",
                                 selectedPreset
                                   ? "border-brand bg-brand text-white shadow-sm"
                                   : "border-border bg-card text-foreground hover:border-zinc-300 hover:bg-white dark:hover:border-zinc-700"
                               )}
                               onClick={() => applyFourBySixPreset(item.quantity)}
                             >
-                              <span
-                                className={cn(
-                                  "flex size-8 shrink-0 items-center justify-center rounded-lg text-sm font-bold tabular-nums",
-                                  selectedPreset ? "bg-white/20" : "bg-surface-soft text-ink"
-                                )}
-                              >
-                                {item.quantity}
-                              </span>
-                              <span className="min-w-0 flex-1">
-                                <span className="block text-sm font-semibold leading-5">{copy.title}</span>
-                                <span className={cn("block truncate text-[11px] leading-4", selectedPreset ? "text-white/80" : "text-muted")}>
-                                  {copy.hint}
-                                </span>
-                              </span>
-                              {selectedPreset ? <CheckCircle2 className="size-4 shrink-0" /> : null}
+                              {copy.title}
                             </button>
                           );
                         })}
@@ -1564,93 +1518,39 @@ export function MultiPrintScreen() {
                 </div>
 
                 <details className="group rounded-xl border border-border bg-card">
-                  <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-3 text-sm font-medium">
+                  <summary className="flex h-8 cursor-pointer list-none items-center gap-2 px-2.5 text-xs font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1">
                     <SlidersHorizontal className="size-4 text-muted" />
                     Advanced layout
                     <ChevronDown className="ml-auto size-4 text-muted transition-transform duration-200 group-open:rotate-180" />
                   </summary>
                   <div className="space-y-3 border-t border-border p-3">
-                    <p className="text-xs text-muted">Change margins, gaps, rotation, label size, rows, or columns.</p>
+                    <p className="text-sm leading-6 text-muted">Margins, gaps, rotation, label size, rows, and columns. Changing these switches to a manual layout.</p>
                     <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                       {(["topMm", "rightMm", "bottomMm", "leftMm"] as const).map((key) => (
-                        <label key={key} className="space-y-1 text-[11px] capitalize text-muted">
+                        <label key={key} className="space-y-1 text-xs font-medium capitalize text-muted">
                           {key.replace("Mm", "")} (mm)
-                          <Input value={String(activeMargins[key])} onChange={(event) => { markManual(); setMargins((current) => ({ ...current, [key]: Number(event.target.value) || 0 })); }} />
+                          <Input className="h-8 px-2 text-xs" value={String(activeMargins[key])} onChange={(event) => { markManual(); setMargins((current) => ({ ...current, [key]: Number(event.target.value) || 0 })); }} />
                         </label>
                       ))}
                     </div>
                     <div className="grid grid-cols-2 gap-2">
-                      <label className="space-y-1 text-[11px] text-muted">Horizontal gap (mm)<Input value={activeGapX} onChange={(event) => { markManual(); setGapX(event.target.value); }} /></label>
-                      <label className="space-y-1 text-[11px] text-muted">Vertical gap (mm)<Input value={activeGapY} onChange={(event) => { markManual(); setGapY(event.target.value); }} /></label>
+                      <label className="space-y-1 text-xs font-medium text-muted">Horizontal gap (mm)<Input className="h-8 px-2 text-xs" value={activeGapX} onChange={(event) => { markManual(); setGapX(event.target.value); }} /></label>
+                      <label className="space-y-1 text-xs font-medium text-muted">Vertical gap (mm)<Input className="h-8 px-2 text-xs" value={activeGapY} onChange={(event) => { markManual(); setGapY(event.target.value); }} /></label>
                     </div>
                     <div className="grid grid-cols-2 gap-2">
-                      <label className="space-y-1 text-[11px] text-muted">
+                      <label className="space-y-1 text-xs font-medium text-muted">
                         Rotation
-                        <select className="h-10 w-full rounded-[var(--radius-input)] border border-border bg-card px-2 text-sm" value={String(rotation)} onChange={(event) => { markManual(); setRotation(event.target.value === "0" ? 0 : event.target.value === "90" ? 90 : "auto"); }}>
+                        <select className="h-8 w-full cursor-pointer rounded-[var(--radius-input)] border border-border bg-card px-2 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1" value={String(rotation)} onChange={(event) => { markManual(); setRotation(event.target.value === "0" ? 0 : event.target.value === "90" ? 90 : "auto"); }}>
                           <option value="auto">Auto</option><option value="0">0°</option><option value="90">90°</option>
                         </select>
                       </label>
-                      <label className="space-y-1 text-[11px] text-muted">Label size (100% = 1)<Input value={scale} onChange={(event) => { markManual(); setScale(event.target.value); }} /></label>
-                      <label className="space-y-1 text-[11px] text-muted">Columns<Input value={columns} onChange={(event) => { markManual(); setColumns(event.target.value); }} placeholder="Auto" /></label>
-                      <label className="space-y-1 text-[11px] text-muted">Rows<Input value={rows} onChange={(event) => { markManual(); setRows(event.target.value); }} placeholder="Auto" /></label>
+                      <label className="space-y-1 text-xs font-medium text-muted">Label size (100% = 1)<Input className="h-8 px-2 text-xs" value={scale} onChange={(event) => { markManual(); setScale(event.target.value); }} /></label>
+                      <label className="space-y-1 text-xs font-medium text-muted">Columns<Input className="h-8 px-2 text-xs" value={columns} onChange={(event) => { markManual(); setColumns(event.target.value); }} placeholder="Auto" /></label>
+                      <label className="space-y-1 text-xs font-medium text-muted">Rows<Input className="h-8 px-2 text-xs" value={rows} onChange={(event) => { markManual(); setRows(event.target.value); }} placeholder="Auto" /></label>
                     </div>
                   </div>
                 </details>
 
-                <div className="flex gap-2">
-                  <Button type="button" variant="secondary" className="flex-1" onClick={() => setWorkflowStep("labels")}><ChevronLeft />Labels</Button>
-                  <Button type="button" className="flex-1" disabled={!layout?.ok || !items.length} onClick={() => setWorkflowStep("review")}>Review<ChevronRight /></Button>
-                </div>
-              </>
-            ) : null}
-
-            {workflowStep === "review" ? (
-              <>
-                <div>
-                  <h2 className="text-sm font-semibold text-ink">3. Review & print</h2>
-                  <p className="mt-1 text-xs leading-5 text-muted">Confirm each sheet, preview the final PDF, then download or print it.</p>
-                </div>
-
-                <div className="rounded-xl border border-border bg-surface-soft p-3">
-                  <div className="flex items-center justify-between text-sm"><span className="text-muted">Labels</span><strong>{labelCount}</strong></div>
-                  <div className="mt-2 flex items-center justify-between text-sm"><span className="text-muted">Sheets</span><strong>{layout?.ok ? pages : "—"}</strong></div>
-                  <div className="mt-2 flex items-center justify-between text-sm"><span className="text-muted">Paper</span><strong>{multiPrintPaperName(paper)}</strong></div>
-                  <div className="mt-2 flex items-center justify-between text-sm"><span className="text-muted">Layout</span><strong>{presetCaption(chosenFourBySix, layoutMode === "preset" ? "No label fit" : "Manual")}</strong></div>
-                </div>
-
-                {layout?.ok ? (
-                  <div className="space-y-2">
-                    {sheetGroups(layout.placements.map((placement) => placement.orderId), layout.perSheet).map((group, sheetIndex) => (
-                      <button
-                        key={`sheet-group-${sheetIndex}`}
-                        type="button"
-                        onClick={() => setSheetPage(sheetIndex)}
-                        className={cn(
-                          "w-full rounded-xl border p-3 text-left transition-all duration-200",
-                          pageIndex === sheetIndex ? "border-brand/30 bg-rose-50 shadow-sm" : "border-border bg-card hover:bg-surface-soft"
-                        )}
-                      >
-                        <span className="flex items-center justify-between text-sm font-semibold">
-                          Sheet {sheetIndex + 1}
-                          <span className="text-xs font-normal text-muted">{group.length} labels</span>
-                        </span>
-                        <span className="mt-1 block truncate text-xs text-muted">{group.join(", ")}</span>
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
-
-                <div className={cn("rounded-xl border px-3 py-3 text-sm", canPrint ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-border bg-surface-soft text-muted")}>
-                  <span className="flex items-center gap-2 font-medium">
-                    <span className={cn("size-2 rounded-full", canPrint ? "animate-pulse-soft bg-emerald-500" : "bg-zinc-400")} />
-                    {printerMessage}
-                  </span>
-                </div>
-
-                <div className="grid gap-2">{outputActions}</div>
-                <Button type="button" variant="ghost" className="w-full" onClick={() => setWorkflowStep("layout")}><ChevronLeft />Back to arrangement</Button>
-              </>
-            ) : null}
           </CardContent>
         </Card>
 
@@ -1659,7 +1559,7 @@ export function MultiPrintScreen() {
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <CardTitle>Sheet preview</CardTitle>
-                <CardDescription>What you see here is the geometry used for preview, download, and print.</CardDescription>
+                <CardDescription>This is the sheet that preview, download, and print will use.</CardDescription>
               </div>
               <div className="flex items-center gap-1.5" role="group" aria-label="Sheet navigation">
                 <Button type="button" size="icon" variant="secondary" disabled={pageIndex <= 0} onClick={() => setSheetPage((page) => page - 1)} aria-label="Previous sheet" title="Previous sheet"><ChevronLeft /></Button>
@@ -1680,13 +1580,13 @@ export function MultiPrintScreen() {
               </div>
             </div>
             {sheetOrders.length ? (
-              <div className="mt-2 flex flex-wrap gap-1.5">
+              <div className="mt-3 flex flex-wrap gap-2">
                 {sheetOrders.map((placement, slot) => (
                   <button
                     key={placement.index}
                     type="button"
                     className={cn(
-                      "rounded-full border px-2 py-1 text-[11px] font-medium transition-colors",
+                      "h-7 cursor-pointer whitespace-nowrap rounded-full border px-2.5 text-xs font-medium transition-[color,background-color,border-color,transform] duration-200 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 motion-safe:active:scale-95",
                       selectedSlots.includes(placement.index) ? "border-brand/30 bg-rose-50 text-brand-dark" : "border-border bg-card text-muted hover:text-foreground"
                     )}
                     onClick={() => setSelectedSlots([placement.index])}
@@ -1707,7 +1607,7 @@ export function MultiPrintScreen() {
 
           {displayLayout?.ok ? (
             <>
-              <div className="flex flex-wrap items-center gap-1.5 border-b border-border bg-surface-soft px-3 py-2">
+              <div className="flex flex-wrap items-center gap-2 border-b border-border bg-surface-soft px-3 py-2">
                 <Button
                   type="button"
                   size="sm"
@@ -1852,7 +1752,7 @@ export function MultiPrintScreen() {
                             <button
                               type="button"
                               aria-label="Resize label"
-                              className="absolute bottom-0 right-0 z-10 size-3 cursor-se-resize bg-brand"
+                              className="absolute -bottom-1 -right-1 z-10 size-8 cursor-se-resize rounded-sm border-2 border-white bg-brand shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
                               onPointerDown={(event) => onResizeStart(placement.index, event)}
                               onPointerMove={(event) => onSlotPointerMove(placement.index, event)}
                               onPointerUp={endDrag}
@@ -1872,13 +1772,13 @@ export function MultiPrintScreen() {
           ) : (
             <div className="flex min-h-[520px] flex-col items-center justify-center p-8 text-center">
               <Grid2X2 className="size-8 text-muted" />
-              <p className="mt-3 text-sm font-semibold">
-                {items.length ? "Adjust the layout to fit these labels" : "Choose labels to build your sheet"}
+              <p className="mt-3 text-base font-semibold">
+                {items.length ? "These labels do not fit this page" : "Your sheet will show up here"}
               </p>
-              <p className="mt-1 max-w-sm text-xs text-muted">
+              <p className="mt-1 max-w-sm text-sm leading-6 text-muted">
                 {items.length
-                  ? "Open Arrange and Advanced layout, then reduce label size or choose a larger sheet."
-                  : "Start in step 1. Your A4 preview will appear here automatically."}
+                  ? "Choose a larger paper, fewer labels per page, or open Advanced layout and reduce the label size."
+                  : "Pick an order on the left. A4 with two labels is already selected."}
               </p>
             </div>
           )}
@@ -1915,7 +1815,7 @@ export function MultiPrintScreen() {
         printDisabled={!canPrint}
       />
 
-      <div className="fixed inset-x-0 bottom-0 z-30 flex items-center gap-2 border-t border-border bg-card/95 p-3 shadow-[0_-8px_30px_rgb(9_9_11/0.08)] backdrop-blur sm:hidden">
+      <div className="fixed inset-x-0 bottom-0 z-30 flex items-center gap-2 border-t border-border bg-card/95 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-[0_-8px_30px_rgb(9_9_11/0.08)] backdrop-blur md:hidden">
         <Button type="button" size="sm" variant="secondary" className="flex-1" onClick={preview} disabled={Boolean(busy) || !items.length || layout?.ok === false}><Eye />Preview</Button>
         <Button type="button" size="sm" variant="secondary" className="flex-1" onClick={download} disabled={Boolean(busy) || !items.length || layout?.ok === false}><Download />Download</Button>
         <Button type="button" size="sm" className="flex-1" onClick={print} disabled={Boolean(busy) || !canPrint}><Printer />Print</Button>
