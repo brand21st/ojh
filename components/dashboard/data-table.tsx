@@ -319,7 +319,7 @@ export function DataTable<TData extends Record<string, unknown>>({
               );
           return (
             <Checkbox
-              aria-label="Select all visible orders"
+              aria-label="Select all visible rows"
               checked={headerState}
               disabled={visibleIds.length === 0}
               onCheckedChange={(value) => {

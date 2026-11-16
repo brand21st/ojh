@@ -37,11 +37,18 @@ import {
   salesInvoiceFilename,
   salesInvoiceHasPdf,
   salesStatusBadge,
+  shippingInvoiceFilename,
+  shippingInvoiceHasPdf,
   shippingStatusBadge,
   type InvoiceBadgeTone,
   type InvoiceOption,
 } from "@/lib/invoices/labels";
-import { downloadInvoicePdf, openInvoicePdf, printInvoicePdf } from "@/lib/invoices/preview";
+import {
+  invoiceBulkDownloadMessage,
+  mergeSelectedRows,
+  partitionInvoiceDownloads,
+} from "@/lib/invoices/bulk-download";
+import { downloadInvoicePdf, downloadInvoicePdfs, openInvoicePdf, printInvoicePdf } from "@/lib/invoices/preview";
 import { api } from "@/lib/hooks/use-api";
 import { usePlanEntitlements } from "@/lib/hooks/use-plan-entitlements";
 import { cn } from "@/lib/utils";
@@ -155,6 +162,8 @@ function useDebounced<T>(value: T, delay: number) {
 function SalesTab({ allowed, checking }: { allowed: boolean; checking: boolean }) {
   const router = useRouter();
   const [page, setPage] = useState(1);
+  const [selectedRows, setSelectedRows] = useState<SalesInvoiceRow[]>([]);
+  const [downloading, setDownloading] = useState(false);
   const [searchInput, setSearchInput] = useState("");
   const search = useDebounced(searchInput.trim(), 300);
   const [filters, setFilters] = useState<Filters>(NO_FILTERS);
@@ -196,7 +205,29 @@ function SalesTab({ allowed, checking }: { allowed: boolean; checking: boolean }
     enabled: allowed,
   });
   const list = asPaginated<SalesInvoiceRow>(query.data);
+  const selectedIds = selectedRows.map((row) => row.id);
   const open = (row: SalesInvoiceRow) => router.push(`/dashboard/invoices/${row.id}`);
+  const downloadSelected = async () => {
+    const { items, skipped } = partitionInvoiceDownloads(
+      selectedRows,
+      (row) => salesInvoiceHasPdf(row.status),
+      (row) => salesInvoiceFilename(row.invoiceNumber, row.id),
+      "sales"
+    );
+    if (items.length === 0) {
+      toast.error(invoiceBulkDownloadMessage(0, skipped, 0));
+      return;
+    }
+    setDownloading(true);
+    try {
+      const result = await downloadInvoicePdfs(items, "sales-invoices.zip");
+      toast.success(invoiceBulkDownloadMessage(result.downloaded, skipped, result.failed));
+    } catch (error) {
+      pdfError(error instanceof Error ? error : new Error("Could not download those invoices."));
+    } finally {
+      setDownloading(false);
+    }
+  };
 
   const columns: DataTableColumn<SalesInvoiceRow>[] = [
     {
@@ -291,6 +322,13 @@ function SalesTab({ allowed, checking }: { allowed: boolean; checking: boolean }
       </div>
       {dateRangeInvalid ? <p className="text-sm text-error">The start date must be on or before the end date.</p> : null}
 
+      <InvoiceBulkBar
+        count={selectedRows.length}
+        downloading={downloading}
+        onDownload={downloadSelected}
+        onClear={() => setSelectedRows([])}
+      />
+
       {query.isError ? (
         <EmptyState
           icon={AlertCircle}
@@ -307,6 +345,9 @@ function SalesTab({ allowed, checking }: { allowed: boolean; checking: boolean }
           columns={columns}
           data={list.items}
           getRowId={(row) => row.id}
+          selectable
+          selectedIds={selectedIds}
+          onSelectionChange={(ids) => setSelectedRows((current) => mergeSelectedRows(current, list.items, ids))}
           onRowClick={open}
           loading={checking || query.isLoading}
           fetching={query.isFetching && !query.isLoading}
@@ -485,8 +526,46 @@ function DateRangeFilter({
   );
 }
 
+function InvoiceBulkBar({
+  count,
+  downloading,
+  onDownload,
+  onClear,
+}: {
+  count: number;
+  downloading: boolean;
+  onDownload: () => void;
+  onClear: () => void;
+}) {
+  if (count === 0) return null;
+  return (
+    <div
+      className="sticky top-2 z-20 rounded-xl border border-border bg-card px-3 py-2 shadow-sm"
+      role="region"
+      aria-label="Selected invoices"
+    >
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-sm font-medium" aria-live="polite">
+          {count === 1 ? "1 selected" : `${count} selected`}
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" size="sm" className="min-h-10" disabled={downloading} onClick={onDownload}>
+            <Download className="size-4" aria-hidden />
+            {downloading ? "Downloading…" : count === 1 ? "Download PDF" : "Download PDFs"}
+          </Button>
+          <Button type="button" variant="secondary" size="sm" className="min-h-10" disabled={downloading} onClick={onClear}>
+            Clear selection
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ShippingTab({ allowed, checking }: { allowed: boolean; checking: boolean }) {
   const [page, setPage] = useState(1);
+  const [selectedRows, setSelectedRows] = useState<InvoiceRecord[]>([]);
+  const [downloading, setDownloading] = useState(false);
   const [regenerate, setRegenerate] = useState<InvoiceRecord | null>(null);
   const queryClient = useQueryClient();
   const query = useQuery({
@@ -500,6 +579,28 @@ function ShippingTab({ allowed, checking }: { allowed: boolean; checking: boolea
     enabled: allowed,
   });
   const list = asPaginated<InvoiceRecord>(query.data);
+  const selectedIds = selectedRows.map((row) => row.id);
+  const downloadSelected = async () => {
+    const { items, skipped } = partitionInvoiceDownloads(
+      selectedRows,
+      (row) => shippingInvoiceHasPdf(row.status),
+      (row) => shippingInvoiceFilename(row.invoiceNumber ?? row.invoice_number, row.id),
+      "shipping"
+    );
+    if (items.length === 0) {
+      toast.error(invoiceBulkDownloadMessage(0, skipped, 0));
+      return;
+    }
+    setDownloading(true);
+    try {
+      const result = await downloadInvoicePdfs(items, "shipping-documents.zip");
+      toast.success(invoiceBulkDownloadMessage(result.downloaded, skipped, result.failed));
+    } catch (error) {
+      pdfError(error instanceof Error ? error : new Error("Could not download those documents."));
+    } finally {
+      setDownloading(false);
+    }
+  };
   const retry = useMutation({
     mutationFn: (id: string) => api(`/api/v1/invoices/${id}/retry`, { method: "POST" }),
     onSuccess: () => {
@@ -551,6 +652,12 @@ function ShippingTab({ allowed, checking }: { allowed: boolean; checking: boolea
       <p className="mb-3 text-sm text-muted">
         Created when India Post returns a tracking ID. These are shipping documents, not GST tax invoices.
       </p>
+      <InvoiceBulkBar
+        count={selectedRows.length}
+        downloading={downloading}
+        onDownload={downloadSelected}
+        onClear={() => setSelectedRows([])}
+      />
       {query.isError ? (
         <EmptyState
           icon={AlertCircle}
@@ -567,6 +674,9 @@ function ShippingTab({ allowed, checking }: { allowed: boolean; checking: boolea
           columns={columns}
           data={list.items}
           getRowId={(row) => row.id}
+          selectable
+          selectedIds={selectedIds}
+          onSelectionChange={(ids) => setSelectedRows((current) => mergeSelectedRows(current, list.items, ids))}
           loading={checking || query.isLoading}
           fetching={query.isFetching && !query.isLoading}
           emptyTitle="No shipping documents yet"
