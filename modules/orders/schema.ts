@@ -24,9 +24,36 @@ export const addressInput = z.object({
   country: z.string().min(2).default("IN"),
 });
 
-export const updateOrderAddressSchema = addressInput.extend({
-  expectedFingerprint: z.string().min(16).max(128).optional(),
-});
+const optionalCorrectionValue = (value: unknown) => (value === "" || value == null ? undefined : value);
+
+/** Phone and PIN only. The server copies every other address field from the stored row. */
+export const phonePinCorrectionSchema = z
+  .object({
+    correction: z.literal("phone_pin"),
+    phone: z.preprocess(optionalCorrectionValue, indiaMobile.optional()),
+    pincode: z.preprocess(
+      optionalCorrectionValue,
+      z.string().regex(/^[1-9][0-9]{5}$/, "Enter a valid 6-digit PIN code.").optional()
+    ),
+    expectedFingerprint: z.string().min(16).max(128).optional(),
+  })
+  .refine((value) => value.phone !== undefined || value.pincode !== undefined, {
+    message: "Enter a mobile number or PIN code.",
+  });
+
+export const updateOrderAddressSchema = z.union([
+  addressInput.extend({
+    expectedFingerprint: z.string().min(16).max(128).optional(),
+  }),
+  phonePinCorrectionSchema,
+]);
+
+export type UpdateOrderAddressInput = z.infer<typeof updateOrderAddressSchema>;
+export type PhonePinCorrectionInput = z.infer<typeof phonePinCorrectionSchema>;
+
+export function isPhonePinCorrection(input: UpdateOrderAddressInput): input is PhonePinCorrectionInput {
+  return "correction" in input && input.correction === "phone_pin";
+}
 
 /** HTML number inputs send "" or 0; treat those as “not set”. */
 export const optionalPositiveInt = z.preprocess((value) => {

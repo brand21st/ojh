@@ -27,7 +27,9 @@ import type { ErrorQuickAction } from "@/modules/orders/error-facts";
 import { OrderDimensionBadge } from "@/components/orders/order-dimension-badge";
 import { ShopifyPaymentConfirm } from "@/components/orders/shopify-payment-confirm";
 import { BulkIndiaPostBooking } from "@/components/bookings/bulk-india-post-booking";
+import { precheckOrderIds } from "@/components/orders/booking-precheck";
 import { PrebookingReviewDialog } from "@/components/orders/prebooking-review-dialog";
+import { needsContactCorrection } from "@/modules/orders/contact-correction";
 import { AddToQueueButton } from "@/components/booking-queue/add-to-queue-button";
 import { DataTable, type DataTableColumn } from "@/components/dashboard/data-table";
 import {
@@ -113,7 +115,7 @@ import { isIndiaPostBookingInFlight } from "@/modules/india-post/booking-status"
 import { tariffListState, type TariffListState } from "@/modules/india-post/tariff-list";
 import type { TariffQuote } from "@/modules/india-post/tariff-contract";
 import { ORDER_SOURCE_LABELS, ORDER_SOURCES, ORDER_STATUSES, PAYMENT_STATUSES, PAYMENT_STATUS_LABELS } from "@/types/domain";
-import type { AutomationSettings, BulkOrderStatusResult, DashboardKpis, IndiaPostConfig, IntegrationsResponse, OrderRecord, Paginated } from "@/types/api";
+import type { AutomationSettings, BulkOrderStatusResult, DashboardKpis, IndiaPostConfig, IntegrationsResponse, OrderRecord, Paginated, PrebookingCheckResult } from "@/types/api";
 
 const COLUMN_STORAGE = "postbus.orders.columns";
 const WIDTH_STORAGE = "postbus.orders.column-widths";
@@ -190,6 +192,8 @@ export default function OrdersPage() {
   const [payment, setPayment] = useState("all");
   const [selected, setSelected] = useState<string[]>([]);
   const [reviewIds, setReviewIds] = useState<string[] | null>(null);
+  const [reviewSeed, setReviewSeed] = useState<PrebookingCheckResult | null>(null);
+  const [preparingShip, setPreparingShip] = useState(false);
   const [checkingIds, setCheckingIds] = useState<string[]>([]);
   const [parcelOrder, setParcelOrder] = useState<OrderRecord | null>(null);
   // Opened from a booking error: saving the parcel also retries the booking.
@@ -796,9 +800,34 @@ export default function OrdersPage() {
     );
   }
 
+  function openCorrection(ids: string[], seed: PrebookingCheckResult | null) {
+    setReviewSeed(seed);
+    setReviewIds(ids);
+  }
+
+  async function fulfillOrCorrect(orderIds: string[]) {
+    setPreparingShip(true);
+    try {
+      const checked = await precheckOrderIds(orderIds, () => undefined, { allowAi: aiAddressCheck, forceAi: false });
+      const correctable = checked.orders.filter((order) => needsContactCorrection(order.issues));
+      if (correctable.length) {
+        openCorrection(
+          correctable.map((order) => order.orderId),
+          checked
+        );
+        return;
+      }
+      ship.mutate({ orderIds, action: "fulfill" });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not check this order.");
+    } finally {
+      setPreparingShip(false);
+    }
+  }
+
   async function correctAddressAndBook(row: OrderRecord) {
     if (!aiAddressCheck) {
-      setReviewIds([row.id]);
+      router.push(`/dashboard/orders/${row.id}`);
       return;
     }
     try {
@@ -821,9 +850,9 @@ export default function OrdersPage() {
     else if (action === "retry") retryBooking.mutate(row);
     else if (action === "autocorrect") {
       if (aiAddressCheck) void correctAddressAndBook(row);
-      else setReviewIds([row.id]);
+      else router.push(`/dashboard/orders/${row.id}`);
     }
-    else if (action === "review") setReviewIds([row.id]);
+    else if (action === "review") openCorrection([row.id], null);
     else if (action === "open") router.push(`/dashboard/orders/${row.id}`);
     else setErrorDialog({ orderId: row.id, confirmForce: action === "force" });
   }
@@ -842,11 +871,11 @@ export default function OrdersPage() {
               size="icon-xs"
               variant="secondary"
               className={cn("transition-all duration-150", orderActionButtonClass(row.status))}
-              disabled={pending}
+              disabled={pending || preparingShip}
               aria-label={next.label}
               title={next.label}
               onClick={() => {
-                if (next.action === "fulfill") setReviewIds([row.id]);
+                if (next.action === "fulfill") void fulfillOrCorrect([row.id]);
                 else ship.mutate({ orderIds: [row.id], action: next.action });
               }}
             >
@@ -870,9 +899,9 @@ export default function OrdersPage() {
                 ))}
                 <DropdownMenuItem
                   className="font-semibold"
-                  disabled={pending}
+                  disabled={pending || preparingShip}
                   onSelect={() => {
-                    if (next.action === "fulfill") setReviewIds([row.id]);
+                    if (next.action === "fulfill") void fulfillOrCorrect([row.id]);
                     else ship.mutate({ orderIds: [row.id], action: next.action });
                   }}
                 >
@@ -1166,8 +1195,8 @@ export default function OrdersPage() {
                   type="button"
                   variant="secondary"
                   size="xs"
-                  disabled={ship.isPending}
-                  onClick={() => setReviewIds(selected)}
+                  disabled={ship.isPending || preparingShip}
+                  onClick={() => void fulfillOrCorrect(selected)}
                 >
                   <Truck className="size-4" />
                   Ship
@@ -1338,12 +1367,15 @@ export default function OrdersPage() {
       <PrebookingReviewDialog
         open={reviewIds !== null}
         onOpenChange={(next) => {
-          if (!next) setReviewIds(null);
+          if (!next) {
+            setReviewIds(null);
+            setReviewSeed(null);
+          }
         }}
         orderIds={reviewIds ?? []}
+        seed={reviewSeed}
         allowAi={aiAddressCheck}
         onCheckingChange={setCheckingIds}
-        onBookReady={(ids) => ship.mutate({ orderIds: ids, action: "fulfill" })}
       />
       {errorDialogOrder ? (
         <BookingErrorDialog

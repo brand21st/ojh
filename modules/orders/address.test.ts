@@ -150,6 +150,45 @@ describe("updateOrderShippingAddress", () => {
     expect(client.updates).toEqual([]);
   });
 
+  it("keeps the stored street, city, and name when only the phone and PIN are saved", async () => {
+    const client = addressClient({ shipmentStatus: "QUEUED" });
+    await updateOrderShippingAddress(client as never, ctx, "ord-1", {
+      correction: "phone_pin",
+      phone: "+91 98765 43210",
+      pincode: "673121",
+    });
+    const saved = client.updates.find((update) => update.table === "addresses");
+    expect(saved?.values).toEqual(
+      expect.objectContaining({
+        name: "Asha Rao",
+        phone: "9876543210",
+        line1: "12 MG Road",
+        line2: "Near park",
+        city: "Kozhikode",
+        state: "Kerala",
+        pincode: "673121",
+        country: "IN",
+        address_manual_override: true,
+      })
+    );
+    expect(client.updates).toEqual(
+      expect.arrayContaining([{ table: "customers", values: { phone: "9876543210" } }])
+    );
+    expect(client.updates.find((update) => update.table === "customers")?.values).not.toHaveProperty("name");
+  });
+
+  it("rejects a phone and PIN correction that does not match the stored fingerprint", async () => {
+    const client = addressClient({ shipmentStatus: "QUEUED", fingerprint: "stored-fingerprint-value" });
+    await expect(
+      updateOrderShippingAddress(client as never, ctx, "ord-1", {
+        correction: "phone_pin",
+        phone: "9876543210",
+        expectedFingerprint: "client-fingerprint-value",
+      })
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    expect(client.updates).toEqual([]);
+  });
+
   it("inserts a shipping address when the order has none", async () => {
     const client = addressClient({ shipmentStatus: "DRAFT", shippingAddressId: null });
     await updateOrderShippingAddress(client as never, ctx, "ord-1", address);

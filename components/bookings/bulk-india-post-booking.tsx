@@ -12,9 +12,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { precheckOrderIds } from "@/components/orders/booking-precheck";
 import { PrebookingReviewDialog } from "@/components/orders/prebooking-review-dialog";
 import { api } from "@/lib/hooks/use-api";
-import type { BulkBookingResult } from "@/types/api";
+import { needsContactCorrection } from "@/modules/orders/contact-correction";
+import type { AutomationSettings, BulkBookingResult, PrebookingCheckResult } from "@/types/api";
 
 function Counts({ result }: { result: BulkBookingResult | undefined }) {
   if (!result) return null;
@@ -55,7 +57,15 @@ export function BulkIndiaPostBooking({
 }) {
   const [open, setOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
+  const [reviewIds, setReviewIds] = useState<string[]>([]);
+  const [reviewSeed, setReviewSeed] = useState<PrebookingCheckResult | null>(null);
+  const [preparing, setPreparing] = useState(false);
   const [result, setResult] = useState<BulkBookingResult | null>(null);
+  const automation = useQuery({
+    queryKey: ["automation"],
+    queryFn: () => api<AutomationSettings>("/api/v1/automation"),
+  });
+  const allowAi = automation.data?.autoAiAddressCheck ?? automation.data?.auto_ai_address_check ?? false;
 
   const summary = useQuery({
     queryKey: ["bookings-summary", selectedIds.join(",")],
@@ -103,6 +113,29 @@ export function BulkIndiaPostBooking({
     onError: (error: Error) => toast.error(error.message),
   });
 
+  async function startBulk() {
+    setPreparing(true);
+    try {
+      const checked = await precheckOrderIds(selectedIds, () => undefined, { allowAi, forceAi: false });
+      const correctable = checked.orders.filter((order) => needsContactCorrection(order.issues));
+      const ready = checked.orders.filter((order) => order.status === "ready").map((order) => order.orderId);
+      if (ready.length) queue.mutate(ready);
+      if (correctable.length) {
+        setReviewIds(correctable.map((order) => order.orderId));
+        setReviewSeed({ ...checked, orders: correctable });
+        setReviewOpen(true);
+        return;
+      }
+      if (!ready.length) {
+        toast.message("No selected orders are ready to book, and none have a mobile number or PIN to correct here.");
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not check the selected orders.");
+    } finally {
+      setPreparing(false);
+    }
+  }
+
   const live = summary.data;
   const shown = result
     ? {
@@ -124,10 +157,10 @@ export function BulkIndiaPostBooking({
         type="button"
         variant="secondary"
         size={iconOnly ? "icon-xs" : size}
-        disabled={selectedIds.length === 0}
+        disabled={selectedIds.length === 0 || preparing || queue.isPending}
         title="Bulk book"
         aria-label="Bulk book"
-        onClick={() => setReviewOpen(true)}
+        onClick={() => void startBulk()}
       >
         <Truck className="size-4" />
         {iconOnly ? null : "Bulk book"}
@@ -140,11 +173,9 @@ export function BulkIndiaPostBooking({
       <PrebookingReviewDialog
         open={reviewOpen}
         onOpenChange={setReviewOpen}
-        orderIds={selectedIds}
-        onBookReady={(ids) => {
-          queue.mutate(ids);
-          setReviewOpen(false);
-        }}
+        orderIds={reviewIds}
+        seed={reviewSeed}
+        allowAi={allowAi}
       />
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-h-[90vh] max-w-4xl overflow-y-auto">

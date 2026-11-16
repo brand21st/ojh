@@ -5,7 +5,7 @@ import type { OrderStatus } from "@/types/domain";
 import type { TenantContext } from "@/lib/api/context";
 import type { z } from "zod";
 import { extractIndiaMobileDigits } from "@/lib/phone/india-whatsapp";
-import type { createOrderSchema, orderListQuery, updateOrderAddressSchema, updateOrderCodSchema, updateOrderWeightsSchema } from "@/modules/orders/schema";
+import { isPhonePinCorrection, type createOrderSchema, type orderListQuery, type updateOrderAddressSchema, type updateOrderCodSchema, type updateOrderWeightsSchema } from "@/modules/orders/schema";
 import { parcelServiceCode } from "@/modules/india-post/booking-service";
 import { applyManualExtraCodCharge } from "@/modules/orders/extra-cod";
 import { paymentStatusFromManualCod, restoreAutoOrderPayment } from "@/modules/orders/cod-amount";
@@ -642,6 +642,10 @@ export async function updateOrderShippingAddress(
     throw new AppError(ERROR_CODES.CONFLICT, "Address is locked after India Post booking.");
   }
 
+  if (isPhonePinCorrection(input)) {
+    return savePhonePinCorrection(supabase, ctx, orderId, order, input);
+  }
+
   const phone = input.phone ? extractIndiaMobileDigits(input.phone) ?? input.phone : null;
   const name = input.name?.trim() || null;
   if (order.shipping_address_id && input.expectedFingerprint) {
@@ -725,6 +729,94 @@ export async function updateOrderShippingAddress(
     after: { pincode: input.pincode, city: input.city, state: input.state, phone, name },
   });
 
+  return getOrder(supabase, ctx, orderId);
+}
+
+async function savePhonePinCorrection(
+  supabase: SupabaseClient,
+  ctx: TenantContext,
+  orderId: string,
+  order: { customer_id?: string | null; shipping_address_id?: string | null },
+  input: { phone?: string; pincode?: string; expectedFingerprint?: string }
+) {
+  if (!order.shipping_address_id) {
+    throw new AppError(ERROR_CODES.VALIDATION_ERROR, "This order has no shipping address.");
+  }
+  const { data: stored, error: storedError } = await supabase
+    .from("addresses")
+    .select("name, phone, line1, line2, line3, city, state, pincode, country, address_validation_fingerprint")
+    .eq("id", order.shipping_address_id)
+    .eq("organization_id", ctx.organizationId)
+    .maybeSingle();
+  if (storedError) throw new AppError(ERROR_CODES.VALIDATION_ERROR, storedError.message);
+  if (!stored) throw new AppError(ERROR_CODES.RESOURCE_NOT_FOUND, "Shipping address not found.");
+  const row = stored as {
+    name?: string | null;
+    phone?: string | null;
+    line1?: string | null;
+    line2?: string | null;
+    line3?: string | null;
+    city?: string | null;
+    state?: string | null;
+    pincode?: string | null;
+    country?: string | null;
+    address_validation_fingerprint?: string | null;
+  };
+  if (input.expectedFingerprint && row.address_validation_fingerprint && row.address_validation_fingerprint !== input.expectedFingerprint) {
+    throw new AppError(ERROR_CODES.CONFLICT, "This address was changed. Reload and review it again.");
+  }
+  const phone = input.phone ? extractIndiaMobileDigits(input.phone) : row.phone ?? null;
+  if (input.phone && !phone) {
+    throw new AppError(ERROR_CODES.VALIDATION_ERROR, "Enter a valid 10-digit mobile number.");
+  }
+  const pincode = input.pincode ?? row.pincode ?? "";
+  const name = row.name?.trim() || null;
+  const classified = classifyStoredShippingAddress({
+    name,
+    phone,
+    line1: row.line1,
+    line2: row.line2,
+    line3: row.line3,
+    city: row.city,
+    state: row.state,
+    pincode,
+    country: row.country ?? "IN",
+  });
+  const fields = {
+    name,
+    phone: phone ?? null,
+    line1: row.line1 ?? "",
+    line2: row.line2 ?? null,
+    line3: row.line3 ?? null,
+    city: row.city ?? "",
+    state: row.state ?? "",
+    pincode,
+    country: row.country ?? "IN",
+    address_manual_override: true,
+    ...validationPatchPendingPinCheck(classified, "manual"),
+  };
+  const { error } = await supabase
+    .from("addresses")
+    .update(fields)
+    .eq("id", order.shipping_address_id)
+    .eq("organization_id", ctx.organizationId);
+  if (error) throw new AppError(ERROR_CODES.VALIDATION_ERROR, error.message);
+  if (order.customer_id && input.phone && phone) {
+    const { error: customerError } = await supabase
+      .from("customers")
+      .update({ phone })
+      .eq("id", order.customer_id)
+      .eq("organization_id", ctx.organizationId);
+    if (customerError) throw new AppError(ERROR_CODES.VALIDATION_ERROR, customerError.message);
+  }
+  await supabase.from("audit_logs").insert({
+    organization_id: ctx.organizationId,
+    actor_id: ctx.userId || null,
+    action: "order.shipping_address_updated",
+    entity_type: "order",
+    entity_id: orderId,
+    after: { correction: "phone_pin", pincode, phone },
+  });
   return getOrder(supabase, ctx, orderId);
 }
 

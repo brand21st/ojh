@@ -1,24 +1,20 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useEffect, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { IndiaPostPincodeAutofill } from "@/components/address/india-post-pincode-autofill";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { api } from "@/lib/hooks/use-api";
-import type { AutomationSettings, PrebookingCheckResult, PrebookingOrderResult, PrebookingUiStatus } from "@/types/api";
-
-const CHUNK = 25;
+import { FixOrderDetailsForm, type SavePhase } from "@/components/orders/fix-order-details-form";
+import { precheckOrderIds, tallyPrecheck } from "@/components/orders/booking-precheck";
+import { ApiError, api } from "@/lib/hooks/use-api";
+import { contactCorrectionFields, needsContactCorrection } from "@/modules/orders/contact-correction";
+import type { AutomationSettings, PrebookingCheckResult, PrebookingOrderResult } from "@/types/api";
 
 export function addressCheckLabel(status?: string | null, checking = false) {
   if (checking) return "Checking";
@@ -36,94 +32,33 @@ export function addressCheckLabel(status?: string | null, checking = false) {
   }
 }
 
-function statusLabel(status: PrebookingUiStatus) {
-  switch (status) {
-    case "ready":
-      return "Ready to book";
-    case "fix_required":
-      return "Address error";
-    case "needs_review":
-      return "Review required";
-    case "validation_unavailable":
-      return "Check unavailable";
-    case "checking":
-      return "Checking";
-    default:
-      return "Not checked";
-  }
-}
-
-type Draft = PrebookingOrderResult["address"] & {
-  weightGrams: string;
-  lengthCm: string;
-  widthCm: string;
-  heightCm: string;
-};
-
-function draftFrom(order: PrebookingOrderResult): Draft {
-  return {
-    ...order.address,
-    weightGrams: order.parcel ? String(order.parcel.weightGrams || "") : "",
-    lengthCm: order.parcel ? String(order.parcel.lengthCm || "") : "",
-    widthCm: order.parcel ? String(order.parcel.widthCm || "") : "",
-    heightCm: order.parcel ? String(order.parcel.heightCm || "") : "",
-  };
-}
-
-function safeSuggestion(order: PrebookingOrderResult) {
-  return order.issues.find((issue) => {
-    const suggestion = issue.suggestion;
-    if (!suggestion?.line1) return false;
-    if (suggestion.pincode && suggestion.pincode !== order.address.pincode) return false;
-    return issue.code === "address_formatting" || issue.code === "ai_formatting";
-  })?.suggestion;
-}
-
-async function precheckChunks(
-  orderIds: string[],
-  onProgress: (done: number, total: number) => void,
-  options: { allowAi: boolean; forceAi?: boolean } = { allowAi: true }
-) {
-  const orders: PrebookingOrderResult[] = [];
-  const allowAi = options.allowAi;
-  const forceAi = allowAi && Boolean(options.forceAi);
-  for (let index = 0; index < orderIds.length; index += CHUNK) {
-    const chunk = orderIds.slice(index, index + CHUNK);
-    const result = await api<PrebookingCheckResult>("/api/v1/bookings/precheck", {
-      method: "POST",
-      body: JSON.stringify({ orderIds: chunk, allowAi, forceAi }),
-    });
-    orders.push(...result.orders);
-    onProgress(Math.min(index + chunk.length, orderIds.length), orderIds.length);
-  }
-  return {
-    total: orders.length,
-    ready: orders.filter((order) => order.status === "ready").length,
-    fixRequired: orders.filter((order) => order.status === "fix_required").length,
-    needsReview: orders.filter((order) => order.status === "needs_review").length,
-    unavailable: orders.filter((order) => order.status === "validation_unavailable").length,
-    orders,
-  } satisfies PrebookingCheckResult;
+function replaceOrder(current: PrebookingCheckResult | null, next: PrebookingOrderResult[]) {
+  const orders = current
+    ? current.orders.map((order) => next.find((item) => item.orderId === order.orderId) ?? order)
+    : next;
+  return tallyPrecheck(orders);
 }
 
 export function PrebookingReviewDialog({
   open,
   onOpenChange,
   orderIds,
-  onBookReady,
   onCheckingChange,
   allowAi: allowAiProp,
+  seed,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   orderIds: string[];
-  onBookReady: (orderIds: string[]) => void;
   onCheckingChange?: (orderIds: string[]) => void;
   allowAi?: boolean;
+  seed?: PrebookingCheckResult | null;
 }) {
+  const queryClient = useQueryClient();
   const automation = useQuery({
     queryKey: ["automation"],
     queryFn: () => api<AutomationSettings>("/api/v1/automation"),
+    enabled: open && allowAiProp === undefined,
   });
   const allowAi =
     allowAiProp ??
@@ -131,392 +66,190 @@ export function PrebookingReviewDialog({
     automation.data?.auto_ai_address_check ??
     false;
   const [result, setResult] = useState<PrebookingCheckResult | null>(null);
-  const [checking, setChecking] = useState(false);
-  const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [activeId, setActiveId] = useState<string | null>(null);
-  const [draft, setDraft] = useState<Draft | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [booking, setBooking] = useState(false);
+  const [formError, setFormError] = useState("");
+  const [conflict, setConflict] = useState(false);
+  const [phase, setPhase] = useState<SavePhase>("idle");
+  const [seenOpen, setSeenOpen] = useState(open);
+  if (open !== seenOpen) {
+    setSeenOpen(open);
+    if (open) {
+      const seeded = seed?.orders.filter((order) => needsContactCorrection(order.issues)) ?? [];
+      setPhase("idle");
+      setFormError("");
+      setConflict(false);
+      if (seeded.length) {
+        const visible = tallyPrecheck(seeded);
+        setResult(visible);
+        setActiveId(visible.orders[0]?.orderId ?? null);
+      } else {
+        setResult(null);
+        setActiveId(null);
+      }
+    }
+  }
+  const ordersRef = useRef<PrebookingOrderResult[]>([]);
+  const closeTimer = useRef<number | null>(null);
+  useEffect(() => {
+    ordersRef.current = result?.orders ?? [];
+  }, [result]);
+  useEffect(() => {
+    if (open) return;
+    if (closeTimer.current) window.clearTimeout(closeTimer.current);
+  }, [open]);
 
-  async function runCheck(ids: string[], forceAi = false) {
-    if (!ids.length) return;
-    setChecking(true);
+  async function runCheck(ids: string[]) {
+    if (!ids.length) return null;
     onCheckingChange?.(ids);
-    setProgress({ done: 0, total: ids.length });
     try {
-      const next = await precheckChunks(ids, (done, total) => setProgress({ done, total }), {
-        allowAi,
-        forceAi,
-      });
-      setResult((current) => {
-        const orders = current
-          ? current.orders.map((order) => next.orders.find((item) => item.orderId === order.orderId) ?? order)
-          : next.orders;
-        return {
-          total: orders.length,
-          ready: orders.filter((order) => order.status === "ready").length,
-          fixRequired: orders.filter((order) => order.status === "fix_required").length,
-          needsReview: orders.filter((order) => order.status === "needs_review").length,
-          unavailable: orders.filter((order) => order.status === "validation_unavailable").length,
-          orders,
-        };
-      });
-      setActiveId((current) => {
-        const still = next.orders.find((order) => order.orderId === current);
-        const focus = still ?? next.orders.find((order) => order.status !== "ready") ?? next.orders[0];
-        if (focus) setDraft(draftFrom(focus));
-        return focus?.orderId ?? null;
-      });
-      const corrected = next.orders.filter((order) => order.autoCorrected).length;
-      if (corrected) toast.success(`Corrected ${corrected} address${corrected === 1 ? "" : "es"} for booking.`);
+      const next = await precheckOrderIds(ids, () => undefined, { allowAi, forceAi: false });
+      const merged = replaceOrder(ids.length === orderIds.length ? null : result, next.orders);
+      const visible = tallyPrecheck(merged.orders.filter((order) => needsContactCorrection(order.issues)));
+      setResult(visible);
+      return visible;
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Address check failed.");
+      return null;
     } finally {
-      setChecking(false);
       onCheckingChange?.([]);
     }
   }
 
+  const seeded = Boolean(seed?.orders.some((order) => needsContactCorrection(order.issues)));
+  const checking = open && !result && !seeded;
+
   useEffect(() => {
-    if (!open) return;
-    setResult(null);
-    setDraft(null);
-    setActiveId(null);
-    void runCheck(orderIds);
+    if (!open || seeded) return;
+    let cancelled = false;
+    onCheckingChange?.(orderIds);
+    void precheckOrderIds(orderIds, () => undefined, { allowAi, forceAi: false })
+      .then((next) => {
+        if (cancelled) return;
+        const visible = tallyPrecheck(next.orders.filter((order) => needsContactCorrection(order.issues)));
+        setResult(visible);
+        setActiveId(visible.orders[0]?.orderId ?? null);
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) toast.error(error instanceof Error ? error.message : "Address check failed.");
+      })
+      .finally(() => {
+        if (!cancelled) onCheckingChange?.([]);
+      });
+    return () => {
+      cancelled = true;
+    };
     // The selection captured when the dialog opens is the set to check.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
-  const active = result?.orders.find((order) => order.orderId === activeId) ?? null;
-  const problemFields = useMemo(() => new Set((active?.issues ?? []).map((issue) => issue.field).filter(Boolean)), [active]);
-  const readyIds = result?.orders.filter((order) => order.status === "ready").map((order) => order.orderId) ?? [];
-  const blocked = !result || checking || saving || result.orders.some((order) => order.status !== "ready");
+  const pending = (result?.orders ?? []).filter((order) => needsContactCorrection(order.issues));
+  const active = pending.find((order) => order.orderId === activeId) ?? pending[0] ?? null;
+  const fields = contactCorrectionFields(active?.issues ?? []);
 
   function selectOrder(order: PrebookingOrderResult) {
     setActiveId(order.orderId);
-    setDraft(draftFrom(order));
   }
 
-  function applySuggestion(order: PrebookingOrderResult) {
-    const suggestion = safeSuggestion(order);
-    if (!suggestion || !draft) return;
-    setDraft({
-      ...draft,
-      line1: suggestion.line1 || draft.line1,
-      line2: suggestion.line2 ?? draft.line2,
-      line3: suggestion.line3 ?? draft.line3,
-      city: suggestion.city || draft.city,
-      state: suggestion.state || draft.state,
-      pincode: suggestion.pincode || draft.pincode,
-    });
-    toast.success("Suggestion applied. Save changes to keep it.");
-  }
-
-  async function save(order: PrebookingOrderResult) {
-    if (!draft) return;
-    setSaving(true);
+  async function save(order: PrebookingOrderResult, phone: string, pincode: string) {
+    if (phase !== "idle") return;
+    setFormError("");
+    setConflict(false);
+    setPhase("saving");
     try {
       await api(`/api/v1/orders/${order.orderId}/address`, {
         method: "PATCH",
         body: JSON.stringify({
-          name: draft.name,
-          phone: draft.phone,
-          line1: draft.line1,
-          line2: draft.line2,
-          line3: draft.line3,
-          city: draft.city,
-          state: draft.state,
-          pincode: draft.pincode,
-          country: draft.country || "IN",
+          correction: "phone_pin",
+          ...(fields.phone ? { phone } : {}),
+          ...(fields.pin ? { pincode } : {}),
           expectedFingerprint: order.fingerprint || undefined,
         }),
       });
-      if (order.parcel) {
-        const lengthCm = Number(draft.lengthCm);
-        const widthCm = Number(draft.widthCm);
-        const heightCm = Number(draft.heightCm);
-        const weight = Number(draft.weightGrams);
-        const changed =
-          lengthCm !== order.parcel.lengthCm ||
-          widthCm !== order.parcel.widthCm ||
-          heightCm !== order.parcel.heightCm ||
-          (weight > 0 && weight !== order.parcel.weightGrams);
-        if (changed && lengthCm > 0 && widthCm > 0 && heightCm > 0) {
-          await api(`/api/v1/orders/${order.orderId}/dimensions`, {
-            method: "PATCH",
-            body: JSON.stringify({
-              lengthCm,
-              widthCm,
-              heightCm,
-              boxWeightGrams: weight > 0 ? weight : undefined,
-            }),
-          });
+      await queryClient.invalidateQueries({ queryKey: ["orders"] });
+      const checked = await precheckOrderIds([order.orderId], () => undefined, { allowAi, forceAi: false });
+      const updated = checked.orders[0];
+      const still = updated ? needsContactCorrection(updated.issues) : true;
+      const unavailable = updated ? contactCorrectionFields(updated.issues).pinUnavailable : false;
+      if (still || unavailable) {
+        setResult((current) => (updated ? replaceOrder(current, [updated]) : current));
+        setPhase("idle");
+        if (unavailable && !still) {
+          setFormError("Saved. India Post PIN check is temporarily unavailable, so this order is not marked ready.");
         }
+        return;
       }
-      toast.success("Shipping address saved.");
-      await runCheck([order.orderId]);
+      setPhase("success");
+      if (closeTimer.current) window.clearTimeout(closeTimer.current);
+      closeTimer.current = window.setTimeout(() => {
+        const orders = ordersRef.current.filter((item) => item.orderId !== order.orderId);
+        setResult(tallyPrecheck(orders));
+        setPhase("idle");
+        if (!orders.length) onOpenChange(false);
+        else setActiveId(orders[0].orderId);
+      }, 1000);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not save the address.");
-    } finally {
-      setSaving(false);
+      setPhase("idle");
+      setConflict(error instanceof ApiError && error.status === 409);
+      setFormError(error instanceof Error ? error.message : "Could not save the address.");
     }
   }
 
-  async function applySafeAll() {
-    const targets = (result?.orders ?? []).filter((order) => safeSuggestion(order));
-    if (!targets.length) {
-      toast.message("No safe address suggestions to apply.");
-      return;
-    }
-    setSaving(true);
-    try {
-      for (const order of targets) {
-        const suggestion = safeSuggestion(order)!;
-        await api(`/api/v1/orders/${order.orderId}/address`, {
-          method: "PATCH",
-          body: JSON.stringify({
-            name: order.address.name,
-            phone: order.address.phone,
-            line1: suggestion.line1 || order.address.line1,
-            line2: suggestion.line2 ?? order.address.line2,
-            line3: suggestion.line3 ?? order.address.line3,
-            city: suggestion.city || order.address.city,
-            state: suggestion.state || order.address.state,
-            pincode: order.address.pincode,
-            country: order.address.country || "IN",
-            expectedFingerprint: order.fingerprint || undefined,
-          }),
-        });
-      }
-      toast.success("Safe suggestions saved. Rechecking those orders.");
-      await runCheck(targets.map((order) => order.orderId));
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not apply suggestions.");
-    } finally {
-      setSaving(false);
-    }
+  function reload() {
+    if (!active) return;
+    setFormError("");
+    void runCheck([active.orderId]).then((visible) => {
+      const match = visible?.orders.find((order) => order.orderId === active.orderId);
+      if (match) setActiveId(match.orderId);
+    });
   }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[92vh] max-w-3xl overflow-y-auto">
+      <DialogContent className="max-h-[90dvh] w-[calc(100%-1.5rem)] max-w-[28rem] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{allowAi ? "AI Address Check" : "Address check"}</DialogTitle>
-          <DialogDescription>
-            {allowAi
-              ? "Addresses are corrected automatically for India Post booking. Review anything still flagged."
-              : "Review the flagged address. PIN lookup and manual edits still run. AI correction is off."}
-          </DialogDescription>
+          <DialogTitle>Fix Order Details</DialogTitle>
+          <DialogDescription>Please correct the highlighted details to continue.</DialogDescription>
         </DialogHeader>
-        {checking ? (
-          <p className="text-sm text-muted-foreground">
-            Checking {progress.done} of {progress.total || orderIds.length}…
-          </p>
-        ) : null}
-        {result ? (
-          <div className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
-            <Summary label="Total" value={result.total} />
-            <Summary label="Ready" value={result.ready} />
-            <Summary label="Critical" value={result.fixRequired} />
-            <Summary label="Review" value={result.needsReview + result.unavailable} />
-          </div>
-        ) : null}
-        <div className="grid gap-4 md:grid-cols-[14rem_1fr]">
-          <div className="max-h-64 space-y-1 overflow-y-auto md:max-h-[28rem]">
-            {(result?.orders ?? []).map((order) => (
+        {checking && !active ? <p className="text-sm text-muted-foreground">Checking…</p> : null}
+        {pending.length > 1 ? (
+          <div className="max-h-36 space-y-1 overflow-y-auto">
+            {pending.map((order) => (
               <button
                 key={order.orderId}
                 type="button"
-                className={`w-full rounded-lg border px-2 py-1.5 text-left text-xs ${order.orderId === activeId ? "border-brand bg-surface-soft" : "border-border"}`}
+                className={`w-full rounded-lg border px-2 py-2 text-left text-sm ${order.orderId === active?.orderId ? "border-brand bg-surface-soft" : "border-border"}`}
                 onClick={() => selectOrder(order)}
               >
-                <span className="block font-medium">#{order.orderNumber || order.orderId.slice(0, 8)}</span>
-                <span className="text-muted-foreground">{order.customerName || "Customer"} · {statusLabel(order.status)}</span>
+                #{order.orderNumber || order.orderId.slice(0, 8)} · {order.customerName || "Customer"}
               </button>
             ))}
           </div>
-          {active && draft ? (
-            <div className="space-y-3">
-              <div>
-                <p className="text-sm font-medium">Order #{active.orderNumber || active.orderId.slice(0, 8)}</p>
-                <p className="text-xs text-muted-foreground">
-                  {active.customerName || "Customer"} · {statusLabel(active.status)} · {active.issues.filter((issue) => issue.code !== "address_auto_corrected").length} issue{active.issues.filter((issue) => issue.code !== "address_auto_corrected").length === 1 ? "" : "s"}
-                </p>
-              </div>
-              {active.autoCorrected ? (
-                <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1.5 text-xs text-emerald-900">
-                  Address lines were corrected and saved for booking.
-                </p>
-              ) : null}
-              <div className="space-y-2">
-                {active.issues.filter((issue) => issue.code !== "address_auto_corrected").map((issue, index) => (
-                  <div key={`${issue.code}-${index}`} className="rounded-lg border border-border p-2 text-xs">
-                    <p className="font-medium">{issue.message}</p>
-                    {issue.suggestion?.line1 ? (
-                      <p className="mt-1 text-muted-foreground">Suggestion: {[issue.suggestion.line1, issue.suggestion.line2, issue.suggestion.city, issue.suggestion.state].filter(Boolean).join(", ")}</p>
-                    ) : null}
-                    {issue.offices?.length ? (
-                      <p className="mt-1 text-muted-foreground">{issue.offices.map((office) => office.name).join(", ")}</p>
-                    ) : null}
-                  </div>
-                ))}
-              </div>
-              <div className="grid gap-2 sm:grid-cols-2">
-                <Field label="Customer name" problem={problemFields.has("name") || problemFields.has("address")}>
-                  <Input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} />
-                </Field>
-                <Field label="Mobile" problem={problemFields.has("phone") || problemFields.has("address")}>
-                  <Input value={draft.phone} onChange={(event) => setDraft({ ...draft, phone: event.target.value })} />
-                </Field>
-                <Field label="Address line 1" problem={problemFields.has("line1") || problemFields.has("address")} className="sm:col-span-2">
-                  <Input value={draft.line1} onChange={(event) => setDraft({ ...draft, line1: event.target.value })} />
-                </Field>
-                <Field label="Address line 2" problem={problemFields.has("line2")} className="sm:col-span-2">
-                  <Input value={draft.line2} onChange={(event) => setDraft({ ...draft, line2: event.target.value })} />
-                </Field>
-                <Field label="Address line 3" problem={problemFields.has("line3")} className="sm:col-span-2">
-                  <Input value={draft.line3} onChange={(event) => setDraft({ ...draft, line3: event.target.value })} />
-                </Field>
-                <Field label="PIN code" problem={problemFields.has("pincode")}>
-                  <Input
-                    inputMode="numeric"
-                    maxLength={6}
-                    autoComplete="postal-code"
-                    value={draft.pincode}
-                    onChange={(event) =>
-                      setDraft({ ...draft, pincode: event.target.value.replace(/\D/g, "").slice(0, 6) })
-                    }
-                  />
-                  <IndiaPostPincodeAutofill
-                    pincode={draft.pincode}
-                    fillKey={active.orderId}
-                    onFill={({ city, state }) =>
-                      setDraft((current) =>
-                        current
-                          ? {
-                              ...current,
-                              ...(city ? { city } : {}),
-                              ...(state ? { state } : {}),
-                            }
-                          : current
-                      )
-                    }
-                  />
-                </Field>
-                <Field label="City" problem={problemFields.has("city")}>
-                  <Input value={draft.city} onChange={(event) => setDraft({ ...draft, city: event.target.value })} />
-                </Field>
-                <Field label="State" problem={problemFields.has("state")}>
-                  <Input value={draft.state} onChange={(event) => setDraft({ ...draft, state: event.target.value })} />
-                </Field>
-                <Field label="Country" problem={problemFields.has("country")}>
-                  <Input value={draft.country} onChange={(event) => setDraft({ ...draft, country: event.target.value })} />
-                </Field>
-                {active.parcel ? (
-                  <>
-                    <Field label="Weight (g)" problem={problemFields.has("physical_weight") || problemFields.has("weight")}>
-                      <Input value={draft.weightGrams} onChange={(event) => setDraft({ ...draft, weightGrams: event.target.value })} />
-                    </Field>
-                    <Field label="Length (cm)" problem={problemFields.has("length")}>
-                      <Input value={draft.lengthCm} onChange={(event) => setDraft({ ...draft, lengthCm: event.target.value })} />
-                    </Field>
-                    <Field label="Width (cm)" problem={problemFields.has("breadth") || problemFields.has("width")}>
-                      <Input value={draft.widthCm} onChange={(event) => setDraft({ ...draft, widthCm: event.target.value })} />
-                    </Field>
-                    <Field label="Height (cm)" problem={problemFields.has("height")}>
-                      <Input value={draft.heightCm} onChange={(event) => setDraft({ ...draft, heightCm: event.target.value })} />
-                    </Field>
-                  </>
-                ) : null}
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <Button type="button" size="sm" variant="secondary" disabled={!safeSuggestion(active) || saving} onClick={() => applySuggestion(active)}>
-                  Apply suggestion
-                </Button>
-                <Button type="button" size="sm" disabled={saving} onClick={() => void save(active)}>
-                  Save changes
-                </Button>
-                {allowAi ? (
-                  <Button type="button" size="sm" variant="secondary" disabled={checking || saving} onClick={() => void runCheck([active.orderId], true)}>
-                    AI correct address
-                  </Button>
-                ) : null}
-                <Button type="button" size="sm" variant="secondary" disabled={checking || saving} onClick={() => void runCheck([active.orderId])}>
-                  Recheck address
-                </Button>
-              </div>
-            </div>
-          ) : (
-            <p className="text-sm text-muted-foreground">{checking ? "Checking addresses…" : "Select an order to review it."}</p>
-          )}
-        </div>
-        <DialogFooter>
-          <Button type="button" variant="secondary" disabled={saving || checking} onClick={() => void applySafeAll()}>
-            Apply safe suggestions
-          </Button>
-          {allowAi ? (
-            <Button type="button" variant="secondary" disabled={checking || saving || !orderIds.length} onClick={() => void runCheck(orderIds, true)}>
-              AI correct all
-            </Button>
-          ) : null}
-          <Button type="button" variant="secondary" disabled={checking || !orderIds.length} onClick={() => void runCheck(orderIds)}>
-            Revalidate
-          </Button>
-          <Button
-            type="button"
-            variant="secondary"
-            disabled={!readyIds.length || checking || saving || booking}
-            onClick={() => {
-              setBooking(true);
-              onBookReady(readyIds);
-              onOpenChange(false);
-              setBooking(false);
-            }}
-          >
-            Book valid orders
-          </Button>
-          <Button
-            type="button"
-            disabled={blocked || booking}
-            onClick={() => {
-              setBooking(true);
-              onBookReady(readyIds);
-              onOpenChange(false);
-              setBooking(false);
-            }}
-          >
-            Book now
-          </Button>
-        </DialogFooter>
+        ) : null}
+        {active ? (
+          <FixOrderDetailsForm
+            key={`${active.orderId}:${active.fingerprint}`}
+            orderNumber={active.orderNumber || active.orderId.slice(0, 8)}
+            customerName={active.customerName || "Customer"}
+            showPhone={fields.phone}
+            showPin={fields.pin}
+            stateChoice={fields.stateChoice}
+            pinUnavailable={fields.pinUnavailable}
+            orderHref={`/dashboard/orders/${active.orderId}`}
+            initialPhone={active.address.phone || ""}
+            initialPin={active.address.pincode || ""}
+            formError={formError}
+            phase={phase}
+            onSave={(phone, pincode) => void save(active, phone, pincode)}
+          />
+        ) : checking ? null : (
+          <p className="text-sm text-muted-foreground">No mobile number or PIN code needs a correction.</p>
+        )}
+        {conflict && active ? (
+          <button type="button" className="text-sm font-medium text-brand" onClick={reload}>
+            Reload
+          </button>
+        ) : null}
       </DialogContent>
     </Dialog>
-  );
-}
-
-function Summary({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="rounded-lg border border-border px-2 py-1.5">
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="font-semibold">{value}</p>
-    </div>
-  );
-}
-
-function Field({
-  label,
-  problem,
-  className,
-  children,
-}: {
-  label: string;
-  problem?: boolean;
-  className?: string;
-  children: ReactNode;
-}) {
-  return (
-    <Label className={`space-y-1 text-xs ${problem ? "text-red-700" : ""} ${className ?? ""}`}>
-      <span>{label}</span>
-      {children}
-    </Label>
   );
 }

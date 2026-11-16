@@ -107,12 +107,28 @@ describe("pre-booking address checks", () => {
     expect(lookup).not.toHaveBeenCalled();
   });
 
-  it("blocks a PIN and state mismatch", async () => {
+  it("aligns the state when every India Post office names one state and keeps the PIN", async () => {
     clearDestinationPinCache();
-    const result = await assessPrebookingAddress(address({ state: "Tamil Nadu" }), {
+    const result = await assessPrebookingAddress(address({ state: "Tamil Nadu", pincode: "673121" }), {
       searchPostOffices: search([office({ state_name: "Kerala" })]),
     });
+    expect(result.status).toBe("READY");
+    expect(result.address.state).toBe("Kerala");
+    expect(result.address.pincode).toBe("673121");
+    expect(result.issues.some((issue) => issue.code === "pin_state_mismatch")).toBe(false);
+  });
+
+  it("keeps a PIN-state mismatch when the offices do not agree on one state", async () => {
+    clearDestinationPinCache();
+    const result = await assessPrebookingAddress(address({ state: "Tamil Nadu" }), {
+      searchPostOffices: search([
+        office({ office_id: "1", state_name: "Kerala", city_name: "Kalpetta" }),
+        office({ office_id: "2", state_name: "Karnataka", city_name: "Mangalore" }),
+      ]),
+    });
     expect(result.status).toBe("INVALID");
+    expect(result.address.state).toBe("Tamil Nadu");
+    expect(result.address.pincode).toBe("673121");
     expect(result.issues.some((issue) => issue.code === "pin_state_mismatch")).toBe(true);
   });
 

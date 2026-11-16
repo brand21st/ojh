@@ -21,6 +21,7 @@ export function IndiaMobileInput({
   size = "default",
   autoComplete = "tel-national",
   describedBy,
+  autoFocus,
 }: {
   id?: string;
   name?: string;
@@ -33,6 +34,7 @@ export function IndiaMobileInput({
   size?: MobileSize;
   autoComplete?: string;
   describedBy?: string;
+  autoFocus?: boolean;
 }) {
   const large = size === "lg";
   const compact = size === "sm";
@@ -64,6 +66,7 @@ export function IndiaMobileInput({
         type="tel"
         inputMode="numeric"
         autoComplete={autoComplete}
+        autoFocus={autoFocus}
         maxLength={10}
         placeholder={placeholder}
         aria-invalid={error ? true : undefined}

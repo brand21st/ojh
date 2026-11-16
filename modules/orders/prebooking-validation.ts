@@ -193,6 +193,24 @@ export function cityAlignedToPin(city: string, offices: IndiaPostOffice[]) {
   return { city: nextCity, ...(states[0] ? { state: states[0] } : {}) };
 }
 
+/**
+ * The state for this PIN, when every eligible office names the same state.
+ * An empty or conflicting entered state is replaced. The PIN is never changed.
+ * Mixed office states return null so the merchant chooses in the full editor.
+ */
+export function stateAlignedToPin(state: string, offices: IndiaPostOffice[]) {
+  const eligible = offices.filter(
+    (office) => indiaPostIsEligibleBookingOffice(office) && collapse(office.state_name)
+  );
+  const states = distinctPlaceNames(eligible.map((office) => office.state_name || ""));
+  if (states.length !== 1) return null;
+  const next = states[0];
+  if (!next) return null;
+  const entered = collapse(state);
+  if (entered && !pinOfficeStateConflict(entered, next)) return null;
+  return { state: next };
+}
+
 /** Street lines still need the model. A clean or invalid address does not. */
 export function addressLinesNeedAi(address: StoredShippingFields) {
   const classified = classifyStoredShippingAddress(address);
@@ -466,6 +484,11 @@ export async function assessPrebookingAddress(
         blocking: true,
       });
     } else {
+      const alignedState = stateAlignedToPin(collapse(current.state) || "", lookup.offices);
+      if (alignedState && !sameAddressText(alignedState.state, collapse(current.state) || "")) {
+        current = { ...current, state: alignedState.state };
+        autoCorrected = true;
+      }
       const offices = assessDestinationOffices(collapse(current.state), collapse(current.city), lookup.offices);
       if (offices.status === "INVALID") {
         status = "INVALID";
