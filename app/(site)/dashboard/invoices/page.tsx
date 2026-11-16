@@ -4,7 +4,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertCircle, Download, Eye, Plus, Printer, Search, Settings2, X } from "lucide-react";
+import { AlertCircle, Archive, ChevronDown, Download, Eye, FileText, Plus, Printer, Search, Settings2, X } from "lucide-react";
 import { toast } from "sonner";
 import { InvoiceActions } from "@/components/invoices/invoice-actions";
 import { DataTable, type DataTableColumn } from "@/components/dashboard/data-table";
@@ -25,6 +25,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { asPaginated, customerName } from "@/lib/dashboard/records";
 import { formatCurrency, formatDate } from "@/lib/format";
 import {
@@ -47,6 +53,7 @@ import {
   invoiceBulkDownloadMessage,
   mergeSelectedRows,
   partitionInvoiceDownloads,
+  type InvoiceBulkFormat,
 } from "@/lib/invoices/bulk-download";
 import { downloadInvoicePdf, downloadInvoicePdfs, openInvoicePdf, printInvoicePdf } from "@/lib/invoices/preview";
 import { api } from "@/lib/hooks/use-api";
@@ -207,7 +214,7 @@ function SalesTab({ allowed, checking }: { allowed: boolean; checking: boolean }
   const list = asPaginated<SalesInvoiceRow>(query.data);
   const selectedIds = selectedRows.map((row) => row.id);
   const open = (row: SalesInvoiceRow) => router.push(`/dashboard/invoices/${row.id}`);
-  const downloadSelected = async () => {
+  const downloadSelected = async (format: InvoiceBulkFormat) => {
     const { items, skipped } = partitionInvoiceDownloads(
       selectedRows,
       (row) => salesInvoiceHasPdf(row.status),
@@ -215,13 +222,13 @@ function SalesTab({ allowed, checking }: { allowed: boolean; checking: boolean }
       "sales"
     );
     if (items.length === 0) {
-      toast.error(invoiceBulkDownloadMessage(0, skipped, 0));
+      toast.error(invoiceBulkDownloadMessage(0, skipped, 0, format));
       return;
     }
     setDownloading(true);
     try {
-      const result = await downloadInvoicePdfs(items, "sales-invoices.zip");
-      toast.success(invoiceBulkDownloadMessage(result.downloaded, skipped, result.failed));
+      const result = await downloadInvoicePdfs(items, { zip: "sales-invoices.zip", pdf: "sales-invoices.pdf" }, format);
+      toast.success(invoiceBulkDownloadMessage(result.downloaded, skipped, result.failed, format));
     } catch (error) {
       pdfError(error instanceof Error ? error : new Error("Could not download those invoices."));
     } finally {
@@ -534,7 +541,7 @@ function InvoiceBulkBar({
 }: {
   count: number;
   downloading: boolean;
-  onDownload: () => void;
+  onDownload: (format: InvoiceBulkFormat) => void;
   onClear: () => void;
 }) {
   if (count === 0) return null;
@@ -549,10 +556,38 @@ function InvoiceBulkBar({
           {count === 1 ? "1 selected" : `${count} selected`}
         </p>
         <div className="flex flex-wrap gap-2">
-          <Button type="button" size="sm" className="min-h-10" disabled={downloading} onClick={onDownload}>
-            <Download className="size-4" aria-hidden />
-            {downloading ? "Downloading…" : count === 1 ? "Download PDF" : "Download PDFs"}
-          </Button>
+          {count === 1 ? (
+            <Button type="button" size="sm" className="min-h-10" disabled={downloading} onClick={() => onDownload("pdf")}>
+              <Download className="size-4" aria-hidden />
+              {downloading ? "Downloading…" : "Download PDF"}
+            </Button>
+          ) : (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button type="button" size="sm" className="min-h-10" disabled={downloading} aria-label="Download selected invoices">
+                  <Download className="size-4" aria-hidden />
+                  {downloading ? "Downloading…" : "Download PDFs"}
+                  <ChevronDown className="size-4 opacity-80" aria-hidden />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="min-w-[16rem]">
+                <DropdownMenuItem disabled={downloading} onSelect={() => onDownload("zip")}>
+                  <Archive className="size-4" aria-hidden />
+                  <span>
+                    <span className="block font-medium">ZIP</span>
+                    <span className="block text-xs font-normal text-muted">One PDF file per invoice</span>
+                  </span>
+                </DropdownMenuItem>
+                <DropdownMenuItem disabled={downloading} onSelect={() => onDownload("pdf")}>
+                  <FileText className="size-4" aria-hidden />
+                  <span>
+                    <span className="block font-medium">One PDF</span>
+                    <span className="block text-xs font-normal text-muted">All selected invoices in one file</span>
+                  </span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
           <Button type="button" variant="secondary" size="sm" className="min-h-10" disabled={downloading} onClick={onClear}>
             Clear selection
           </Button>
@@ -580,7 +615,7 @@ function ShippingTab({ allowed, checking }: { allowed: boolean; checking: boolea
   });
   const list = asPaginated<InvoiceRecord>(query.data);
   const selectedIds = selectedRows.map((row) => row.id);
-  const downloadSelected = async () => {
+  const downloadSelected = async (format: InvoiceBulkFormat) => {
     const { items, skipped } = partitionInvoiceDownloads(
       selectedRows,
       (row) => shippingInvoiceHasPdf(row.status),
@@ -588,13 +623,13 @@ function ShippingTab({ allowed, checking }: { allowed: boolean; checking: boolea
       "shipping"
     );
     if (items.length === 0) {
-      toast.error(invoiceBulkDownloadMessage(0, skipped, 0));
+      toast.error(invoiceBulkDownloadMessage(0, skipped, 0, format));
       return;
     }
     setDownloading(true);
     try {
-      const result = await downloadInvoicePdfs(items, "shipping-documents.zip");
-      toast.success(invoiceBulkDownloadMessage(result.downloaded, skipped, result.failed));
+      const result = await downloadInvoicePdfs(items, { zip: "shipping-documents.zip", pdf: "shipping-documents.pdf" }, format);
+      toast.success(invoiceBulkDownloadMessage(result.downloaded, skipped, result.failed, format));
     } catch (error) {
       pdfError(error instanceof Error ? error : new Error("Could not download those documents."));
     } finally {
