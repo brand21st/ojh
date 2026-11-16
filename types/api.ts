@@ -17,6 +17,7 @@ export type MeUser = {
   avatarUrl: string | null;
   whatsappNumber?: string | null;
   indiaPostOnboardingDismissedAt?: string | null;
+  indiaPostBookingGuideHiddenAt?: string | null;
 };
 
 export type MeOrganization = {

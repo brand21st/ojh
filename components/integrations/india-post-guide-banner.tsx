@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { BookOpen } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
 import { IndiaPostBookingGuideBody } from "@/components/shipments/india-post-booking-guide";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -13,29 +14,96 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  hasLocalIndiaPostBookingGuideHidden,
+  setLocalIndiaPostBookingGuideHidden,
+  shouldAutoOpenIndiaPostBookingGuide,
+} from "@/lib/dashboard/india-post-booking-guide";
+import { api } from "@/lib/hooks/use-api";
+import { useMe } from "@/lib/hooks/use-me";
+import type { MeResponse } from "@/types/api";
 
-const HIDE_KEY = "postbus:india-post-guide:hide";
+function subscribeNever() {
+  return () => {};
+}
 
 export function IndiaPostGuideBanner({ selectedService }: { selectedService?: string }) {
+  const me = useMe();
+  const queryClient = useQueryClient();
+  const hydrated = useSyncExternalStore(subscribeNever, () => true, () => false);
+  const userId = me.data?.user.id;
+  const hiddenAt = me.data?.user.indiaPostBookingGuideHiddenAt ?? null;
   const [open, setOpen] = useState(false);
   const [dontShow, setDontShow] = useState(false);
+  const [localHidden, setLocalHidden] = useState(false);
+  const [seenUserId, setSeenUserId] = useState(userId);
+  const [autoOpened, setAutoOpened] = useState(false);
+
+  if (userId !== seenUserId) {
+    setSeenUserId(userId);
+    const nextLocal = userId ? hasLocalIndiaPostBookingGuideHidden(userId) : false;
+    setLocalHidden(nextLocal);
+    setDontShow(Boolean(hiddenAt) || nextLocal);
+    setAutoOpened(false);
+  }
+
+  const persistHidden = useCallback(
+    async (hidden: boolean) => {
+      if (userId) setLocalIndiaPostBookingGuideHidden(userId, hidden);
+      setLocalHidden(hidden);
+      setDontShow(hidden);
+      const hiddenStamp = hidden ? new Date().toISOString() : null;
+      queryClient.setQueryData<MeResponse>(["me"], (current) => {
+        if (!current) return current;
+        return {
+          ...current,
+          user: { ...current.user, indiaPostBookingGuideHiddenAt: hiddenStamp },
+        };
+      });
+      try {
+        await api("/api/v1/me", {
+          method: "PATCH",
+          body: JSON.stringify({ indiaPostBookingGuideHidden: hidden }),
+        });
+      } catch {
+        // Local skip plus optimistic /me keep the guide from returning this session.
+      }
+    },
+    [queryClient, userId],
+  );
+
+  const shouldAutoOpen = shouldAutoOpenIndiaPostBookingGuide({
+    hydrated,
+    meLoading: me.isLoading,
+    meError: Boolean(me.error),
+    hiddenAt,
+    localHidden,
+  });
 
   useEffect(() => {
-    if (window.localStorage.getItem(HIDE_KEY) === "1") return;
-    const timer = window.setTimeout(() => setOpen(true), 400);
+    if (!userId || me.isLoading || me.error) return;
+    if (localHidden && !hiddenAt) void persistHidden(true);
+  }, [hiddenAt, localHidden, me.error, me.isLoading, persistHidden, userId]);
+
+  useEffect(() => {
+    if (!shouldAutoOpen || autoOpened) return;
+    const timer = window.setTimeout(() => {
+      setDontShow(false);
+      setOpen(true);
+      setAutoOpened(true);
+    }, 400);
     return () => window.clearTimeout(timer);
-  }, []);
+  }, [autoOpened, shouldAutoOpen]);
 
   function handleOpenChange(next: boolean) {
-    if (!next) {
-      if (dontShow) window.localStorage.setItem(HIDE_KEY, "1");
-      else window.localStorage.removeItem(HIDE_KEY);
+    if (!next && dontShow && !hiddenAt && !localHidden) {
+      void persistHidden(true);
     }
     setOpen(next);
   }
 
   function openGuide() {
-    setDontShow(window.localStorage.getItem(HIDE_KEY) === "1");
+    setDontShow(Boolean(hiddenAt) || localHidden);
     setOpen(true);
   }
 
@@ -87,7 +155,14 @@ export function IndiaPostGuideBanner({ selectedService }: { selectedService?: st
 
           <DialogFooter className="items-stretch gap-3 sm:items-center sm:justify-between">
             <label className="flex items-center gap-2 text-sm text-muted">
-              <Checkbox checked={dontShow} onCheckedChange={(value) => setDontShow(value === true)} />
+              <Checkbox
+                checked={dontShow}
+                onCheckedChange={(value) => {
+                  const hidden = value === true;
+                  void persistHidden(hidden);
+                  if (hidden) setOpen(false);
+                }}
+              />
               Don&apos;t show this automatically
             </label>
             <Button type="button" size="sm" onClick={() => handleOpenChange(false)}>

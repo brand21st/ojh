@@ -12,6 +12,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { isTransientAuthClass } from "@/lib/auth/session/classify";
 import { getRequestAuthUser } from "@/lib/supabase/request-auth";
 import { isMerchantApiOpenForOrg } from "@/modules/merchant-api/flags";
+import { setIndiaPostBookingGuideHiddenForUser } from "@/lib/dashboard/india-post-booking-guide";
 import { dismissIndiaPostOnboardingForUser } from "@/lib/dashboard/india-post-onboarding";
 import { shouldWritePresence } from "@/lib/admin/user-presence";
 
@@ -52,6 +53,7 @@ export async function handleSessionRoutes(
         avatarUrl: profile?.avatar_url,
         whatsappNumber: profile?.whatsapp_number ?? null,
         indiaPostOnboardingDismissedAt: profile?.india_post_onboarding_dismissed_at ?? null,
+        indiaPostBookingGuideHiddenAt: profile?.india_post_booking_guide_hidden_at ?? null,
       },
       organization,
       role: ensured.role,
@@ -123,8 +125,32 @@ export async function handleSessionRoutes(
     }
     if (!user) throw new AppError(ERROR_CODES.AUTH_REQUIRED, "Please sign in to continue.");
     const body = await request.json().catch(() => ({}));
-    z.object({ indiaPostOnboardingDismissedAt: z.literal(true) }).parse(body);
-    return dismissIndiaPostOnboardingForUser(supabase, user.id);
+    const parsed = z
+      .object({
+        indiaPostOnboardingDismissedAt: z.literal(true).optional(),
+        indiaPostBookingGuideHidden: z.boolean().optional(),
+      })
+      .refine(
+        (value) =>
+          value.indiaPostOnboardingDismissedAt === true || typeof value.indiaPostBookingGuideHidden === "boolean",
+        { message: "No preference to save" },
+      )
+      .parse(body);
+    const result: {
+      dismissed?: true;
+      indiaPostOnboardingDismissedAt?: string;
+      indiaPostBookingGuideHiddenAt?: string | null;
+    } = {};
+    if (parsed.indiaPostOnboardingDismissedAt) {
+      Object.assign(result, await dismissIndiaPostOnboardingForUser(supabase, user.id));
+    }
+    if (typeof parsed.indiaPostBookingGuideHidden === "boolean") {
+      Object.assign(
+        result,
+        await setIndiaPostBookingGuideHiddenForUser(supabase, user.id, parsed.indiaPostBookingGuideHidden),
+      );
+    }
+    return result;
   }
 
   if (key === "POST organizations") {
