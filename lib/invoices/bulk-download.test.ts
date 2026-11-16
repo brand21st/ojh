@@ -40,5 +40,6 @@ describe("invoice bulk download", () => {
     expect(invoiceBulkDownloadMessage(2, 1, 1)).toBe(
       "Saved 2 PDFs. 1 was skipped because it has no PDF yet. 1 could not be downloaded."
     );
+    expect(invoiceBulkDownloadMessage(4, 0, 0, "pdf")).toBe("Saved 1 PDF with 4 invoices.");
   });
 });

@@ -56,14 +56,25 @@ export function partitionInvoiceDownloads<T extends { id: string }>(
   return { items, skipped };
 }
 
-export function invoiceBulkDownloadMessage(downloaded: number, skipped: number, failed: number) {
+export type InvoiceBulkFormat = "zip" | "pdf";
+
+export function invoiceBulkDownloadMessage(
+  downloaded: number,
+  skipped: number,
+  failed: number,
+  format: InvoiceBulkFormat = "zip"
+) {
   if (downloaded === 0 && failed === 0) {
     return skipped === 1
       ? "That invoice does not have a PDF yet."
       : "None of the selected invoices have a PDF yet.";
   }
   const parts = [
-    downloaded === 1 ? "Saved 1 PDF." : `Saved ${downloaded} PDFs.`,
+    format === "pdf" && downloaded > 1
+      ? `Saved 1 PDF with ${downloaded} invoices.`
+      : downloaded === 1
+        ? "Saved 1 PDF."
+        : `Saved ${downloaded} PDFs.`,
   ];
   if (skipped) {
     parts.push(skipped === 1 ? "1 was skipped because it has no PDF yet." : `${skipped} were skipped because they have no PDF yet.`);

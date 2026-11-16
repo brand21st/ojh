@@ -41,32 +41,63 @@ export async function downloadInvoicePdf(invoiceId: string, filename: string, ki
 
 export async function downloadInvoicePdfs(
   items: Array<{ id: string; filename: string; kind: "shipping" | "sales" }>,
-  zipName: string
+  names: { zip: string; pdf: string },
+  format: "zip" | "pdf" = "zip"
 ): Promise<{ downloaded: number; failed: number }> {
   if (items.length === 0) return { downloaded: 0, failed: 0 };
-  const names = uniqueDownloadNames(items.map((item) => item.filename));
+  const filenames = uniqueDownloadNames(items.map((item) => item.filename));
   if (items.length === 1) {
-    await downloadInvoicePdf(items[0].id, names[0], items[0].kind);
+    await downloadInvoicePdf(items[0].id, filenames[0], items[0].kind);
     return { downloaded: 1, failed: 0 };
   }
 
-  const JSZip = (await import("jszip")).default;
-  const zip = new JSZip();
-  let downloaded = 0;
+  const files: Array<{ name: string; bytes: ArrayBuffer }> = [];
   let failed = 0;
   for (let index = 0; index < items.length; index += 1) {
     try {
-      zip.file(names[index], await fetchInvoicePdfBlob(items[index].id, items[index].kind));
-      downloaded += 1;
+      files.push({
+        name: filenames[index],
+        bytes: await (await fetchInvoicePdfBlob(items[index].id, items[index].kind)).arrayBuffer(),
+      });
     } catch {
       failed += 1;
     }
   }
-  if (downloaded === 0) {
+  if (files.length === 0) {
     throw new Error("Could not download those invoices. Try again.");
   }
-  saveBlob(await zip.generateAsync({ type: "blob" }), zipName.endsWith(".zip") ? zipName : `${zipName}.zip`);
-  return { downloaded, failed };
+
+  if (format === "pdf") {
+    const merged = await mergeInvoicePdfs(files.map((file) => file.bytes));
+    saveBlob(new Blob([new Uint8Array(merged)], { type: "application/pdf" }), names.pdf.endsWith(".pdf") ? names.pdf : `${names.pdf}.pdf`);
+    return { downloaded: files.length, failed };
+  }
+
+  const JSZip = (await import("jszip")).default;
+  const zip = new JSZip();
+  for (const file of files) zip.file(file.name, file.bytes);
+  saveBlob(await zip.generateAsync({ type: "blob" }), names.zip.endsWith(".zip") ? names.zip : `${names.zip}.zip`);
+  return { downloaded: files.length, failed };
+}
+
+async function mergeInvoicePdfs(buffers: ArrayBuffer[]) {
+  const { PDFDocument } = await import("pdf-lib");
+  const output = await PDFDocument.create();
+  let merged = 0;
+  for (const bytes of buffers) {
+    try {
+      const source = await PDFDocument.load(bytes, { ignoreEncryption: true, updateMetadata: false });
+      const pages = await output.copyPages(source, source.getPageIndices());
+      for (const page of pages) output.addPage(page);
+      merged += 1;
+    } catch {
+      // skip unreadable PDFs; caller still reports how many files were fetched
+    }
+  }
+  if (merged === 0 || output.getPageCount() === 0) {
+    throw new Error("Could not combine those invoices into one PDF. Try ZIP instead.");
+  }
+  return output.save();
 }
 
 export async function printInvoicePdf(invoiceId: string, kind: "shipping" | "sales" = "shipping") {
