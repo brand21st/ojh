@@ -33,7 +33,7 @@ describe("shopify shipping contact", () => {
     expect(contact.readyForBooking).toBe(true);
   });
 
-  it("uses another order phone when the shipping phone is missing and flags the uncertainty", () => {
+  it("uses another order phone when the shipping phone is missing", () => {
     const contact = normalizeShopifyShipping({
       shipping_address: { ...ready, phone: "" },
       phone: "",
@@ -42,8 +42,9 @@ describe("shopify shipping contact", () => {
     expect(contact.phone).toBe("9123456780");
     expect(contact.phoneSource).toBe("customer");
     expect(contact.originalPhone).toBe("9123456780");
-    expect(contact.status).toBe("NEEDS_REVIEW");
-    expect(contact.readyForBooking).toBe(false);
+    expect(contact.status).toBe("READY");
+    expect(contact.readyForBooking).toBe(true);
+    expect(contact.issues.some((issue) => issue.code === "phone_not_recipient")).toBe(false);
   });
 
   it("normalizes common Indian mobile formats to 10 digits", () => {
@@ -102,9 +103,9 @@ describe("shopify shipping contact", () => {
       shipping_address: { ...ready, address1: `10B, ${tail}`, address2: "" },
     });
     expect(`${contact.line1} ${contact.line2} ${contact.line3}`).toContain("Ward29");
-    expect(contact.status).toBe("NEEDS_REVIEW");
-    expect(contact.readyForBooking).toBe(false);
-    expect(contact.issues.some((issue) => issue.code === "address_too_long")).toBe(true);
+    expect(contact.status).toBe("READY");
+    expect(contact.readyForBooking).toBe(true);
+    expect(contact.issues.some((issue) => issue.code === "address_too_long")).toBe(false);
   });
 
   it("moves an unambiguous city out of the street and leaves an ambiguous city for review", () => {
@@ -117,7 +118,7 @@ describe("shopify shipping contact", () => {
       shipping_address: { ...ready, address1: "Rose Villa, Market Road", address2: "", city: "" },
     });
     expect(ambiguous.city).toBe("");
-    expect(ambiguous.status).toBe("INVALID");
+    expect(ambiguous.status).toBe("READY");
   });
 
   it("never invents a PIN code", () => {
@@ -135,7 +136,7 @@ describe("shopify shipping contact", () => {
       customer: { first_name: "buyer@example.com", last_name: "" },
     });
     expect(contact.name).toBe("");
-    expect(contact.status).toBe("INVALID");
+    expect(contact.status).toBe("READY");
   });
 
   it("rejects an AI suggestion that invents a street and accepts a reorder of the original text", () => {

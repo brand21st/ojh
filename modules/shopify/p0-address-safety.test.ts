@@ -6,6 +6,7 @@ import {
   incomingShopifyShippingUnusable,
   shopifyAddressPersistence,
   shopifyMayRefreshStoredAddress,
+  recipientSourceAdvisoryOnly,
   shippingAddressBookingBlock,
   normalizeShopifyShipping,
 } from "@/modules/shopify/shipping-contact";
@@ -39,12 +40,46 @@ describe("P0-07 fail-closed booking eligibility", () => {
     ).toMatch(/Invalid/i);
   });
 
-  it("blocks NEEDS_REVIEW, INVALID, NULL, unknown, and missing addresses", () => {
-    expect(shippingAddressBookingBlock({ ...readyRow, address_validation_status: "NEEDS_REVIEW" })).toBeTruthy();
-    expect(shippingAddressBookingBlock({ ...readyRow, address_validation_status: "INVALID" })).toBeTruthy();
+  it("blocks a stored PIN failure, NULL, unknown, and missing addresses", () => {
+    expect(shippingAddressBookingBlock({ ...readyRow, address_validation_status: "NEEDS_REVIEW" })).toBeNull();
+    expect(
+      shippingAddressBookingBlock({
+        ...readyRow,
+        address_validation_status: "INVALID",
+        address_validation_errors: [
+          { code: "pin_not_found", message: "This PIN code was not found by India Post.", blocking: true },
+        ],
+      })
+    ).toBeTruthy();
     expect(shippingAddressBookingBlock({ ...readyRow, address_validation_status: null })).toMatch(/not been validated/i);
     expect(shippingAddressBookingBlock({ ...readyRow, address_validation_status: "UNKNOWN" })).toMatch(/incomplete/i);
     expect(shippingAddressBookingBlock(null)).toMatch(/Missing shipping address/i);
+  });
+
+  it("does not block a stored buyer-phone note once the live number is valid", () => {
+    expect(
+      recipientSourceAdvisoryOnly([
+        {
+          code: "phone_not_recipient",
+          message: "Mobile number may belong to the buyer rather than the shipping recipient.",
+          blocking: false,
+        },
+      ])
+    ).toBe(true);
+    expect(
+      shippingAddressBookingBlock({
+        ...readyRow,
+        phone_source: "customer",
+        address_validation_status: "NEEDS_REVIEW",
+        address_validation_errors: [
+          {
+            code: "phone_not_recipient",
+            message: "Mobile number may belong to the buyer rather than the shipping recipient.",
+            blocking: false,
+          },
+        ],
+      })
+    ).toBeNull();
   });
 
   it("blocks a legacy NULL status even when the phone looks like a placeholder", () => {

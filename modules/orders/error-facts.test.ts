@@ -11,6 +11,38 @@ import {
 import { parseErrorStatusContent } from "@/modules/orders/error-status";
 
 describe("order error status", () => {
+  it("drops a stored buyer-phone note so parcel errors stay the address action", () => {
+    const facts = collectErrorFacts({
+      shippingAddress: {
+        address_validation_status: "NEEDS_REVIEW",
+        address_validation_errors: [
+          {
+            code: "phone_not_recipient",
+            message: "Mobile number may belong to the buyer rather than the shipping recipient.",
+          },
+          {
+            code: "address_auto_corrected",
+            message: "Address lines were corrected for India Post booking.",
+          },
+        ],
+      },
+      shipment: { status: "DRAFT", length_cm: 0, width_cm: 0, height_cm: 0, weight_grams: 0 },
+    });
+    expect(facts.some((fact) => fact.kind === "address")).toBe(false);
+    const shown = resolveDisplayError({
+      shippingAddress: {
+        address_validation_status: "NEEDS_REVIEW",
+        address_validation_errors: [
+          { message: "Mobile number may belong to the buyer rather than the shipping recipient." },
+          { message: "Address lines were corrected for India Post booking." },
+        ],
+      },
+      shipment: { status: "DRAFT", length_cm: 0, width_cm: 0, height_cm: 0, weight_grams: 0 },
+    });
+    expect(shown?.status).toBe("Parcel details missing");
+    expect(shown && errorQuickAction(shown, false)).toBe("parcel");
+  });
+
   it("keeps a provider failure ahead of address and parcel facts", () => {
     const facts = collectErrorFacts({
       payment_status: "UNPAID",

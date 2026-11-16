@@ -7,13 +7,11 @@ import { extractIndiaMobileDigits } from "@/lib/phone/india-whatsapp";
  * Shared Shopify recipient mapping.
  *
  * Name priority: shipping address name or shipping first/last, then the customer
- * account name, then billing. Account and billing names are flagged because the
- * buyer and the recipient are not assumed to be the same person.
- * Shopify customer displayName is intentionally unused.
+ * account name, then billing. Shopify customer displayName is intentionally unused.
  *
  * Phone priority: shipping address, order phone, customer phone, billing phone.
- * A non-shipping number is kept and flagged for review. Invalid digit strings are
- * not truncated and not replaced.
+ * A valid non-shipping number is kept. Invalid digit strings are not truncated
+ * and not replaced.
  *
  * PIN codes are kept only when they are exactly six digits. Missing values stay empty.
  */
@@ -254,35 +252,17 @@ export function assessShopifyShippingFields(input: {
 }): { issues: AddressIssue[]; status: AddressValidationStatus; needsAi: boolean } {
   const issues: AddressIssue[] = [];
   const add = (code: string, message: string, blocking: boolean) => issues.push({ code, message, blocking });
-  if (!input.name) add("missing_name", "Missing recipient name.", true);
-  else if (input.nameSource !== "shipping") {
-    add("name_not_recipient", "Recipient name was taken from the buyer account, not the shipping address.", false);
-  }
   if (!input.originalPhone && !input.phone) add("missing_phone", "Missing mobile number.", true);
   else if (!input.phone) add("invalid_phone", "Mobile number is not a 10-digit Indian number starting with 6, 7, 8, or 9.", true);
-  else if (input.phoneSource !== "shipping") {
-    add("phone_not_recipient", "Mobile number may belong to the buyer rather than the shipping recipient.", false);
-  }
-  if (!input.line1) add("missing_line1", "Address line 1 is empty.", true);
-  if (!input.city) add("missing_city", "City is missing.", true);
-  if (!input.state) add("missing_state", "State is missing.", true);
-  else if (!stateCodeFromName(input.state)) add("invalid_state", "State is not a recognized Indian state or union territory.", false);
   if (!input.pincode) add("missing_pincode", "PIN code is missing.", true);
   else if (!/^[1-9][0-9]{5}$/.test(input.pincode)) add("invalid_pincode", "PIN code must be exactly six digits.", true);
-  const street = [input.line1, input.line2, input.line3].filter(Boolean);
-  const tooLong = street.some((line) => line.length > INDIA_POST_ADDRESS_LINE_MAX) || street.join("").length > INDIA_POST_ADDRESS_TOTAL_MAX;
-  if (tooLong) {
-    add("address_too_long", "Address exceeds India Post line limits. Review it before booking.", false);
-  }
-  const country = input.country.toUpperCase();
-  if (country && country !== "IN" && country !== "INDIA") {
-    add("country_not_india", "Shipping country is not India.", true);
-  }
   const blocking = issues.some((issue) => issue.blocking);
-  const review = issues.some((issue) => !issue.blocking);
-  const status: AddressValidationStatus = blocking ? "INVALID" : review ? "NEEDS_REVIEW" : "READY";
+  const status: AddressValidationStatus = blocking ? "INVALID" : "READY";
+  const street = [input.line1, input.line2, input.line3].filter(Boolean);
+  const tooLong =
+    street.some((line) => line.length > INDIA_POST_ADDRESS_LINE_MAX) || street.join("").length > INDIA_POST_ADDRESS_TOTAL_MAX;
   const fragmentCount = fragmentsOf(street.join(", ")).length;
-  const needsAi = tooLong || fragmentCount >= 8 || (status !== "READY" && fragmentCount >= 5);
+  const needsAi = tooLong || fragmentCount >= 8;
   return { issues, status, needsAi };
 }
 
@@ -565,6 +545,59 @@ function issueMessages(errors: unknown) {
 const FORMATTING_REVIEW_NOTE =
   /repeated locality or address line removed|extra commas or spaces removed|address lines were corrected for india post/i;
 
+const RECIPIENT_SOURCE_NOTE =
+  /mobile number may belong to the buyer rather than the shipping recipient|recipient name was taken from the buyer account, not the shipping address/i;
+
+function recipientSourceIssue(issue: unknown) {
+  if (typeof issue === "string") return RECIPIENT_SOURCE_NOTE.test(issue);
+  if (!issue || typeof issue !== "object") return false;
+  const row = issue as { code?: unknown; message?: unknown; blocking?: unknown };
+  if (row.blocking === true) return false;
+  const code = String(row.code ?? "");
+  if (code === "phone_not_recipient" || code === "name_not_recipient") return true;
+  return RECIPIENT_SOURCE_NOTE.test(String(row.message ?? ""));
+}
+
+function formattingReviewIssue(issue: unknown) {
+  if (typeof issue === "string") return FORMATTING_REVIEW_NOTE.test(issue);
+  if (!issue || typeof issue !== "object") return false;
+  const row = issue as { code?: unknown; message?: unknown; blocking?: unknown };
+  if (row.blocking === true) return false;
+  const code = String(row.code ?? "");
+  if (code === "address_formatting" || code === "address_auto_corrected") return true;
+  return FORMATTING_REVIEW_NOTE.test(String(row.message ?? ""));
+}
+
+const PHONE_OR_PIN_NOTE =
+  /mobile number|10-digit indian|pin\s*code|pincode|exactly six digits|not found by india post|pin verification/i;
+
+/** Address check only fails a booking for the mobile number or the PIN code. */
+export function phoneOrPincodeIssue(issue: unknown) {
+  if (typeof issue === "string") return PHONE_OR_PIN_NOTE.test(issue);
+  if (!issue || typeof issue !== "object") return false;
+  const row = issue as { code?: unknown; message?: unknown };
+  const code = String(row.code ?? "");
+  if (
+    code === "missing_phone" ||
+    code === "invalid_phone" ||
+    code === "missing_pincode" ||
+    code === "invalid_pincode" ||
+    code === "pin_not_found" ||
+    code === "pin_state_mismatch" ||
+    code === "pin_unavailable" ||
+    code === "INVALID_PINCODE"
+  ) {
+    return true;
+  }
+  return PHONE_OR_PIN_NOTE.test(String(row.message ?? ""));
+}
+
+/** Buyer-phone notes and formatting cleanups. They are not an address error and do not block booking. */
+export function recipientSourceAdvisoryOnly(errors: unknown) {
+  if (!Array.isArray(errors) || errors.length === 0) return false;
+  return errors.every((issue) => recipientSourceIssue(issue) || formattingReviewIssue(issue));
+}
+
 /** True when every stored note is a safe cleanup, with nothing the merchant still has to confirm. */
 export function formattingReviewOnly(errors: unknown) {
   if (!Array.isArray(errors) || errors.length === 0) return false;
@@ -667,11 +700,18 @@ export function shippingAddressBookingBlock(address?: StoredShippingFields | nul
     if (stored === "VALIDATION_UNAVAILABLE") {
       return "India Post PIN verification is temporarily unavailable. Retry the address check before booking.";
     }
-    if (stored === "NEEDS_REVIEW" && formattingReviewOnly(address.address_validation_errors)) {
+    if (
+      stored === "NEEDS_REVIEW" &&
+      (formattingReviewOnly(address.address_validation_errors) ||
+        recipientSourceAdvisoryOnly(address.address_validation_errors))
+    ) {
       const live = classifyStoredShippingAddress(address);
       if (live.status === "READY") return null;
     }
     if (stored === "NEEDS_REVIEW" || stored === "INVALID") {
+      const live = classifyStoredShippingAddress(address);
+      const storedErrors = Array.isArray(address.address_validation_errors) ? address.address_validation_errors : [];
+      if (live.status === "READY" && !storedErrors.some((issue) => phoneOrPincodeIssue(issue))) return null;
       return bookingBlockMessage(stored, address.address_validation_errors);
     }
     return "Shipping address validation is incomplete. Correct it before India Post booking.";

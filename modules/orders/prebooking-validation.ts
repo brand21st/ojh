@@ -15,6 +15,8 @@ import {
   classifyStoredShippingAddress,
   pinOfficeStateConflict,
   formattingReviewOnly,
+  phoneOrPincodeIssue,
+  recipientSourceAdvisoryOnly,
   shippingAddressBookingBlock,
   validationPatchFromClassification,
   type AddressIssue,
@@ -33,8 +35,6 @@ const LOCALITY_TOKEN =
   /\b(nagar|layout|colony|enclave|vihar|puram|pally|palli|street|road|\brd\b|town|village|gram|ganj|bagh|market|bazaar|chowk|cross|extension|extn|society|residency|kunj|peta|palya)\b/i;
 const LANDMARK_TOKEN = /^(near|opp\.?|opposite|behind|beside|next to|landmark|adjacent|close to|nr\.?)\b/i;
 const UNIT_CODE = /^(?:[a-z]\d{1,4}[a-z]?|\d{1,3}[a-z])$/i;
-const HAS_NUMBER = /\d|\p{Nd}/u;
-
 const pinOfficeCache = new Map<string, { at: number; offices: IndiaPostOffice[] }>();
 
 export type PrebookingUiStatus =
@@ -363,17 +363,6 @@ export function formattingSuggestion(address: StoredShippingFields) {
   };
 }
 
-function missingHouse(address: StoredShippingFields) {
-  const line1 = collapse(address.line1);
-  if (!line1) return false;
-  if (HAS_NUMBER.test(line1) || HOUSE_TOKEN.test(line1)) return false;
-  const tokens = line1.split(" ").filter(Boolean);
-  const city = collapse(address.city).toLocaleLowerCase();
-  const state = collapse(address.state).toLocaleLowerCase();
-  const samePlace = line1.toLocaleLowerCase() === city || line1.toLocaleLowerCase() === state;
-  return tokens.length < 2 || samePlace;
-}
-
 export async function lookupDestinationOffices(search: SearchPostOffices, pincode: string) {
   const pin = pincode.replace(/\D/g, "").slice(0, 6);
   const cached = pinOfficeCache.get(pin);
@@ -462,25 +451,7 @@ export async function assessPrebookingAddress(
   }
   const classified = classifyStoredShippingAddress(current);
   const issues: PrebookingIssue[] = classified.issues.map((issue) => ({ ...issue, field: issue.field || "address" }));
-  if (fitted.overflow) {
-    issues.push({
-      code: "address_overflow",
-      field: "line1",
-      message: "This address is longer than India Post allows (three lines of 80 characters). Shorten it before booking.",
-      blocking: true,
-    });
-  }
   let status: AddressValidationStatus = classified.status;
-  if (fitted.overflow && status !== "INVALID") status = "NEEDS_REVIEW";
-  if (status !== "INVALID" && missingHouse(current)) {
-    status = "NEEDS_REVIEW";
-    issues.push({
-      code: "missing_house",
-      field: "line1",
-      message: "House or building details look missing from address line 1.",
-      blocking: false,
-    });
-  }
 
   const pin = collapse(current.pincode);
   const pinReady = /^[1-9][0-9]{5}$/.test(pin);
@@ -563,22 +534,6 @@ export async function assessPrebookingAddress(
             source = "ai";
             autoCorrected = true;
           }
-        } else if (changed || applied.status !== "READY" || suggestion?.needs_review) {
-          status = status === "VALIDATION_UNAVAILABLE" ? status : "NEEDS_REVIEW";
-          issues.push({
-            code: "ai_formatting",
-            field: "line1",
-            message: suggestion?.warnings?.[0] || suggestion?.changes?.[0] || "AI suggested an address cleanup. Review it before booking.",
-            blocking: false,
-            suggestion: {
-              line1: lines.line1,
-              line2: lines.line2,
-              line3: lines.line3,
-              city: applied.city,
-              state: applied.state,
-              pincode: applied.pincode,
-            },
-          });
         } else {
           source = alreadyAi || applied.source === "ai" ? "ai" : source;
         }
@@ -634,7 +589,11 @@ export async function refreshAddressPrebooking(
     input.address.address_validation_fingerprint === fingerprint &&
     reusable &&
     !packed &&
-    !(stored === "NEEDS_REVIEW" && formattingReviewOnly(input.address.address_validation_errors)) &&
+    !(
+      stored === "NEEDS_REVIEW" &&
+      (formattingReviewOnly(input.address.address_validation_errors) ||
+        recipientSourceAdvisoryOnly(input.address.address_validation_errors))
+    ) &&
     !stalePinCityReview(input.address.address_validation_errors) &&
     !(wantsAi && !alreadyAi)
   ) {
@@ -835,7 +794,8 @@ function orderResult(row: PrebookingOrderRow, address: StoredShippingFields | nu
     reviewApplies && Array.isArray(address?.address_validation_errors)
       ? (address.address_validation_errors as PrebookingIssue[])
       : [];
-  const issues = [...storedIssues, ...extra].filter((issue) => issue && (issue.message || issue.code));
+  const keptStored = storedIssues.filter((issue) => phoneOrPincodeIssue(issue));
+  const issues = [...keptStored, ...extra].filter((issue) => issue && (issue.message || issue.code));
   const status = !reviewApplies
     ? extra.some((issue) => issue.blocking)
       ? "fix_required"
@@ -847,13 +807,17 @@ function orderResult(row: PrebookingOrderRow, address: StoredShippingFields | nu
           ? "validation_unavailable"
           : "fix_required"
         : prebookingUiStatus(address?.address_validation_status, address?.address_validation_fingerprint, current);
+  const shown =
+    reviewApplies && !extra.some((issue) => issue.blocking) && !keptStored.length && status !== "validation_unavailable"
+      ? "ready"
+      : status;
   return {
     orderId: row.id,
     orderNumber: String(row.order_number ?? ""),
     customerName: customerNameOf(row) || collapse(address?.name),
     source: String(row.source ?? ""),
-    status,
-    blocking: status !== "ready",
+    status: shown,
+    blocking: shown !== "ready",
     fingerprint: String(address?.address_validation_fingerprint ?? current),
     issues,
     address: addressView(address),

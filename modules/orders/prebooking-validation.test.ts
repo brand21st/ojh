@@ -88,10 +88,10 @@ describe("pre-booking address checks", () => {
     expect(result.issues.filter((issue) => issue.blocking)).toEqual([]);
   });
 
-  it("blocks a missing customer name", async () => {
+  it("does not block a missing customer name when the phone and PIN are valid", async () => {
     const result = await assessPrebookingAddress(address({ name: "" }), { searchPostOffices: search([office()]) });
-    expect(result.status).toBe("INVALID");
-    expect(result.issues.some((issue) => issue.code === "missing_name")).toBe(true);
+    expect(result.status).toBe("READY");
+    expect(result.issues.some((issue) => issue.code === "missing_name")).toBe(false);
   });
 
   it("blocks an invalid mobile number", async () => {
@@ -231,10 +231,10 @@ describe("pre-booking address checks", () => {
     expect(suggestion?.line1).not.toMatch(/,\s*,/);
   });
 
-  it("flags a very long address for review", async () => {
+  it("keeps a very long address bookable when the phone and PIN are valid", async () => {
     const result = await assessPrebookingAddress(address({ line1: "X".repeat(250) }));
-    expect(result.status).toBe("NEEDS_REVIEW");
-    expect(result.issues.some((issue) => issue.code === "address_too_long")).toBe(true);
+    expect(result.status).toBe("READY");
+    expect(result.issues.some((issue) => issue.code === "address_too_long" || issue.code === "missing_house")).toBe(false);
   });
 
   it("keeps Malayalam characters in a formatting suggestion", () => {
@@ -243,13 +243,13 @@ describe("pre-booking address checks", () => {
     expect(suggestion?.line1).toContain("മെയിൻ റോഡ്");
   });
 
-  it("asks for house details when line 1 is only the city", async () => {
+  it("does not ask for house details when the phone and PIN are valid", async () => {
     clearDestinationPinCache();
     const result = await assessPrebookingAddress(address({ line1: "Kalpetta" }), {
       searchPostOffices: search([office()]),
     });
-    expect(result.status).toBe("NEEDS_REVIEW");
-    expect(result.issues.some((issue) => issue.code === "missing_house")).toBe(true);
+    expect(result.status).toBe("READY");
+    expect(result.issues.some((issue) => issue.code === "missing_house")).toBe(false);
   });
 
   it("keeps the deterministic result when AI times out", async () => {
@@ -644,7 +644,7 @@ describe("pre-booking address checks", () => {
     expect(searchPostOffices).not.toHaveBeenCalled();
   });
 
-  it("still blocks a Shopify order when house details are missing from line 1", async () => {
+  it("books a Shopify order when house details are missing and the phone and PIN are valid", async () => {
     clearDestinationPinCache();
     const supabase = {
       from() {
@@ -668,8 +668,8 @@ describe("pre-booking address checks", () => {
       allowAi: false,
       orderSource: "SHOPIFY",
     });
-    expect(gate.ok).toBe(false);
-    expect(gate.message).toMatch(/House or building details look missing from address line 1/);
+    expect(gate.ok).toBe(true);
+    expect(gate.message).toBeNull();
   });
 
   it("treats a stored address review as ready for manual orders and keeps it for Shopify", async () => {
@@ -730,7 +730,7 @@ describe("pre-booking address checks", () => {
     const shop = result.orders.find((order) => order.orderId === "shop-1");
     expect(manual?.status).toBe("ready");
     expect(manual?.issues.some((issue) => issue.code === "missing_house")).toBe(false);
-    expect(shop?.status).toBe("needs_review");
-    expect(shop?.issues.some((issue) => issue.code === "missing_house")).toBe(true);
+    expect(shop?.status).toBe("ready");
+    expect(shop?.issues.some((issue) => issue.code === "missing_house")).toBe(false);
   });
 });

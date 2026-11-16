@@ -255,7 +255,7 @@ describe("address review actions", () => {
     expect(client.eqs).toEqual(expect.arrayContaining([expect.objectContaining({ column: "organization_id", value: "org-1" })]));
   });
 
-  it("P0-01 rejects invalid phone, PIN, city, recipient, and over-long lines", async () => {
+  it("P0-01 rejects an invalid phone or PIN and accepts a missing city, name, or long line", async () => {
     await expect(
       acceptOrderShippingAddress(
         reviewClient({ ...address, phone: "12345", address_validation_status: "NEEDS_REVIEW" }) as never,
@@ -276,14 +276,14 @@ describe("address review actions", () => {
         ctx,
         "ord-1"
       )
-    ).rejects.toBeInstanceOf(AppError);
+    ).resolves.toBeDefined();
     await expect(
       acceptOrderShippingAddress(
         reviewClient({ ...address, name: "", address_validation_status: "NEEDS_REVIEW" }) as never,
         ctx,
         "ord-1"
       )
-    ).rejects.toBeInstanceOf(AppError);
+    ).resolves.toBeDefined();
     const longLine = "X".repeat(81);
     await expect(
       acceptOrderShippingAddress(
@@ -297,7 +297,7 @@ describe("address review actions", () => {
         ctx,
         "ord-1"
       )
-    ).rejects.toBeInstanceOf(AppError);
+    ).resolves.toBeDefined();
   });
 
   it("P0-01 rejects a concurrent overwrite", async () => {
