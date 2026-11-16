@@ -78,13 +78,25 @@ export function salesInvoiceHasPdf(status: string | null | undefined) {
   return key === "ISSUED" || key === "CANCELLED";
 }
 
+/** Shipping documents only have a PDF after India Post generation succeeds. */
+export function shippingInvoiceHasPdf(status: string | null | undefined) {
+  return (status ?? "").toUpperCase() === "GENERATED";
+}
+
 /** Total GST on a row, cess included, so rows add up to the summary card. */
 export function rowGstPaise(row: { cgstPaise?: number; sgstPaise?: number; utgstPaise?: number; igstPaise?: number; cessPaise?: number }) {
   return (row.cgstPaise ?? 0) + (row.sgstPaise ?? 0) + (row.utgstPaise ?? 0) + (row.igstPaise ?? 0) + (row.cessPaise ?? 0);
 }
 
+function safePdfFilename(base: string) {
+  return `${base.replace(/[\\/:*?"<>|]+/g, "-")}.pdf`;
+}
+
 /** Filename for a downloaded sales invoice PDF. Slashes in GST invoice numbers are not valid in filenames. */
 export function salesInvoiceFilename(invoiceNumber: string | null | undefined, id: string) {
-  const base = (invoiceNumber || `invoice-${id.slice(0, 8)}`).replace(/[\\/:*?"<>|]+/g, "-");
-  return `${base}.pdf`;
+  return safePdfFilename(invoiceNumber || `invoice-${id.slice(0, 8)}`);
+}
+
+export function shippingInvoiceFilename(invoiceNumber: string | null | undefined, id: string) {
+  return safePdfFilename(invoiceNumber || `shipping-${id.slice(0, 8)}`);
 }

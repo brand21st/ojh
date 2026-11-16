@@ -6,6 +6,7 @@ import {
   salesInvoiceFilename,
   salesInvoiceHasPdf,
   salesStatusBadge,
+  shippingInvoiceHasPdf,
   shippingStatusBadge,
 } from "@/lib/invoices/labels";
 
@@ -36,6 +37,12 @@ describe("invoice labels", () => {
     expect(salesInvoiceHasPdf("REVIEW")).toBe(false);
     expect(salesInvoiceHasPdf("ISSUED")).toBe(true);
     expect(salesInvoiceHasPdf("CANCELLED")).toBe(true);
+  });
+
+  it("only offers a shipping PDF after generation succeeds", () => {
+    expect(shippingInvoiceHasPdf("PENDING")).toBe(false);
+    expect(shippingInvoiceHasPdf("FAILED")).toBe(false);
+    expect(shippingInvoiceHasPdf("GENERATED")).toBe(true);
   });
 
   it("includes cess in row GST", () => {
