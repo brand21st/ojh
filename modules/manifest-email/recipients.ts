@@ -73,6 +73,27 @@ export function resolveManifestRecipients(
   return { recipients: settings.recipients, source: "default" };
 }
 
+/**
+ * Replace one booking office's recipient list without dropping other offices.
+ * An empty list is stored only when that office already had its own entry.
+ */
+export function withBookingOfficeRecipients(
+  overrides: Record<string, string[]>,
+  officeId: string,
+  emails: string[],
+  keepEmpty = false
+): Record<string, string[]> {
+  const key = officeId.trim();
+  const next = { ...overrides };
+  if (!key) return next;
+  if (!emails.length && !keepEmpty) {
+    delete next[key];
+    return next;
+  }
+  next[key] = [...emails];
+  return next;
+}
+
 export function assertAutoSendRecipients(recipients: string[]) {
   if (!recipients.length) {
     throw new AppError(

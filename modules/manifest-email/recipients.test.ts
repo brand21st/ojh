@@ -7,6 +7,7 @@ import {
   normalizeRecipients,
   recipientSetHash,
   resolveManifestRecipients,
+  withBookingOfficeRecipients,
 } from "@/modules/manifest-email/recipients";
 
 describe("manifest email recipients", () => {
@@ -31,6 +32,27 @@ describe("manifest email recipients", () => {
     expect(resolveManifestRecipients(settings, "22660001").recipients).toEqual([]);
     expect(resolveManifestRecipients(settings, "99999999").recipients).toEqual(["default@example.com"]);
     expect(resolveManifestRecipients(settings, null).recipients).toEqual(["default@example.com"]);
+  });
+
+  it("updates the current booking office without dropping other offices", () => {
+    const overrides = {
+      "11111111": ["kept@example.com"],
+      "22222222": [] as string[],
+    };
+    expect(withBookingOfficeRecipients(overrides, "33333333", ["office@example.com"])).toEqual({
+      "11111111": ["kept@example.com"],
+      "22222222": [],
+      "33333333": ["office@example.com"],
+    });
+    expect(overrides["33333333"]).toBeUndefined();
+  });
+
+  it("does not store an empty booking-office list unless that office already had one", () => {
+    const overrides = { "11111111": ["kept@example.com"] };
+    expect(withBookingOfficeRecipients(overrides, "33333333", [])).toEqual(overrides);
+    expect(withBookingOfficeRecipients(overrides, "11111111", [], true)).toEqual({
+      "11111111": [],
+    });
   });
 
   it("refuses automatic sending without a default recipient", () => {

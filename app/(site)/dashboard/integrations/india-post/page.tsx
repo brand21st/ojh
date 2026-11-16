@@ -29,6 +29,7 @@ import { api } from "@/lib/hooks/use-api";
 import { INDIA_POST_QUERY_KEY, useIndiaPost } from "@/lib/hooks/use-india-post";
 import { cn } from "@/lib/utils";
 import { AlertTriangle, Check, ChevronDown, Copy, Eye, EyeOff, MapPin } from "lucide-react";
+import { IndiaPostManifestEmailSetup } from "@/components/dashboard/india-post-manifest-email-setup";
 import { IndiaPostOfficeFinder, type IndiaPostOfficeRow } from "@/components/integrations/india-post-office-finder";
 import { notifyIndiaPostSaved } from "@/components/integrations/india-post-saved-toast";
 import { indiaPostOfficeWritePayload, indiaPostPickupOfficeWritePayload } from "@/modules/india-post/office-patch";
@@ -1176,7 +1177,7 @@ export default function IndiaPostPage() {
       </div>
 
       <div className={SECTION_GRID}>
-        <Card className={CARD}>
+        <Card className={cn(CARD, "xl:col-span-2")}>
           <CardHeader className={CARD_HEADER}>
             <StepTitle step={5}>Barcode range</StepTitle>
             <CardDescription>
@@ -1537,6 +1538,7 @@ export default function IndiaPostPage() {
           })}
         </CardContent>
       </Card>
+      <IndiaPostManifestEmailSetup officeId={savedOfficeId} officeName={savedOfficeName} />
       </div>
     </div>
   );
