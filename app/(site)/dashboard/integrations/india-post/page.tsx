@@ -28,7 +28,7 @@ import {
 import { api } from "@/lib/hooks/use-api";
 import { INDIA_POST_QUERY_KEY, useIndiaPost } from "@/lib/hooks/use-india-post";
 import { cn } from "@/lib/utils";
-import { AlertTriangle, Check, Copy, Eye, EyeOff, MapPin } from "lucide-react";
+import { AlertTriangle, Check, ChevronDown, Copy, Eye, EyeOff, MapPin } from "lucide-react";
 import { IndiaPostOfficeFinder, type IndiaPostOfficeRow } from "@/components/integrations/india-post-office-finder";
 import { notifyIndiaPostSaved } from "@/components/integrations/india-post-saved-toast";
 import { indiaPostOfficeWritePayload, indiaPostPickupOfficeWritePayload } from "@/modules/india-post/office-patch";
@@ -158,6 +158,7 @@ export default function IndiaPostPage() {
   const [replaceSecrets, setReplaceSecrets] = useState(false);
   const [highlightConnection, setHighlightConnection] = useState(false);
   const [prefixErrors, setPrefixErrors] = useState<Record<string, string>>({});
+  const [codSeriesOpen, setCodSeriesOpen] = useState<boolean | null>(null);
 
   const query = useIndiaPost();
 
@@ -1299,102 +1300,147 @@ export default function IndiaPostPage() {
               const payload = barcodeRangeWritePayload(draft);
               const stock = barcodeStockForService(config?.barcodeRanges ?? [], INDIA_POST_COD_RANGE_CODE);
               const left = barcodesLeft(stock);
+              const hasDraftRange = Boolean(draft.startNumber || draft.endNumber);
+              const open = codSeriesOpen ?? hasSaved;
+              const rangeSummary =
+                draft.startNumber && draft.endNumber
+                  ? `${INDIA_POST_COD_PREFIX} ${draft.startNumber}–${draft.endNumber}`
+                  : hasDraftRange
+                    ? `${INDIA_POST_COD_PREFIX} series started`
+                    : "Not set · skip if unused";
+              const stockLow = left != null && stock != null && left <= LOW_BARCODE_THRESHOLD;
               return (
-                <div className={SUB_PANEL}>
-                  <div className="flex items-start justify-between gap-3">
+                <details
+                  className={cn("group", SUB_PANEL)}
+                  open={open}
+                  onToggle={(event) => setCodSeriesOpen(event.currentTarget.open)}
+                >
+                  <summary className="flex min-h-11 cursor-pointer list-none items-start justify-between gap-3 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30 [&::-webkit-details-marker]:hidden">
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
                         <p className="text-sm font-medium text-foreground">COD</p>
                         <span className="rounded-md border border-border px-1.5 py-0.5 text-xs font-medium text-foreground">
                           Optional
                         </span>
+                        {!open ? (
+                          <span
+                            className={cn(
+                              "truncate text-xs",
+                              stockLow ? "font-medium text-warning" : "text-muted"
+                            )}
+                          >
+                            {rangeSummary}
+                            {left != null && stock ? ` · ${formatNumber(left)} left` : ""}
+                          </span>
+                        ) : null}
                       </div>
-                      <p className="text-xs text-muted">
-                        Cash on delivery only. Prefix EZ. Leave blank to book COD on the Speed Post or Business
-                        Parcel series.
+                      {open ? (
+                        <p className="mt-1 text-xs text-muted">
+                          Dedicated EZ series for cash on delivery. Skip this if you book COD on Speed Post or
+                          Business Parcel.
+                        </p>
+                      ) : (
+                        <p className="mt-1 text-xs text-muted">Add a dedicated EZ series, or skip.</p>
+                      )}
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2">
+                      {open ? (
+                        <div
+                          className="flex gap-2"
+                          onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                          }}
+                        >
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            size="xs"
+                            onClick={() => persistSeries(draft, { force: true })}
+                            disabled={saveRange.isPending || !payload}
+                          >
+                            {saveRange.isPending ? "Saving…" : "Save"}
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="xs"
+                            onClick={() => clearSeries(INDIA_POST_COD_RANGE_CODE)}
+                            disabled={saveRange.isPending || (!hasSaved && !draft.startNumber && !draft.endNumber)}
+                          >
+                            Clear
+                          </Button>
+                        </div>
+                      ) : null}
+                      <ChevronDown
+                        className={cn(
+                          "mt-0.5 size-4 shrink-0 text-muted transition-transform duration-200 motion-reduce:transition-none",
+                          open && "rotate-180"
+                        )}
+                        aria-hidden
+                      />
+                    </div>
+                  </summary>
+                  <div className="space-y-3 pt-3">
+                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-[4.5rem_minmax(0,1fr)_minmax(0,1fr)]">
+                      <Field
+                        className={PREFIX_FIELD}
+                        label="Prefix"
+                        value={INDIA_POST_COD_PREFIX}
+                        readOnly
+                        onChange={() => undefined}
+                      />
+                      <Field
+                        label="Start number"
+                        value={draft.startNumber}
+                        placeholder="7536320"
+                        maxLength={BARCODE_ALLOTMENT_DIGITS}
+                        inputMode="numeric"
+                        onChange={(value) =>
+                          updateSeries(INDIA_POST_COD_RANGE_CODE, {
+                            prefix: INDIA_POST_COD_PREFIX,
+                            startNumber: sanitizeBarcodeAllotmentField(value),
+                          })
+                        }
+                        onBlur={(value) =>
+                          persistSeries({
+                            ...draft,
+                            prefix: INDIA_POST_COD_PREFIX,
+                            startNumber: sanitizeBarcodeAllotmentField(value),
+                          })
+                        }
+                      />
+                      <Field
+                        label="End number"
+                        value={draft.endNumber}
+                        placeholder="7537319"
+                        maxLength={BARCODE_ALLOTMENT_DIGITS}
+                        inputMode="numeric"
+                        onChange={(value) =>
+                          updateSeries(INDIA_POST_COD_RANGE_CODE, {
+                            prefix: INDIA_POST_COD_PREFIX,
+                            endNumber: sanitizeBarcodeAllotmentField(value),
+                          })
+                        }
+                        onBlur={(value) =>
+                          persistSeries({
+                            ...draft,
+                            prefix: INDIA_POST_COD_PREFIX,
+                            endNumber: sanitizeBarcodeAllotmentField(value),
+                          })
+                        }
+                      />
+                    </div>
+                    {left != null && stock ? (
+                      <p
+                        role="status"
+                        className={stockLow ? "text-xs font-medium text-warning" : "text-xs text-muted"}
+                      >
+                        {formatNumber(left)} barcodes left · EZ series
                       </p>
-                    </div>
-                    <div className="flex shrink-0 gap-2">
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        size="xs"
-                                                onClick={() => persistSeries(draft, { force: true })}
-                        disabled={saveRange.isPending || !payload}
-                      >
-                        {saveRange.isPending ? "Saving…" : "Save"}
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="xs"
-                                                onClick={() => clearSeries(INDIA_POST_COD_RANGE_CODE)}
-                        disabled={saveRange.isPending || (!hasSaved && !draft.startNumber && !draft.endNumber)}
-                      >
-                        Clear
-                      </Button>
-                    </div>
+                    ) : null}
                   </div>
-                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-[4.5rem_minmax(0,1fr)_minmax(0,1fr)]">
-                    <Field
-                      className={PREFIX_FIELD}
-                      label="Prefix"
-                      value={INDIA_POST_COD_PREFIX}
-                      readOnly
-                      onChange={() => undefined}
-                    />
-                    <Field
-                      label="Start number"
-                      value={draft.startNumber}
-                      placeholder="7536320"
-                      maxLength={BARCODE_ALLOTMENT_DIGITS}
-                      inputMode="numeric"
-                      onChange={(value) =>
-                        updateSeries(INDIA_POST_COD_RANGE_CODE, {
-                          prefix: INDIA_POST_COD_PREFIX,
-                          startNumber: sanitizeBarcodeAllotmentField(value),
-                        })
-                      }
-                      onBlur={(value) =>
-                        persistSeries({
-                          ...draft,
-                          prefix: INDIA_POST_COD_PREFIX,
-                          startNumber: sanitizeBarcodeAllotmentField(value),
-                        })
-                      }
-                    />
-                    <Field
-                      label="End number"
-                      value={draft.endNumber}
-                      placeholder="7537319"
-                      maxLength={BARCODE_ALLOTMENT_DIGITS}
-                      inputMode="numeric"
-                      onChange={(value) =>
-                        updateSeries(INDIA_POST_COD_RANGE_CODE, {
-                          prefix: INDIA_POST_COD_PREFIX,
-                          endNumber: sanitizeBarcodeAllotmentField(value),
-                        })
-                      }
-                      onBlur={(value) =>
-                        persistSeries({
-                          ...draft,
-                          prefix: INDIA_POST_COD_PREFIX,
-                          endNumber: sanitizeBarcodeAllotmentField(value),
-                        })
-                      }
-                    />
-                  </div>
-                  {left != null && stock ? (
-                    <p
-                      role="status"
-                      className={
-                        left <= LOW_BARCODE_THRESHOLD ? "text-xs font-medium text-warning" : "text-xs text-muted"
-                      }
-                    >
-                      {formatNumber(left)} barcodes left · EZ series
-                    </p>
-                  ) : null}
-                </div>
+                </details>
               );
             })()}
           </CardContent>
