@@ -4,7 +4,7 @@ import { useState, type ComponentType, type FocusEvent, type MouseEvent } from "
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ChevronsLeft, Lock } from "lucide-react";
+import { ChevronsLeft, Lock, PanelLeftOpen } from "lucide-react";
 import { Logo } from "@/components/layout/logo";
 import { WhatsappIcon } from "@/components/layout/whatsapp-support-button";
 import { Badge } from "@/components/ui/badge";
@@ -157,14 +157,30 @@ export function Sidebar({
         )}
       >
         {collapsed ? (
-          <Link
-            href="/dashboard"
-            prefetch={false}
-            aria-label="PostBus dashboard"
-            className="flex size-9 items-center justify-center rounded-lg bg-brand text-xs font-bold tracking-tight text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2"
-          >
-            PB
-          </Link>
+          onCollapsedChange ? (
+            <button
+              type="button"
+              onClick={() => {
+                setTip(null);
+                onCollapsedChange(false);
+              }}
+              {...tipHandlers("Expand sidebar")}
+              aria-label="Expand sidebar"
+              aria-expanded={false}
+              className="flex size-9 cursor-pointer items-center justify-center rounded-lg bg-brand text-xs font-bold tracking-tight text-white transition-colors hover:bg-brand-dark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-card active:bg-brand-dark"
+            >
+              PB
+            </button>
+          ) : (
+            <Link
+              href="/dashboard"
+              prefetch={false}
+              aria-label="PostBus dashboard"
+              className="flex size-9 items-center justify-center rounded-lg bg-brand text-xs font-bold tracking-tight text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2"
+            >
+              PB
+            </Link>
+          )
         ) : (
           <>
             <Logo href="/dashboard" className="[&_img]:h-8 [&_img]:sm:h-8" />
@@ -175,7 +191,7 @@ export function Sidebar({
                 aria-label="Collapse sidebar"
                 aria-expanded
                 title="Collapse sidebar"
-                className="ml-auto flex size-8 items-center justify-center rounded-lg text-muted transition-colors hover:bg-surface-soft hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+                className="ml-auto flex size-8 cursor-pointer items-center justify-center rounded-lg text-muted transition-colors hover:bg-surface-soft hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
               >
                 <ChevronsLeft aria-hidden className="size-4" />
               </button>
@@ -335,9 +351,9 @@ export function Sidebar({
             {...tipHandlers("Expand sidebar")}
             aria-label="Expand sidebar"
             aria-expanded={false}
-            className={cn(itemBase, itemIdle, "mt-0.5 w-10 justify-center px-0")}
+            className={cn(itemBase, itemIdle, "mt-0.5 size-10 cursor-pointer justify-center px-0")}
           >
-            <ChevronsLeft aria-hidden className="size-4 shrink-0 rotate-180" />
+            <PanelLeftOpen aria-hidden className="size-4 shrink-0" />
           </button>
         ) : null}
       </div>
