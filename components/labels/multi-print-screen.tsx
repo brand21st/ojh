@@ -1555,17 +1555,17 @@ export function MultiPrintScreen() {
         </Card>
 
         <Card className="min-w-0 overflow-hidden">
-          <CardHeader className="border-b border-border p-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <CardTitle>Sheet preview</CardTitle>
-                <CardDescription>This is the sheet that preview, download, and print will use.</CardDescription>
+          <CardHeader className="border-b border-border p-2.5">
+            <div className="flex min-w-0 items-center gap-2">
+              <div className="min-w-0 flex-1">
+                <CardTitle className="text-sm">Sheet preview</CardTitle>
+                <CardDescription className="truncate text-xs">What you print.</CardDescription>
               </div>
-              <div className="flex items-center gap-1.5" role="group" aria-label="Sheet navigation">
-                <Button type="button" size="icon" variant="secondary" disabled={pageIndex <= 0} onClick={() => setSheetPage((page) => page - 1)} aria-label="Previous sheet" title="Previous sheet"><ChevronLeft /></Button>
+              <div className="flex shrink-0 items-center gap-1" role="group" aria-label="Sheet navigation">
+                <Button type="button" size="icon-xs" variant="secondary" className="motion-safe:active:scale-95" disabled={pageIndex <= 0} onClick={() => setSheetPage((page) => page - 1)} aria-label="Previous sheet" title="Previous sheet"><ChevronLeft /></Button>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button type="button" size="sm" variant="secondary">Sheet {pageIndex + 1} of {pages}<ChevronDown /></Button>
+                    <Button type="button" size="xs" variant="secondary" className="h-8 whitespace-nowrap motion-safe:active:scale-95">Sheet {pageIndex + 1} of {pages}<ChevronDown /></Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
                     <DropdownMenuLabel>Go to sheet</DropdownMenuLabel>
@@ -1576,17 +1576,18 @@ export function MultiPrintScreen() {
                     ))}
                   </DropdownMenuContent>
                 </DropdownMenu>
-                <Button type="button" size="icon" variant="secondary" disabled={pageIndex >= pages - 1} onClick={() => setSheetPage((page) => page + 1)} aria-label="Next sheet" title="Next sheet"><ChevronRight /></Button>
+                <Button type="button" size="icon-xs" variant="secondary" className="motion-safe:active:scale-95" disabled={pageIndex >= pages - 1} onClick={() => setSheetPage((page) => page + 1)} aria-label="Next sheet" title="Next sheet"><ChevronRight /></Button>
               </div>
             </div>
             {sheetOrders.length ? (
-              <div className="mt-3 flex flex-wrap gap-2">
+              <div className="mt-1.5 flex gap-1.5 overflow-x-auto pb-0.5">
                 {sheetOrders.map((placement, slot) => (
                   <button
                     key={placement.index}
                     type="button"
+                    title={placement.orderId}
                     className={cn(
-                      "h-7 cursor-pointer whitespace-nowrap rounded-full border px-2.5 text-xs font-medium transition-[color,background-color,border-color,transform] duration-200 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 motion-safe:active:scale-95",
+                      "h-7 shrink-0 cursor-pointer whitespace-nowrap rounded-full border px-2.5 text-xs font-medium transition-[color,background-color,border-color,transform] duration-200 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 motion-safe:active:scale-95",
                       selectedSlots.includes(placement.index) ? "border-brand/30 bg-rose-50 text-brand-dark" : "border-border bg-card text-muted hover:text-foreground"
                     )}
                     onClick={() => setSelectedSlots([placement.index])}
@@ -1607,11 +1608,12 @@ export function MultiPrintScreen() {
 
           {displayLayout?.ok ? (
             <>
-              <div className="flex flex-wrap items-center gap-2 border-b border-border bg-surface-soft px-3 py-2">
+              <div className="flex h-10 items-center gap-1 overflow-x-auto border-b border-border bg-surface-soft px-2">
                 <Button
                   type="button"
-                  size="sm"
+                  size="xs"
                   variant={manual ? "primary" : "secondary"}
+                  className="shrink-0 whitespace-nowrap motion-safe:active:scale-95"
                   aria-pressed={manual}
                   onClick={() => {
                     setManual((current) => {
@@ -1621,14 +1623,14 @@ export function MultiPrintScreen() {
                   }}
                   title="Select and move labels"
                 >
-                  <MousePointer2 />Select & move
+                  <MousePointer2 />Move
                 </Button>
-                <Button type="button" size="icon" variant="secondary" disabled={!Object.keys(overrides).length} onClick={() => setOverrides({})} aria-label="Reset arrangement" title="Reset arrangement"><RotateCcw /></Button>
+                <Button type="button" size="icon-xs" variant="secondary" className="shrink-0 motion-safe:active:scale-95" disabled={!Object.keys(overrides).length} onClick={() => setOverrides({})} aria-label="Reset arrangement" title="Reset arrangement"><RotateCcw /></Button>
 
                 {selectedSlots.length >= 2 ? (
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <Button type="button" size="sm" variant="secondary"><Settings2 />Align<ChevronDown /></Button>
+                      <Button type="button" size="xs" variant="secondary" className="shrink-0 whitespace-nowrap motion-safe:active:scale-95"><Settings2 />Align<ChevronDown /></Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent>
                       <DropdownMenuLabel>Horizontal</DropdownMenuLabel>
@@ -1644,15 +1646,15 @@ export function MultiPrintScreen() {
                   </DropdownMenu>
                 ) : null}
 
-                <span className="mx-1 h-5 w-px bg-border" aria-hidden />
-                <Button type="button" size="icon" variant="secondary" disabled={zoom <= CANVAS_ZOOM_MIN} onClick={() => setZoom((value) => clampCanvasZoom(value / 1.15))} aria-label="Zoom out" title="Zoom out"><Minus /></Button>
-                <span className="min-w-12 text-center text-xs font-medium tabular-nums">{Math.round(zoom * 100)}%</span>
-                <Button type="button" size="icon" variant="secondary" disabled={zoom >= CANVAS_ZOOM_MAX} onClick={() => setZoom((value) => clampCanvasZoom(value * 1.15))} aria-label="Zoom in" title="Zoom in"><Plus /></Button>
-                <Button type="button" size="sm" variant="secondary" onClick={() => setZoom(1)} title="Fit sheet"><Grid2X2 />Fit sheet</Button>
+                <span className="mx-1 h-4 w-px shrink-0 bg-border" aria-hidden />
+                <Button type="button" size="icon-xs" variant="secondary" className="shrink-0 motion-safe:active:scale-95" disabled={zoom <= CANVAS_ZOOM_MIN} onClick={() => setZoom((value) => clampCanvasZoom(value / 1.15))} aria-label="Zoom out" title="Zoom out"><Minus /></Button>
+                <span className="w-9 shrink-0 text-center text-xs font-medium tabular-nums">{Math.round(zoom * 100)}%</span>
+                <Button type="button" size="icon-xs" variant="secondary" className="shrink-0 motion-safe:active:scale-95" disabled={zoom >= CANVAS_ZOOM_MAX} onClick={() => setZoom((value) => clampCanvasZoom(value * 1.15))} aria-label="Zoom in" title="Zoom in"><Plus /></Button>
+                <Button type="button" size="xs" variant="secondary" className="shrink-0 whitespace-nowrap motion-safe:active:scale-95" onClick={() => setZoom(1)} title="Fit sheet"><Grid2X2 />Fit</Button>
 
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button type="button" size="icon" variant="ghost" className="ml-auto" aria-label="Canvas shortcuts" title="Shortcuts"><HelpCircle /></Button>
+                    <Button type="button" size="icon-xs" variant="ghost" className="ml-auto shrink-0" aria-label="Canvas shortcuts" title="Shortcuts"><HelpCircle /></Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
                     <DropdownMenuLabel>Canvas shortcuts</DropdownMenuLabel>
@@ -1670,7 +1672,7 @@ export function MultiPrintScreen() {
                 data-label-canvas
                 tabIndex={manual ? 0 : undefined}
                 className={cn(
-                  "max-h-[calc(100vh-17rem)] min-h-[520px] overflow-auto bg-zinc-100/70 p-5 outline-none dark:bg-zinc-950/50",
+                  "max-h-[calc(100vh-13rem)] min-h-[360px] overflow-auto bg-zinc-100/70 p-3 outline-none dark:bg-zinc-950/50",
                   (spaceHeld || panning) && "select-none",
                   spaceHeld && !panning && "cursor-grab",
                   panning && "cursor-grabbing"
@@ -1764,13 +1766,13 @@ export function MultiPrintScreen() {
                 </div>
               </div>
 
-              <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border bg-card px-4 py-2.5 text-xs text-muted">
-                <span>{displayLayout.columns} × {displayLayout.rows}{displayLayout.rotation ? ` · Rotated ${displayLayout.rotation}°` : ""}</span>
-                <span aria-live="polite">{selectedSlots.length ? `${selectedSlots.length} selected` : manual ? "Click or drag to select labels" : "Turn on Select & move to edit"}</span>
+              <div className="flex h-8 items-center justify-between gap-2 overflow-hidden border-t border-border bg-card px-3 text-[11px] text-muted">
+                <span className="shrink-0">{displayLayout.columns} × {displayLayout.rows}{displayLayout.rotation ? ` · ${displayLayout.rotation}°` : ""}</span>
+                <span className="min-w-0 truncate text-right" aria-live="polite">{selectedSlots.length ? `${selectedSlots.length} selected` : manual ? "Drag to select" : "Turn on Move to edit"}</span>
               </div>
             </>
           ) : (
-            <div className="flex min-h-[520px] flex-col items-center justify-center p-8 text-center">
+            <div className="flex min-h-[360px] flex-col items-center justify-center p-6 text-center">
               <Grid2X2 className="size-8 text-muted" />
               <p className="mt-3 text-base font-semibold">
                 {items.length ? "These labels do not fit this page" : "Your sheet will show up here"}
