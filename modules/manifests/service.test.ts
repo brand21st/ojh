@@ -178,7 +178,14 @@ describe("manifest totals and scan state", () => {
       line({ weightGrams: 1200, paymentMode: "COD", codAmount: 799.5 }),
       line({ weightGrams: 300, serviceCode: "BUSINESS_PARCEL", serviceLabel: "Business Parcel", tariffAmount: null }),
     ]);
-    expect(totals).toMatchObject({ count: 3, weightGrams: 2000, codCount: 1, codAmount: 799.5, tariffAmount: 122 });
+    expect(totals).toMatchObject({
+      count: 3,
+      weightGrams: 2000,
+      codCount: 1,
+      codAmount: 799.5,
+      tariffAmount: 122,
+      tariffQuotedCount: 2,
+    });
     expect(totals.byService).toEqual([
       { code: "SP_INLAND_PARCEL", label: "Speed Post Parcel", count: 2, weightGrams: 1700 },
       { code: "BUSINESS_PARCEL", label: "Business Parcel", count: 1, weightGrams: 300 },

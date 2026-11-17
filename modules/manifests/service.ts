@@ -95,6 +95,7 @@ export type ManifestTotals = {
   codCount: number;
   codAmount: number;
   tariffAmount: number;
+  tariffQuotedCount: number;
   byService: Array<{ code: string; label: string; count: number; weightGrams: number }>;
 };
 
@@ -560,9 +561,13 @@ export function manifestTotals(lines: ManifestLine[]): ManifestTotals {
   let codCount = 0;
   let codAmount = 0;
   let tariffAmount = 0;
+  let tariffQuotedCount = 0;
   for (const line of lines) {
     weightGrams += line.weightGrams;
-    tariffAmount += line.tariffAmount ?? 0;
+    if (line.tariffAmount != null) {
+      tariffQuotedCount += 1;
+      tariffAmount += line.tariffAmount;
+    }
     if (line.codAmount > 0) {
       codCount += 1;
       codAmount += line.codAmount;
@@ -579,6 +584,7 @@ export function manifestTotals(lines: ManifestLine[]): ManifestTotals {
     codCount,
     codAmount: Math.round(codAmount * 100) / 100,
     tariffAmount: Math.round(tariffAmount * 100) / 100,
+    tariffQuotedCount,
     byService: [...byService.values()].sort((a, b) => b.count - a.count),
   };
 }

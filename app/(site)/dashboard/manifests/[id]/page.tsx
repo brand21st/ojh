@@ -156,6 +156,16 @@ export default function ManifestDetailPage() {
           row.codAmount > 0 ? <span className="whitespace-nowrap tabular-nums">{formatCurrency(row.codAmount)}</span> : "—",
       },
       {
+        id: "tariff",
+        header: "Tariff",
+        cell: (row) =>
+          row.tariffAmount == null ? (
+            <span className="whitespace-nowrap text-muted">—</span>
+          ) : (
+            <span className="whitespace-nowrap tabular-nums">{formatCurrency(row.tariffAmount)}</span>
+          ),
+      },
+      {
         id: "status",
         header: handedOver ? "India Post scan" : "Status",
         cell: (row) => (
@@ -318,10 +328,16 @@ export default function ManifestDetailPage() {
         }
       />
 
-      <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <Stat label="Articles" value={String(totals.count)} hint={totals.byService.map((s) => `${s.label}: ${s.count}`).join(" · ") || "No articles yet"} />
         <Stat label="Total weight" value={`${(totals.weightGrams / 1000).toFixed(2)} kg`} />
         <Stat label="COD" value={formatCurrency(totals.codAmount)} hint={`${totals.codCount} COD article${totals.codCount === 1 ? "" : "s"}`} />
+        <Stat
+          label="Tariff"
+          value={formatCurrency(totals.tariffAmount)}
+          hint={tariffHint(totals.tariffQuotedCount, totals.count)}
+          warn={totals.count > 0 && totals.tariffQuotedCount < totals.count}
+        />
         {handedOver ? (
           <Stat
             label="Awaiting India Post scan"
@@ -500,6 +516,13 @@ export default function ManifestDetailPage() {
       />
     </div>
   );
+}
+
+function tariffHint(quoted: number, count: number) {
+  if (!count) return "India Post postage for this manifest.";
+  if (quoted === count) return "India Post postage for every article.";
+  if (!quoted) return "No article has a quoted tariff yet.";
+  return `Quoted on ${quoted} of ${count} articles. Missing amounts are not in this total.`;
 }
 
 function Stat({ label, value, hint, warn }: { label: string; value: string; hint?: string; warn?: boolean }) {

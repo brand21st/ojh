@@ -110,6 +110,8 @@ export async function manifestXlsx(manifest: ManifestDetail, sender: Pick<Manife
         ["Total weight (g)", totals.weightGrams],
         ["COD articles", totals.codCount],
         ["COD amount", totals.codAmount],
+        ["Tariff amount", totals.tariffAmount],
+        ["Tariff quoted", totals.tariffQuotedCount],
         [],
         ["Service", "Articles", "Weight (g)"],
         ...totals.byService.map((service) => [service.label, service.count, service.weightGrams]),

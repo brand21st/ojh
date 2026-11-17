@@ -179,5 +179,7 @@ describe("handover export mobiles", () => {
     expect(sheets[1]!.rows[5]).toEqual(["Total weight (g)", "5800"]);
     expect(sheets[1]!.rows[6]).toEqual(["COD articles", "6"]);
     expect(sheets[1]!.rows[7]).toEqual(["COD amount", "2848"]);
+    expect(sheets[1]!.rows[8]).toEqual(["Tariff amount", "1240"]);
+    expect(sheets[1]!.rows[9]).toEqual(["Tariff quoted", "40"]);
   });
 });
