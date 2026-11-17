@@ -91,6 +91,9 @@ function memory(initial: EmailDelivery, manifestStatus = "CLOSED", closedAt: str
     async merchantContact() {
       return { email: "merchant@example.com", phone: "9876543210" };
     },
+    async officeAddress() {
+      return "";
+    },
   };
   return { repo, read: () => row, set: (patch: Partial<EmailDelivery>) => { row = { ...row, ...patch }; } };
 }
@@ -121,6 +124,20 @@ describe("manifest email delivery", () => {
     });
     expect(resent?.status).toBe("SENT");
     expect(secondLoad).not.toHaveBeenCalled();
+  });
+
+  it("puts the booking office address in the message that is sent", async () => {
+    const state = memory(delivery());
+    state.repo.officeAddress = async () => "Kochi, Kerala 682001";
+    const send = vi.fn(async () => ({ messageId: "msg-1", response: "250 ok" }));
+    await executeManifestEmailDelivery(state.repo, "delivery-1", {
+      maxBytes: 1000,
+      send,
+      loadExcel: async () => ({ bytes: excel, filename: "x.xlsx" }),
+    });
+    expect(send.mock.calls[0][0].text).toContain("Booking office address: Kochi, Kerala 682001");
+    expect(send.mock.calls[0][0].html).toContain("Kochi, Kerala 682001");
+    expect(send.mock.calls[0][0].text).toContain("Merchant Email: merchant@example.com");
   });
 
   it("retries a refused connection and records a permanent rejection", async () => {

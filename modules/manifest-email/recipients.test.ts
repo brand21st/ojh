@@ -4,9 +4,12 @@ import {
   assertAutoSendRecipients,
   autoIdempotencyKey,
   ccForManifestEmail,
+  commitEmailDraft,
+  fillOfficeAddress,
   fillOfficeDisplayName,
   manualIdempotencyKey,
   normalizeRecipients,
+  splitEmailField,
   recipientSetHash,
   resolveManifestRecipients,
   withBookingOfficeRecipients,
@@ -18,6 +21,32 @@ describe("manifest email recipients", () => {
       "postoffice@example.com",
       "booking@example.com",
     ]);
+  });
+
+  it("splits a pasted field into addresses", () => {
+    expect(splitEmailField(" a@x.com, B@Y.com; c@z.com ")).toEqual(["a@x.com", "B@Y.com", "c@z.com"]);
+    expect(normalizeRecipients("a@x.com, B@Y.com; c@z.com")).toEqual(["a@x.com", "b@y.com", "c@z.com"]);
+    expect(normalizeRecipients("a@x.com,  , b@y.com")).toEqual(["a@x.com", "b@y.com"]);
+    expect(() => normalizeRecipients("bad, a@x.com")).toThrow(/Enter a valid email address/);
+  });
+
+  it("keeps an unfinished address out of the saved list until it is finished", () => {
+    expect(commitEmailDraft(["a@x.com"], "ops@", { max: 10, flushPending: false })).toEqual({
+      emails: ["a@x.com"],
+      pending: "ops@",
+      error: null,
+    });
+    expect(commitEmailDraft(["a@x.com"], "b@y.com, c@z.com", { max: 10, flushPending: true })).toEqual({
+      emails: ["a@x.com", "b@y.com", "c@z.com"],
+      pending: "",
+      error: null,
+    });
+    expect(commitEmailDraft(["a@x.com"], "a@x.com,", { max: 10, flushPending: false }).error).toMatch(/already/);
+    expect(commitEmailDraft([], "not-an-email", { max: 10, flushPending: true }).error).toMatch(/valid email/);
+    expect(commitEmailDraft(["a@x.com"], "b@y.com", { max: 1, flushPending: true })).toMatchObject({
+      emails: ["a@x.com"],
+      pending: "b@y.com",
+    });
   });
 
   it("rejects an invalid address and a list over the cap", () => {
@@ -64,6 +93,29 @@ describe("manifest email recipients", () => {
       pickup_office_id: "22661165",
       pickup_office_name: "Kodurmalabar SO",
     })).toBe("Saved Name");
+  });
+
+  it("builds a booking office address from the India Post connection", () => {
+    expect(
+      fillOfficeAddress("22660001", {
+        pickup_office_id: "22660001",
+        pickup_office_city: "Kochi",
+        pickup_office_state: "Kerala",
+        pickup_office_pincode: "682001",
+        pickup_dropoff_office_id: "22660454",
+        pickup_dropoff_office_pincode: "682311",
+      })
+    ).toBe("Kochi, Kerala 682001");
+    expect(
+      fillOfficeAddress("22660454", {
+        pickup_office_id: "22660001",
+        pickup_office_city: "Kochi",
+        pickup_dropoff_office_id: "22660454",
+        pickup_dropoff_office_pincode: "682311",
+      })
+    ).toBe("682311");
+    expect(fillOfficeAddress("99999999", { pickup_office_id: "22660001", pickup_office_city: "Kochi" })).toBe("");
+    expect(fillOfficeAddress("22660001", { pickup_office_id: "22660001", pickup_office_city: "Kochi" })).toBe("Kochi");
   });
 
   it("updates the current booking office without dropping other offices", () => {

@@ -8,6 +8,7 @@ import { manifestEmailEnabled } from "@/modules/manifest-email/config";
 import {
   autoIdempotencyKey,
   ccForManifestEmail,
+  fillOfficeAddress,
   fillOfficeDisplayName,
   manualIdempotencyKey,
   recipientSetHash,
@@ -43,20 +44,25 @@ async function merchantName(supabase: SupabaseClient, organizationId: string) {
   return (await loadMerchantMailContact(supabase, organizationId)).name;
 }
 
-async function officeLabel(
+const OFFICE_COLUMNS =
+  "pickup_dropoff_office_id, pickup_dropoff_office_name, pickup_dropoff_office_pincode, pickup_office_id, pickup_office_name, pickup_office_pincode, pickup_office_city, pickup_office_state";
+
+async function officePresentation(
   supabase: SupabaseClient,
   organizationId: string,
   officeId: string | null,
   storedName: string | null
 ) {
-  const saved = storedName?.trim();
-  if (saved) return saved;
   const { data } = await supabase
     .from("india_post_connections")
-    .select("pickup_dropoff_office_id, pickup_dropoff_office_name, pickup_office_id, pickup_office_name")
+    .select(OFFICE_COLUMNS)
     .eq("organization_id", organizationId)
     .maybeSingle();
-  return fillOfficeDisplayName(officeId, storedName, data) || storedName || "";
+  const saved = storedName?.trim();
+  return {
+    name: saved || fillOfficeDisplayName(officeId, storedName, data) || storedName || "",
+    address: fillOfficeAddress(officeId, data),
+  };
 }
 
 async function loadManifest(supabase: SupabaseClient, organizationId: string, manifestId: string) {
@@ -135,6 +141,7 @@ function snapshot(input: {
   status: "QUEUED" | "FAILED";
   lastError?: string;
   lastErrorCode?: string;
+  officeAddress: string;
 }) {
   const rendered = renderManifestEmail({
     merchantName: input.merchant,
@@ -142,6 +149,7 @@ function snapshot(input: {
     manifestDate: input.manifest.manifest_date,
     shipmentCount: input.manifest.shipment_count ?? 0,
     officeName: input.manifest.office_name || "",
+    officeAddress: input.officeAddress,
   });
   return {
     organization_id: input.organizationId,
@@ -187,7 +195,7 @@ export async function enqueueAutoManifestEmail(
   if (!settings.autoSendEnabled) return null;
   const resolved = resolveManifestRecipients(settings, manifest.office_id);
   const merchant = await merchantName(supabase, organizationId);
-  const officeName = await officeLabel(supabase, organizationId, manifest.office_id, manifest.office_name);
+  const office = await officePresentation(supabase, organizationId, manifest.office_id, manifest.office_name);
   const key = autoIdempotencyKey(organizationId, manifest.id, manifest.closed_at);
   let block: { message: string; code: string } | null = null;
   if (!manifestEmailEnabled()) {
@@ -204,7 +212,7 @@ export async function enqueueAutoManifestEmail(
     supabase,
     snapshot({
       organizationId,
-      manifest: { ...manifest, office_name: officeName || manifest.office_name },
+      manifest: { ...manifest, office_name: office.name || manifest.office_name },
       merchant,
       recipients: resolved.recipients,
       cc: ccForManifestEmail(settings, manifest.office_id),
@@ -215,6 +223,7 @@ export async function enqueueAutoManifestEmail(
       status: block ? "FAILED" : "QUEUED",
       lastError: block?.message,
       lastErrorCode: block?.code,
+      officeAddress: office.address,
     }),
     userId
   );
@@ -300,12 +309,12 @@ export async function sendManifestEmail(
     );
   }
   const merchant = await merchantName(supabase, organizationId);
-  const officeName = await officeLabel(supabase, organizationId, manifest.office_id, manifest.office_name);
+  const office = await officePresentation(supabase, organizationId, manifest.office_id, manifest.office_name);
   const inserted = await insertDelivery(
     supabase,
     snapshot({
       organizationId,
-      manifest: { ...manifest, office_name: officeName || manifest.office_name },
+      manifest: { ...manifest, office_name: office.name || manifest.office_name },
       merchant,
       recipients,
       cc: ccForManifestEmail(settings, manifest.office_id),
@@ -314,6 +323,7 @@ export async function sendManifestEmail(
       idempotencyKey: manualIdempotencyKey(organizationId, manifestId, randomUUID()),
       userId,
       status: "QUEUED",
+      officeAddress: office.address,
     }),
     userId
   );

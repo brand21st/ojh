@@ -8,6 +8,7 @@ export type ManifestEmailContent = {
   manifestDate: string;
   shipmentCount: number;
   officeName: string;
+  officeAddress?: string;
 };
 
 export function escapeHtml(value: string) {
@@ -42,6 +43,7 @@ export function renderManifestEmail(content: ManifestEmailContent) {
   const number = plainText(content.manifestNumber) || "Manifest";
   const date = formatManifestDate(content.manifestDate);
   const office = plainText(content.officeName) || "Not specified";
+  const address = plainText(content.officeAddress ?? "");
   const count = Number.isFinite(content.shipmentCount) ? Math.max(0, Math.floor(content.shipmentCount)) : 0;
   const subject = `India Post Shipment Manifest | ${merchant} | ${number} | ${date}`.slice(0, 180);
 
@@ -58,6 +60,7 @@ export function renderManifestEmail(content: ManifestEmailContent) {
     `Manifest Date: ${date}`,
     `Total Shipments: ${count}`,
     `Booking Office: ${office}`,
+    ...(address ? [`Booking office address: ${address}`] : []),
     "",
     "The attached Excel file contains the shipment details in the India Post ArticleDetails format.",
     "",
@@ -107,6 +110,7 @@ export function renderManifestEmail(content: ManifestEmailContent) {
                 <tr><td style="padding:12px 16px;font-size:13px;color:#71717a;border-top:1px solid #e4e4e7;">Manifest Date</td><td style="padding:12px 16px;font-size:14px;border-top:1px solid #e4e4e7;">${escapeHtml(date)}</td></tr>
                 <tr><td style="padding:12px 16px;font-size:13px;color:#71717a;border-top:1px solid #e4e4e7;">Total Shipments</td><td style="padding:12px 16px;font-size:14px;border-top:1px solid #e4e4e7;">${count}</td></tr>
                 <tr><td style="padding:12px 16px;font-size:13px;color:#71717a;border-top:1px solid #e4e4e7;">Booking Office</td><td style="padding:12px 16px;font-size:14px;border-top:1px solid #e4e4e7;">${escapeHtml(office)}</td></tr>
+                ${address ? `<tr><td style="padding:12px 16px;font-size:13px;color:#71717a;border-top:1px solid #e4e4e7;">Booking office address</td><td style="padding:12px 16px;font-size:14px;border-top:1px solid #e4e4e7;">${escapeHtml(address)}</td></tr>` : ""}
               </table>
               <p style="margin:16px 0 0;">The attached Excel file contains the shipment details in the India Post ArticleDetails format.</p>
               <p style="margin:12px 0 0;">Kindly review the attached manifest and proceed with the applicable booking office procedures.</p>

@@ -15,6 +15,7 @@ export type ManifestEmailRepository = {
   markUnknown(id: string, staleBefore: string, message: string): Promise<boolean>;
   save(row: EmailDelivery): Promise<void>;
   manifest(organizationId: string, manifestId: string): Promise<ManifestEmailGate | null>;
+  officeAddress(organizationId: string, officeId: string | null): Promise<string>;
   loadAttachment(path: string): Promise<Buffer | null>;
   storeAttachment(path: string, bytes: Buffer): Promise<void>;
   merchantContact(organizationId: string): Promise<{ email: string; phone: string }>;
@@ -138,6 +139,7 @@ export async function executeManifestEmailDelivery(
   }
 
   const contact = await repo.merchantContact(row.organizationId);
+  const officeAddress = await repo.officeAddress(row.organizationId, row.officeId);
   const rendered = renderManifestEmail({
     merchantName: row.merchantName,
     merchantEmail: contact.email || row.replyTo || "",
@@ -146,6 +148,7 @@ export async function executeManifestEmailDelivery(
     manifestDate: row.manifestDate,
     shipmentCount: row.shipmentCount,
     officeName: row.officeName,
+    officeAddress,
   });
   row = { ...row, smtpPhase: "SUBMITTED" };
   await repo.save(row);

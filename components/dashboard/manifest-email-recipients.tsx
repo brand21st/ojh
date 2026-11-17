@@ -1,13 +1,14 @@
 "use client";
 
-import { useState } from "react";
-import { Plus, X } from "lucide-react";
+import { useId, useState } from "react";
+import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { commitEmailDraft } from "@/modules/manifest-email/recipients";
+import { cn } from "@/lib/utils";
 
-function looksLikeEmail(value: string) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+function sameList(left: string[], right: string[]) {
+  return left.length === right.length && left.every((email, index) => email === right[index]);
 }
 
 export function EmailList({
@@ -23,61 +24,88 @@ export function EmailList({
   max: number;
   onChange: (next: string[]) => void;
 }) {
-  const [draft, setDraft] = useState("");
-  const normalized = draft.trim().toLowerCase();
-  const duplicate = Boolean(normalized) && emails.includes(normalized);
-  const invalid = Boolean(normalized) && !looksLikeEmail(normalized);
+  const inputId = useId();
+  const hintId = useId();
+  const errorId = useId();
+  const statusId = useId();
+  const [pending, setPending] = useState("");
+  const [error, setError] = useState<string | null>(null);
 
-  function add() {
-    if (!normalized || invalid || duplicate || emails.length >= max) return;
-    onChange([...emails, normalized]);
-    setDraft("");
+  function apply(draft: string, flushPending: boolean) {
+    const result = commitEmailDraft(emails, draft, { max, flushPending });
+    setPending(result.pending);
+    setError(result.error);
+    if (!sameList(result.emails, emails)) onChange(result.emails);
   }
 
   return (
     <div className="grid gap-2">
-      <Label>{label}</Label>
-      <ul className="grid gap-2">
-        {emails.map((email) => (
-          <li key={email} className="flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-2">
-            <span className="min-w-0 flex-1 truncate text-sm">{email}</span>
-            <Button
-              type="button"
-              variant="secondary"
-              className="h-8 px-2"
-              disabled={disabled}
-              aria-label={`Remove ${email}`}
-              onClick={() => onChange(emails.filter((item) => item !== email))}
-            >
-              <X className="size-4" />
-            </Button>
-          </li>
-        ))}
-      </ul>
-      <div className="flex flex-col gap-2 sm:flex-row">
-        <Input
-          type="email"
-          value={draft}
-          disabled={disabled || emails.length >= max}
-          placeholder="office@example.com"
-          aria-label={label}
-          onChange={(event) => setDraft(event.target.value)}
+      <div className="flex items-baseline justify-between gap-3">
+        <Label htmlFor={inputId}>{label}</Label>
+        <p id={statusId} className="text-xs text-muted" role="status">
+          {emails.length} of {max} addresses
+        </p>
+      </div>
+      <div
+        className={cn(
+          "rounded-[var(--radius-input)] border border-border bg-card p-2 shadow-sm focus-within:border-brand focus-within:ring-2 focus-within:ring-brand/30",
+          error && "border-error focus-within:ring-error/25"
+        )}
+      >
+        {emails.length ? (
+          <ul className="mb-2 flex flex-wrap gap-2">
+            {emails.map((email) => (
+              <li key={email} className="flex max-w-full items-center rounded-full border border-border bg-surface-soft">
+                <span className="whitespace-nowrap px-3 text-sm">{email}</span>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="size-11 shrink-0 rounded-full"
+                  disabled={disabled}
+                  aria-label={`Remove ${email}`}
+                  onClick={() => onChange(emails.filter((item) => item !== email))}
+                >
+                  <X aria-hidden="true" />
+                </Button>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        <input
+          id={inputId}
+          type="text"
+          inputMode="email"
+          autoComplete="email"
+          value={pending}
+          disabled={disabled}
+          placeholder={emails.length ? "Add another address" : "office@example.com, ops@example.com"}
+          aria-invalid={error ? true : undefined}
+          aria-describedby={error ? `${hintId} ${errorId}` : hintId}
+          className="h-11 w-full bg-transparent px-2 text-sm text-foreground outline-none placeholder:text-zinc-400 disabled:cursor-not-allowed disabled:opacity-50"
+          onChange={(event) => apply(event.target.value, false)}
+          onBlur={(event) => apply(event.currentTarget.value, true)}
           onKeyDown={(event) => {
-            if (event.key === "Enter") {
+            const value = event.currentTarget.value;
+            if (event.key === "Enter" || event.key === ",") {
               event.preventDefault();
-              add();
+              apply(event.key === "," ? `${value},` : value, event.key === "Enter");
+            } else if (event.key === "Backspace" && !value && emails.length) {
+              onChange(emails.slice(0, -1));
             }
           }}
+          onPaste={(event) => {
+            const pasted = event.clipboardData.getData("text");
+            if (!/[,;\s]/.test(pasted)) return;
+            event.preventDefault();
+            apply(`${event.currentTarget.value}${pasted}`, true);
+          }}
         />
-        <Button type="button" variant="secondary" disabled={disabled || !normalized || invalid || duplicate || emails.length >= max} onClick={add}>
-          <Plus className="size-4" />
-          Add email address
-        </Button>
       </div>
-      {duplicate ? <p className="text-sm text-amber-700">That address is already in the list.</p> : null}
-      {invalid ? <p className="text-sm text-red-700">Enter a valid email address.</p> : null}
-      <p className="text-xs text-muted">
-        {emails.length} of {max}
+      <p id={hintId} className="text-xs text-muted">
+        Type an address and press Enter, or paste several separated by commas.
+      </p>
+      <p id={errorId} role={error ? "alert" : undefined} className="min-h-5 text-sm text-error">
+        {error ?? ""}
       </p>
     </div>
   );

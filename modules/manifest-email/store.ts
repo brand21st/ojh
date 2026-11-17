@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { MANIFEST_EMAIL_BUCKET, XLSX_MIME } from "@/modules/manifest-email/config";
 import { loadMerchantMailContact } from "@/modules/manifest-email/contact";
+import { fillOfficeAddress } from "@/modules/manifest-email/recipients";
 import type { EmailDelivery, ManifestEmailGate, SmtpPhase } from "@/modules/manifest-email/types";
 
 type DeliveryDb = {
@@ -175,6 +176,17 @@ export function createDeliveryRepository(supabase: SupabaseClient) {
       if (error) throw new Error(error.message);
       if (!data) return null;
       return { status: String(data.status), closedAt: (data.closed_at as string | null) ?? null };
+    },
+    async officeAddress(organizationId: string, officeId: string | null) {
+      const { data, error } = await supabase
+        .from("india_post_connections")
+        .select(
+          "pickup_dropoff_office_id, pickup_dropoff_office_pincode, pickup_office_id, pickup_office_pincode, pickup_office_city, pickup_office_state"
+        )
+        .eq("organization_id", organizationId)
+        .maybeSingle();
+      if (error) throw new Error(error.message);
+      return fillOfficeAddress(officeId, data);
     },
     async loadAttachment(path: string) {
       const { data, error } = await supabase.storage.from(MANIFEST_EMAIL_BUCKET).download(path);
