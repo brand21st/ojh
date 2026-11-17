@@ -113,7 +113,7 @@ export default function ManifestEmailSettingsPage() {
               <div>
                 <p className="text-sm font-medium">Booking office recipients</p>
                 <p className="text-sm text-muted">
-                  Leave an office off this list to use the default recipients. An office with its own list never uses the default, even when that list is empty.
+                  Leave an office off this list to use the default recipients as To:. An office with its own list is the To: line. Default addresses that are not on that list are still CC'd. An empty office list means no email for that office.
                 </p>
               </div>
               {settings.offices.length ? (
@@ -132,7 +132,7 @@ export default function ManifestEmailSettingsPage() {
                           aria-label={`Custom recipients for ${office.name || office.id}`}
                           onCheckedChange={(checked) => {
                             const officeOverrides = { ...settings.officeOverrides };
-                            if (checked) officeOverrides[office.id] = officeOverrides[office.id] ?? [];
+                            if (checked) officeOverrides[office.id] = officeOverrides[office.id] ?? [...settings.recipients];
                             else delete officeOverrides[office.id];
                             setDraft({ ...settings, officeOverrides });
                           }}

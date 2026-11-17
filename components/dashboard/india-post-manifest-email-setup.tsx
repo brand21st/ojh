@@ -128,7 +128,7 @@ export function IndiaPostManifestEmailSetup({
                 <div>
                   <p className="text-sm font-medium">This booking office</p>
                   <p className="text-xs text-muted">
-                    {officeName || "Drop-off office"} · {savedOfficeKey}. Add this office&apos;s mailbox here. Leave it blank to keep using the default recipients.
+                    {officeName || "Drop-off office"} · {savedOfficeKey}. Add this office&apos;s mailbox here. Leave it blank to keep using the default recipients as To:. Saved office addresses are To:; other default addresses are still CC'd.
                   </p>
                 </div>
                 <EmailList

@@ -74,6 +74,57 @@ export function resolveManifestRecipients(
 }
 
 /**
+ * Office To: stays the office list. Default recipients that are not already on To
+ * are CC'd so a merchant copy is not dropped when an office mailbox is saved.
+ * An empty office list still means do not send.
+ */
+export function ccForManifestEmail(
+  settings: { recipients: string[]; officeOverrides: Record<string, string[]>; ccRecipients: string[] },
+  officeId: string | null | undefined
+) {
+  const resolved = resolveManifestRecipients(settings, officeId);
+  const seen = new Set([...resolved.recipients, ...settings.ccRecipients].map((email) => email.toLowerCase()));
+  const extra =
+    resolved.source === "office" && resolved.recipients.length
+      ? settings.recipients.filter((email) => {
+          const key = email.toLowerCase();
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        })
+      : [];
+  return [...settings.ccRecipients, ...extra];
+}
+
+export type OfficeNameConnection = {
+  pickup_dropoff_office_id?: string | null;
+  pickup_dropoff_office_name?: string | null;
+  pickup_office_id?: string | null;
+  pickup_office_name?: string | null;
+};
+
+function text(value: unknown) {
+  const next = typeof value === "string" ? value.trim() : "";
+  return next || null;
+}
+
+export function fillOfficeDisplayName(
+  officeId: string | null | undefined,
+  storedName: string | null | undefined,
+  connection: OfficeNameConnection | null | undefined
+) {
+  const saved = text(storedName);
+  if (saved) return saved;
+  const id = text(officeId);
+  if (!id || !connection) return "";
+  const dropId = text(connection.pickup_dropoff_office_id);
+  const pickupId = text(connection.pickup_office_id);
+  if (id === dropId) return text(connection.pickup_dropoff_office_name) || (id === pickupId ? text(connection.pickup_office_name) : null) || "";
+  if (id === pickupId) return text(connection.pickup_office_name) || "";
+  return "";
+}
+
+/**
  * Replace one booking office's recipient list without dropping other offices.
  * An empty list is stored only when that office already had its own entry.
  */

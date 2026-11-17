@@ -3,6 +3,7 @@ import { AppError, ERROR_CODES } from "@/lib/api/errors";
 import { manifestEmailEnabled, manifestEmailMaxRecipients } from "@/modules/manifest-email/config";
 import {
   assertAutoSendRecipients,
+  fillOfficeDisplayName,
   MAX_CC,
   normalizeEmailAddress,
   normalizeOfficeOverrides,
@@ -80,11 +81,16 @@ async function listOffices(supabase: SupabaseClient, organizationId: string) {
     .not("office_id", "is", null)
     .limit(300);
   if (error) throw new AppError(ERROR_CODES.VALIDATION_ERROR, error.message);
+  const { data: connection } = await supabase
+    .from("india_post_connections")
+    .select("pickup_dropoff_office_id, pickup_dropoff_office_name, pickup_office_id, pickup_office_name")
+    .eq("organization_id", organizationId)
+    .maybeSingle();
   const offices = new Map<string, string>();
   for (const row of data ?? []) {
     const id = String(row.office_id ?? "").trim();
     if (!id || offices.has(id)) continue;
-    offices.set(id, String(row.office_name ?? "").trim());
+    offices.set(id, fillOfficeDisplayName(id, row.office_name, connection));
   }
   return [...offices.entries()].map(([id, name]) => ({ id, name }));
 }

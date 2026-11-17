@@ -94,6 +94,14 @@ describe("manifest grouping", () => {
     });
     expect(resolveManifestOffice("99999999", connection)).toEqual({ id: "99999999", name: null });
     expect(resolveManifestOffice(null, null)).toEqual({ id: null, name: null });
+    expect(
+      resolveManifestOffice("22661165", {
+        pickup_dropoff_office_id: "22661165",
+        pickup_dropoff_office_name: null,
+        pickup_office_id: "22661165",
+        pickup_office_name: "Kodurmalabar SO",
+      })
+    ).toEqual({ id: "22661165", name: "Kodurmalabar SO" });
   });
 
   it("groups shipments per booking office for the day", () => {

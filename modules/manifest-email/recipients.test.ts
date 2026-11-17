@@ -3,6 +3,8 @@ import { AppError } from "@/lib/api/errors";
 import {
   assertAutoSendRecipients,
   autoIdempotencyKey,
+  ccForManifestEmail,
+  fillOfficeDisplayName,
   manualIdempotencyKey,
   normalizeRecipients,
   recipientSetHash,
@@ -32,6 +34,36 @@ describe("manifest email recipients", () => {
     expect(resolveManifestRecipients(settings, "22660001").recipients).toEqual([]);
     expect(resolveManifestRecipients(settings, "99999999").recipients).toEqual(["default@example.com"]);
     expect(resolveManifestRecipients(settings, null).recipients).toEqual(["default@example.com"]);
+  });
+
+  it("CCs leftover default recipients when an office list is used for auto-send", () => {
+    const settings = {
+      recipients: ["office@indiapost.gov.in", "merchant@example.com"],
+      officeOverrides: { "22661165": ["office@indiapost.gov.in"] },
+      ccRecipients: ["ops@example.com"],
+    };
+    expect(ccForManifestEmail(settings, "22661165")).toEqual(["ops@example.com", "merchant@example.com"]);
+    expect(ccForManifestEmail(settings, "99999999")).toEqual(["ops@example.com"]);
+    expect(
+      ccForManifestEmail({ ...settings, officeOverrides: { "22661165": [] } }, "22661165")
+    ).toEqual(["ops@example.com"]);
+  });
+
+  it("fills a missing office name from the pickup office when drop-off shares the id", () => {
+    expect(
+      fillOfficeDisplayName("22661165", null, {
+        pickup_dropoff_office_id: "22661165",
+        pickup_dropoff_office_name: null,
+        pickup_office_id: "22661165",
+        pickup_office_name: "Kodurmalabar SO",
+      })
+    ).toBe("Kodurmalabar SO");
+    expect(fillOfficeDisplayName("22661165", "Saved Name", {
+      pickup_dropoff_office_id: "22661165",
+      pickup_dropoff_office_name: null,
+      pickup_office_id: "22661165",
+      pickup_office_name: "Kodurmalabar SO",
+    })).toBe("Saved Name");
   });
 
   it("updates the current booking office without dropping other offices", () => {

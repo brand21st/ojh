@@ -203,7 +203,12 @@ export function resolveManifestOffice(bookingOfficeId: string | null | undefined
   const pickupId = text(connection?.pickup_office_id);
   const id = text(bookingOfficeId) ?? dropId ?? pickupId;
   if (!id) return { id: null, name: null };
-  if (id === dropId) return { id, name: text(connection?.pickup_dropoff_office_name) };
+  if (id === dropId) {
+    return {
+      id,
+      name: text(connection?.pickup_dropoff_office_name) ?? (id === pickupId ? text(connection?.pickup_office_name) : null),
+    };
+  }
   if (id === pickupId) return { id, name: text(connection?.pickup_office_name) };
   return { id, name: null };
 }

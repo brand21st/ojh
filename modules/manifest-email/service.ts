@@ -7,6 +7,8 @@ import { createBackgroundJob } from "@/modules/jobs/service";
 import { manifestEmailEnabled } from "@/modules/manifest-email/config";
 import {
   autoIdempotencyKey,
+  ccForManifestEmail,
+  fillOfficeDisplayName,
   manualIdempotencyKey,
   recipientSetHash,
   resolveManifestRecipients,
@@ -39,6 +41,22 @@ function writer(supabase: SupabaseClient) {
 
 async function merchantName(supabase: SupabaseClient, organizationId: string) {
   return (await loadMerchantMailContact(supabase, organizationId)).name;
+}
+
+async function officeLabel(
+  supabase: SupabaseClient,
+  organizationId: string,
+  officeId: string | null,
+  storedName: string | null
+) {
+  const saved = storedName?.trim();
+  if (saved) return saved;
+  const { data } = await supabase
+    .from("india_post_connections")
+    .select("pickup_dropoff_office_id, pickup_dropoff_office_name, pickup_office_id, pickup_office_name")
+    .eq("organization_id", organizationId)
+    .maybeSingle();
+  return fillOfficeDisplayName(officeId, storedName, data) || storedName || "";
 }
 
 async function loadManifest(supabase: SupabaseClient, organizationId: string, manifestId: string) {
@@ -169,6 +187,7 @@ export async function enqueueAutoManifestEmail(
   if (!settings.autoSendEnabled) return null;
   const resolved = resolveManifestRecipients(settings, manifest.office_id);
   const merchant = await merchantName(supabase, organizationId);
+  const officeName = await officeLabel(supabase, organizationId, manifest.office_id, manifest.office_name);
   const key = autoIdempotencyKey(organizationId, manifest.id, manifest.closed_at);
   let block: { message: string; code: string } | null = null;
   if (!manifestEmailEnabled()) {
@@ -185,10 +204,10 @@ export async function enqueueAutoManifestEmail(
     supabase,
     snapshot({
       organizationId,
-      manifest,
+      manifest: { ...manifest, office_name: officeName || manifest.office_name },
       merchant,
       recipients: resolved.recipients,
-      cc: settings.ccRecipients,
+      cc: ccForManifestEmail(settings, manifest.office_id),
       replyTo: settings.replyTo,
       trigger: "AUTO",
       idempotencyKey: key,
@@ -281,14 +300,15 @@ export async function sendManifestEmail(
     );
   }
   const merchant = await merchantName(supabase, organizationId);
+  const officeName = await officeLabel(supabase, organizationId, manifest.office_id, manifest.office_name);
   const inserted = await insertDelivery(
     supabase,
     snapshot({
       organizationId,
-      manifest,
+      manifest: { ...manifest, office_name: officeName || manifest.office_name },
       merchant,
       recipients,
-      cc: settings.ccRecipients,
+      cc: ccForManifestEmail(settings, manifest.office_id),
       replyTo: settings.replyTo,
       trigger: "MANUAL",
       idempotencyKey: manualIdempotencyKey(organizationId, manifestId, randomUUID()),
