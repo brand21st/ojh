@@ -336,6 +336,15 @@ export function StoreApp({
     });
   }
 
+  function buyNow(next: StoreProduct) {
+    if (!next.inStock) return;
+    const inCart = cart.some((line) => line.product.id === next.id);
+    if (!inCart) addToCart(next);
+    // Skip openCart's stock refresh: it reads the cart before this add lands and would drop the item.
+    setSheet("cart");
+    trackEvent("CART_OPENED", { value: cart.reduce((sum, line) => sum + line.product.price * line.quantity, 0) + (inCart ? 0 : next.price) });
+  }
+
   function addBundle(bundle: StoreBundle) {
     emitStoreEvent(workspaceKey, commerceEvent("add_bundle", { value: bundle.total, items: bundle.components.map((item) => ({ item_id: item.product.id, item_name: item.product.name, price: item.product.price, quantity: item.quantity })) }));
     const next = bundleCartLine(bundle);
@@ -448,7 +457,7 @@ export function StoreApp({
             seenCovers.current.add(slideId);
           }
           trackEvent(type, { slideId });
-        }} detail={product ? <MarketplaceProduct product={product} quantity={cart.find((line) => line.product.id === product.id)?.quantity ?? 0} related={related} onBack={closeProduct} onAdd={addToCart} onDecrease={decrease} onOpenProduct={openProduct} /> : undefined} /> : <StoreHome
+        }} detail={product ? <MarketplaceProduct key={product.id} product={product} quantity={cart.find((line) => line.product.id === product.id)?.quantity ?? 0} cartQuantity={(id) => cart.find((line) => line.product.id === id)?.quantity ?? 0} related={related} categories={store.categories} workspace={isPreview ? undefined : workspaceKey} linkRef={apiRef} preview={isPreview} onBack={closeProduct} onAdd={addToCart} onDecrease={decrease} onOpenProduct={openProduct} onBuyNow={buyNow} /> : undefined} /> : <StoreHome
         store={store}
         cart={cart}
         query={query}
