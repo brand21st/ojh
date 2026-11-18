@@ -28,6 +28,7 @@ export const QUEUE_NAMES = {
   bulkExcelImport: "bulk-excel-import",
   bookingQueueDispatch: "booking-queue-dispatch",
   manifestEmail: "manifest-email",
+  manifestWhatsapp: "manifest-whatsapp",
 } as const;
 
 const queues = new Map<string, Queue>();

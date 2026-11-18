@@ -732,6 +732,16 @@ export async function closeManifest(supabase: SupabaseClient, organizationId: st
       message: error instanceof Error ? error.message : "enqueue failed",
     });
   }
+  try {
+    const { enqueueAutoManifestWhatsApp } = await import("@/modules/manifest-whatsapp/service");
+    await enqueueAutoManifestWhatsApp(supabase, organizationId, row, userId);
+  } catch (error) {
+    logError("manifest_whatsapp.auto_enqueue_failed", {
+      organizationId,
+      manifestId,
+      message: error instanceof Error ? error.message : "enqueue failed",
+    });
+  }
   return mapManifest(row);
 }
 

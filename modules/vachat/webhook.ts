@@ -127,6 +127,12 @@ async function recordAccepted(
       kind: "status",
       payload: { event: "message.status_updated", ...((body as { data?: Record<string, unknown> }).data ?? {}), data: body.data },
     }).catch(() => undefined);
+    const { applyManifestWhatsAppWebhookStatus } = await import("@/modules/manifest-whatsapp/webhook");
+    await applyManifestWhatsAppWebhookStatus(supabase, matched.organization_id, {
+      status,
+      vachatMessageId: body.data?.message_id ?? null,
+      whatsappMessageId: body.data?.whatsapp_message_id ?? null,
+    }).catch(() => undefined);
   }
 
   return { accepted: true, duplicate: false };

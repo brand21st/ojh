@@ -8,6 +8,8 @@ const BOOKING_FAILURE_EXEMPT_QUEUES = new Set([
   "vachat-notify",
   "support-ingest",
   "shopify-address-correction",
+  "manifest-email",
+  "manifest-whatsapp",
 ]);
 
 /** Label and invoice failures must not change the India Post booking outcome. */

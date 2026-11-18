@@ -109,6 +109,8 @@ export function permissionForTenantRoute(
   }
 
   if (path === "manifests/email-settings" && method === "PATCH") return "automation.manage";
+  if (path === "manifests/whatsapp-settings" && method === "PATCH") return "automation.manage";
+  if (path === "manifests/whatsapp-settings/test" && method === "POST") return "automation.manage";
 
   if (root === "manifests") {
     return method === "GET" ? "manifests.read" : "manifests.write";
