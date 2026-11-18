@@ -58,7 +58,9 @@ export async function createBackgroundJob(
         shipmentIds: input.shipmentIds,
         userId: input.userId,
       },
-      input.jobType === "manifest-email" ? { jobId: `manifest-email:${data.id}` } : undefined
+      input.jobType === "manifest-email" || input.jobType === "manifest-whatsapp"
+        ? { jobId: `${input.jobType}:${data.id}` }
+        : undefined
     );
   } catch (queueError) {
     logError("queue.enqueue_failed", {

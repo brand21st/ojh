@@ -82,6 +82,7 @@ describe("bookingFailureShipmentUpdate", () => {
   it("does not let a label failure rewrite the booking", () => {
     expect(shouldApplyBookingFailureUpdate("label-generation")).toBe(false);
     expect(shouldApplyBookingFailureUpdate("shipment-booking")).toBe(true);
+    expect(shouldApplyBookingFailureUpdate("manifest-whatsapp")).toBe(false);
   });
 
   it("fails BOOKING for permanent validation errors", () => {

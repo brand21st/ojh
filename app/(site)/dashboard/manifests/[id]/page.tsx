@@ -34,6 +34,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { manifestOfficeLabel } from "@/lib/dashboard/manifests";
 import { ManifestEmailPanel } from "@/components/dashboard/manifest-email-panel";
+import { ManifestWhatsAppPanel } from "@/components/dashboard/manifest-whatsapp-panel";
 import { formatCurrency, formatDate, formatWeightGrams } from "@/lib/format";
 import { api } from "@/lib/hooks/use-api";
 import { useMe } from "@/lib/hooks/use-me";
@@ -375,6 +376,16 @@ export default function ManifestDetailPage() {
       ) : null}
 
       <ManifestEmailPanel
+        manifestId={id}
+        manifestNumber={data.number ?? "Draft manifest"}
+        merchantName={me.data?.organization?.name ?? "Merchant"}
+        shipmentCount={data.shipmentCount}
+        officeId={data.officeId}
+        filenameHint={`manifest_${(data.number ?? "draft").replace(/[^A-Za-z0-9._-]/g, "_")}_india_post.xlsx`}
+        canSend={canWrite && (data.status === "CLOSED" || data.status === "HANDED_OVER")}
+      />
+
+      <ManifestWhatsAppPanel
         manifestId={id}
         manifestNumber={data.number ?? "Draft manifest"}
         merchantName={me.data?.organization?.name ?? "Merchant"}

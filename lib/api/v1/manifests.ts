@@ -32,6 +32,13 @@ import {
   sendManifestEmail,
 } from "@/modules/manifest-email/service";
 import { getManifestEmailSettings, updateManifestEmailSettings } from "@/modules/manifest-email/settings";
+import {
+  listManifestWhatsAppDeliveries,
+  probeManifestWhatsApp,
+  retryManifestWhatsApp,
+  sendManifestWhatsApp,
+} from "@/modules/manifest-whatsapp/service";
+import { getManifestWhatsAppSettings, updateManifestWhatsAppSettings } from "@/modules/manifest-whatsapp/settings";
 
 async function readHandover(request: NextRequest) {
   const type = request.headers.get("content-type") ?? "";
@@ -81,6 +88,15 @@ export async function handleManifestRoutes(
   if (id === "email-settings" && !action && method === "PATCH") {
     return updateManifestEmailSettings(supabase, org, ctx.userId, await request.json().catch(() => ({})));
   }
+  if (id === "whatsapp-settings" && action === "test" && method === "POST") {
+    return probeManifestWhatsApp(supabase, org);
+  }
+  if (id === "whatsapp-settings" && !action && method === "GET") {
+    return getManifestWhatsAppSettings(supabase, org);
+  }
+  if (id === "whatsapp-settings" && !action && method === "PATCH") {
+    return updateManifestWhatsAppSettings(supabase, org, ctx.userId, await request.json().catch(() => ({})));
+  }
 
   if (!action && method === "GET") return getManifest(supabase, org, id);
 
@@ -100,6 +116,16 @@ export async function handleManifestRoutes(
   }
   if (action === "email-deliveries" && childId && extra === "retry" && method === "POST") {
     return retryManifestEmail(supabase, org, id, childId, ctx.userId);
+  }
+  if (action === "whatsapp" && method === "POST") {
+    const body = (await request.json().catch(() => ({}))) as { recipients?: unknown; confirmResend?: boolean };
+    return sendManifestWhatsApp(supabase, org, id, ctx.userId, body);
+  }
+  if (action === "whatsapp-deliveries" && !childId && method === "GET") {
+    return listManifestWhatsAppDeliveries(supabase, org, id);
+  }
+  if (action === "whatsapp-deliveries" && childId && extra === "retry" && method === "POST") {
+    return retryManifestWhatsApp(supabase, org, id, childId, ctx.userId);
   }
 
   if (action === "close" && method === "POST") return closeManifest(supabase, org, id, ctx.userId);
