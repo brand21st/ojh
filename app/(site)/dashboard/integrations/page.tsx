@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Plug } from "lucide-react";
 import { GoogleSheetsLogo } from "@/components/brand/google-sheets-logo";
 import { IndiaPostLogo } from "@/components/brand/india-post-logo";
+import { RazorpayLogo } from "@/components/brand/razorpay-logo";
 import { ShopifyLogo } from "@/components/brand/shopify-logo";
 import { WatiLogo } from "@/components/brand/wati-logo";
 import { WooCommerceLogo } from "@/components/brand/woocommerce-logo";
@@ -33,6 +34,7 @@ const FALLBACK: IntegrationCard[] = [
   { provider: "WOOCOMMERCE", name: "WooCommerce", status: "NOT_CONNECTED" },
   { provider: "POSTBUS_WHATSAPP", name: "Postbus-Whatsapp Notifications", status: "NOT_CONNECTED" },
   { provider: "VACHAT", name: "Vachat", status: "NOT_CONNECTED" },
+  { provider: "RAZORPAY", name: "Razorpay — Online Payments", status: "NOT_CONNECTED" },
 ];
 
 function cardsFromPayload(payload?: IntegrationsResponse | null): IntegrationCard[] {
@@ -73,7 +75,7 @@ export default function IntegrationsPage() {
     <div className="space-y-6">
       <PageHeader
         title="Integrations"
-        description="Shopify, WooCommerce, India Post, Google Sheets, Wati, PostBus WhatsApp, merchant Vachat, Developer API, and paid add-ons."
+        description="Shopify, WooCommerce, India Post, Razorpay payments, Google Sheets, Wati, PostBus WhatsApp, merchant Vachat, Developer API, and paid add-ons."
       />
 
       <AiAccountantCard />
@@ -139,6 +141,8 @@ export default function IntegrationsPage() {
                       ? "/dashboard/integrations/postbus-whatsapp"
                     : provider === "VACHAT"
                       ? "/dashboard/integrations/vachat"
+                    : provider === "RAZORPAY"
+                      ? "/dashboard/integrations/razorpay"
                     : undefined;
 
             const feature =
@@ -152,8 +156,16 @@ export default function IntegrationsPage() {
                     ? FEATURE.wati
                     : null;
             const locked = Boolean(feature && !entitlements.allows(feature));
+            const payments = card;
             const description = comingLater
               ? null
+              : provider === "RAZORPAY"
+                ? card.lastError ??
+                  (connected
+                    ? payments.enabled
+                      ? `Accepting online payments on your Mini Store · ${payments.mode === "LIVE" ? "Live" : "Test"} mode`
+                      : `Connected · online checkout is off · ${payments.mode === "LIVE" ? "Live" : "Test"} mode`
+                    : "Connect your Razorpay account to accept secure online payments directly from your PostBus Mini Store.")
               : card.lastError || card.last_error
                 ? card.lastError ?? card.last_error
                 : provider === "POSTBUS_WHATSAPP"
@@ -183,6 +195,11 @@ export default function IntegrationsPage() {
                           <WatiLogo className="h-6" />
                         ) : provider === "WOOCOMMERCE" ? (
                           <WooCommerceLogo className="h-6" />
+                        ) : provider === "RAZORPAY" ? (
+                          <span className="flex flex-wrap items-center gap-2">
+                            <RazorpayLogo />
+                            <span className="text-sm font-medium text-muted">Online Payments</span>
+                          </span>
                         ) : (
                           card.name ?? card.provider
                         )}
@@ -205,7 +222,9 @@ export default function IntegrationsPage() {
                 </CardHeader>
                 <CardContent className="flex items-center justify-between">
                   <p className="text-xs text-muted">
-                    Last sync {formatDate(card.lastSyncAt ?? card.last_sync_at, true)}
+                    {provider === "RAZORPAY"
+                      ? `Last verified ${formatDate(card.lastVerifiedAt ?? null, true)}`
+                      : `Last sync ${formatDate(card.lastSyncAt ?? card.last_sync_at, true)}`}
                   </p>
                   {comingLater ? (
                     <span className="text-sm text-muted">Coming later</span>
@@ -215,7 +234,13 @@ export default function IntegrationsPage() {
                     </a>
                   ) : href ? (
                     <Link href={href} className={buttonVariants({ size: "sm" })}>
-                      {connected || card.appConfigured === false ? "Configure" : "Connect"}
+                      {provider === "RAZORPAY"
+                        ? card.status && card.status !== "NOT_CONNECTED"
+                          ? "Manage integration"
+                          : "Connect Razorpay"
+                        : connected || card.appConfigured === false
+                          ? "Configure"
+                          : "Connect"}
                     </Link>
                   ) : null}
                 </CardContent>

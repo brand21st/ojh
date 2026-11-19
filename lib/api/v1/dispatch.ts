@@ -1,3 +1,4 @@
+import { handleMerchantPaymentRoutes } from "@/lib/api/v1/merchant-payments";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { NextRequest } from "next/server";
 import type { TenantContext } from "@/lib/api/context";
@@ -67,6 +68,7 @@ export async function dispatchTenantRoutes(
     (await handleInvoiceRoutes(request, supabase, ctx, key, method, slugs)) ??
     (await handleInventoryRoutes(request, supabase, ctx, key, method, slugs)) ??
     (await handleManifestRoutes(request, supabase, ctx, method, slugs)) ??
+    (await handleMerchantPaymentRoutes(request, ctx, key, method, slugs)) ??
     (await handleCommerceRoutes(request, supabase, ctx, key, method, slugs)) ??
     (await handleIntegrationRoutes(request, supabase, ctx, key)) ??
     (await handleMerchantTutorials(request, supabase, slugs, method)) ??
