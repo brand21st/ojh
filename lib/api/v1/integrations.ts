@@ -328,8 +328,8 @@ export async function handleIntegrationRoutes(
         };
     const shopifyConfigured = shopifyAppConfiguredFor(shopify);
     const shopifySyncReady = shopifyReadyToSync(shopify);
-    const { merchantRazorpaySummary } = await import("@/lib/api/v1/merchant-payments");
-    const razorpay = await merchantRazorpaySummary(ctx.organizationId);
+    const { merchantCashfreeSummary, merchantRazorpaySummary } = await import("@/lib/api/v1/merchant-payments");
+    const [razorpay, cashfree] = await Promise.all([merchantRazorpaySummary(ctx.organizationId), merchantCashfreeSummary(ctx.organizationId)]);
     return {
       shopify: {
         provider: "shopify",
@@ -398,6 +398,7 @@ export async function handleIntegrationRoutes(
           lastError: vachat?.last_error,
         },
         ...(razorpay ? [razorpay] : []),
+        ...(cashfree ? [cashfree] : []),
       ],
     };
   }

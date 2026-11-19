@@ -53,6 +53,8 @@ export function contentSecurityPolicy(options?: { embedShopify?: boolean; shop?:
     "https://*.shopify.com",
     "https://api.razorpay.com",
     "https://lumberjack.razorpay.com",
+    // Merchant storefront Cashfree Hosted Checkout (SDK telemetry and session calls).
+    "https://*.cashfree.com",
     "https://api.stripe.com",
     // PostHog product analytics (instrumentation-client.ts): event ingest, flags and remote config.
     "https://*.i.posthog.com",
@@ -69,6 +71,7 @@ export function contentSecurityPolicy(options?: { embedShopify?: boolean; shop?:
     "https://www.googletagmanager.com",
     "https://static.cloudflareinsights.com",
     "https://checkout.razorpay.com",
+    "https://sdk.cashfree.com",
     "https://cdn.jsdelivr.net",
     // PostHog loads its remote config and lazy extensions (surveys, recorder) from its asset host.
     "https://*.i.posthog.com",
@@ -92,7 +95,10 @@ export function contentSecurityPolicy(options?: { embedShopify?: boolean; shop?:
       : options?.frameSelf
         ? "frame-ancestors 'self'"
         : "frame-ancestors 'none'",
-    "form-action 'self'",
+    // Cashfree's JS SDK opens Hosted Checkout by POSTing the payment session to its own
+    // /pg/view/sessions/checkout page (Sandbox and Production hosts). Without these, the
+    // merchant storefront's Cashfree checkout modal stays blank.
+    "form-action 'self' https://sandbox.cashfree.com https://api.cashfree.com",
     `script-src ${scriptSrc}`,
     `style-src ${styleSrc}`,
     "img-src 'self' data: blob: https:",
@@ -101,7 +107,7 @@ export function contentSecurityPolicy(options?: { embedShopify?: boolean; shop?:
       : "font-src 'self' data: https://fonts.gstatic.com",
     `connect-src ${connectSrc}`,
     "worker-src 'self' blob:",
-    "frame-src 'self' blob: https://api.razorpay.com https://checkout.razorpay.com https://js.stripe.com https://hooks.stripe.com https://*.myshopify.com https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com https://www.facebook.com https://www.instagram.com",
+    "frame-src 'self' blob: https://api.razorpay.com https://checkout.razorpay.com https://*.cashfree.com https://js.stripe.com https://hooks.stripe.com https://*.myshopify.com https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com https://www.facebook.com https://www.instagram.com",
     "upgrade-insecure-requests",
   ].join("; ");
 }

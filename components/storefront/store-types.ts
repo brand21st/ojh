@@ -80,8 +80,10 @@ export type StorePayload = {
   };
   workspace: string;
   footer?: StoreFooter | null;
-  /** Checkout can take payment through the merchant's own Razorpay account. */
+  /** Checkout can take payment through the merchant's own gateway account. */
   onlinePayment?: boolean;
+  /** Which of the merchant's gateways checkout uses. */
+  onlinePaymentProvider?: "RAZORPAY" | "CASHFREE" | null;
 };
 
 export type CartLine = {

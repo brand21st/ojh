@@ -21,13 +21,13 @@ import { loadCatalogProducts } from "@/modules/products/service";
 import { priceStoreCart, quoteCatalogPayment } from "@/modules/storefront/quote";
 import { attachRedemptionOrder, releaseCouponRedemption, reserveCouponRedemption } from "@/modules/storefront/coupons/service";
 import { resolveStoreCart } from "@/modules/storefront/resolve-cart";
+import { newPaymentToken } from "@/modules/merchant-payments/payments";
 import {
   assertOnlinePaymentAvailable,
   createStorefrontPayment,
-  newPaymentToken,
   pendingOnlinePaymentMeta,
-  type CheckoutSession,
-} from "@/modules/merchant-payments/payments";
+  type StorefrontCheckoutSession,
+} from "@/modules/merchant-payments/checkout";
 
 type PublicLinkRow = {
   id: string;
@@ -260,7 +260,8 @@ export async function submitPublicCustomerOrderLink(
   }
   if (input.bundles?.length && !input.quoteVersion) throw new AppError(ERROR_CODES.VALIDATION_ERROR, "Review your bundle quote before placing an order.");
   // Fail before anything is saved when the store cannot take online payments right now.
-  if (input.payOnline === true) await assertOnlinePaymentAvailable(supabase, row.organization_id);
+  // The merchant's chosen gateway (Razorpay or Cashfree) is fixed here for this order.
+  const onlineProvider = input.payOnline === true ? await assertOnlinePaymentAvailable(supabase, row.organization_id) : null;
   if (idempotencyKey) {
     const requestHash = hashSecret(
       JSON.stringify({
@@ -382,8 +383,9 @@ export async function submitPublicCustomerOrderLink(
   const payOnline = input.payOnline === true && Boolean(quote) && Number(quote?.amountDueNow ?? 0) > 0;
   const paymentToken = payOnline ? newPaymentToken() : null;
   const onlinePayment =
-    payOnline && quote && paymentToken
+    payOnline && quote && paymentToken && onlineProvider
       ? pendingOnlinePaymentMeta({
+          provider: onlineProvider,
           kind: quote.preference === "COD" ? "COD_ADVANCE" : "FULL",
           amountDue: Number(quote.amountDueNow),
           orderTotal: Number(quote.total),
@@ -496,13 +498,16 @@ export async function submitPublicCustomerOrderLink(
         : "Cash on delivery"
       : onlinePayment ? "Online payment" : "Prepaid";
 
-  // Razorpay order on the MERCHANT's account. If this fails, the order still exists and the
-  // customer can retry from the confirmation screen with the same token.
-  let payment: CheckoutSession | null = null;
+  // Gateway order (Razorpay or Cashfree) on the MERCHANT's account. If this fails, the order still
+  // exists and the customer can retry from the confirmation screen with the same token.
+  let payment: StorefrontCheckoutSession | null = null;
   let paymentError: string | null = null;
   if (onlinePayment && paymentToken) {
     try {
       payment = await createStorefrontPayment(supabase, {
+        provider: onlinePayment.provider,
+        customer: { name: input.customerName.trim(), phone },
+        returnUrl: input.returnUrl ?? null,
         organizationId: row.organization_id,
         orderId: order.id as string,
         orderNumber: (order.orderNumber ?? order.order_number ?? null) as string | null,

@@ -10,15 +10,15 @@ import { formatDate } from "@/lib/format";
 import { api } from "@/lib/hooks/use-api";
 
 type OnlinePayment = {
-  provider: "RAZORPAY";
-  status: "CREATED" | "FAILED" | "AUTHORIZED" | "PAID" | "REFUNDED";
+  provider: "RAZORPAY" | "CASHFREE";
+  status: "CREATED" | "FAILED" | "CANCELLED" | "PROCESSING" | "AUTHORIZED" | "PAID" | "REFUNDED";
   mode: "TEST" | "LIVE";
   kind: "FULL" | "COD_ADVANCE";
   amount: number;
   orderTotal: number;
   currency: string;
-  razorpayOrderId: string;
-  razorpayPaymentId: string | null;
+  providerOrderId: string;
+  providerPaymentId: string | null;
   method: string | null;
   failureReason: string | null;
   needsReview: boolean;
@@ -33,6 +33,8 @@ type OnlinePayment = {
 const STATUS_LABEL: Record<OnlinePayment["status"], { badge: string; label: string }> = {
   CREATED: { badge: "PENDING", label: "Pending" },
   FAILED: { badge: "FAILED", label: "Failed" },
+  CANCELLED: { badge: "PENDING", label: "Cancelled by customer" },
+  PROCESSING: { badge: "WAITING", label: "Processing" },
   AUTHORIZED: { badge: "WAITING", label: "Authorized" },
   PAID: { badge: "PAID", label: "Paid" },
   REFUNDED: { badge: "REFUNDED", label: "Refunded" },
@@ -41,6 +43,11 @@ const STATUS_LABEL: Record<OnlinePayment["status"], { badge: string; label: stri
 const METHOD_LABEL: Record<string, string> = {
   upi: "UPI",
   card: "Card",
+  credit_card: "Credit card",
+  debit_card: "Debit card",
+  net_banking: "Net banking",
+  cardless_emi: "Cardless EMI",
+  pay_later: "Pay later",
   netbanking: "Net banking",
   wallet: "Wallet",
   emi: "EMI",
@@ -51,7 +58,9 @@ function rupees(value: number) {
   return new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR" }).format(value);
 }
 
-/** Verified Razorpay payment for a storefront order, from the merchant's own Razorpay account. */
+const GATEWAY: Record<OnlinePayment["provider"], string> = { RAZORPAY: "Razorpay", CASHFREE: "Cashfree" };
+
+/** Verified payment for a storefront order, from the merchant's own Razorpay or Cashfree account. */
 export function OnlinePaymentCard({ orderId, customerName }: { orderId: string; customerName?: string | null }) {
   const queryClient = useQueryClient();
   const query = useQuery({
@@ -64,7 +73,8 @@ export function OnlinePaymentCard({ orderId, customerName }: { orderId: string; 
     onSuccess: (data) => {
       queryClient.setQueryData(["orders", orderId, "online-payment"], data);
       void queryClient.invalidateQueries({ queryKey: ["order", orderId] });
-      toast.success(data.payment?.status === "PAID" ? "Payment confirmed with Razorpay." : "Checked with Razorpay. No change.");
+      const gateway = data.payment ? GATEWAY[data.payment.provider] : "the gateway";
+      toast.success(data.payment?.status === "PAID" ? `Payment confirmed with ${gateway}.` : `Checked with ${gateway}. No change.`);
     },
     onError: (error: Error) => toast.error(error.message),
   });
@@ -72,12 +82,13 @@ export function OnlinePaymentCard({ orderId, customerName }: { orderId: string; 
   const payment = query.data?.payment;
   if (!payment) return null;
   const status = STATUS_LABEL[payment.status];
-  const open = payment.status === "CREATED" || payment.status === "FAILED" || payment.status === "AUTHORIZED";
+  const open = ["CREATED", "FAILED", "CANCELLED", "PROCESSING", "AUTHORIZED"].includes(payment.status);
+  const gateway = GATEWAY[payment.provider] ?? payment.provider;
 
   return (
     <Card>
       <CardHeader className="flex-row items-start justify-between gap-2 p-4">
-        <CardTitle>Online payment</CardTitle>
+        <CardTitle>Online payment · {gateway}</CardTitle>
         <div className="flex items-center gap-2">
           {payment.mode === "TEST" ? <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-900">Test</span> : null}
           <StatusBadge value={status.badge} />
@@ -106,12 +117,12 @@ export function OnlinePaymentCard({ orderId, customerName }: { orderId: string; 
           <dt className="text-muted">Method</dt>
           <dd className="text-right">{payment.method ? METHOD_LABEL[payment.method] ?? payment.method : "—"}</dd>
           <dt className="text-muted">Transaction ID</dt>
-          <dd className="min-w-0 break-all text-right font-mono text-xs">{payment.razorpayPaymentId ?? "—"}</dd>
-          <dt className="text-muted">Razorpay order</dt>
-          <dd className="min-w-0 break-all text-right font-mono text-xs">{payment.razorpayOrderId}</dd>
+          <dd className="min-w-0 break-all text-right font-mono text-xs">{payment.providerPaymentId ?? "—"}</dd>
+          <dt className="text-muted">{gateway} order</dt>
+          <dd className="min-w-0 break-all text-right font-mono text-xs">{payment.providerOrderId}</dd>
           <dt className="text-muted">{payment.status === "REFUNDED" ? "Refunded" : "Paid on"}</dt>
           <dd className="text-right">{formatDate(payment.status === "REFUNDED" ? payment.refundedAt : payment.paidAt, true)}</dd>
-          {payment.failureReason && payment.status === "FAILED" ? (
+          {payment.failureReason && (payment.status === "FAILED" || payment.status === "CANCELLED") ? (
             <>
               <dt className="text-muted">Last failure</dt>
               <dd className="min-w-0 text-right text-xs">{payment.failureReason}</dd>
@@ -121,7 +132,7 @@ export function OnlinePaymentCard({ orderId, customerName }: { orderId: string; 
         {open ? (
           <Button type="button" variant="secondary" size="sm" className="w-full" onClick={() => reconcile.mutate()} disabled={reconcile.isPending}>
             {reconcile.isPending ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <RefreshCw className="size-4" aria-hidden />}
-            Check status with Razorpay
+            Check status with {gateway}
           </Button>
         ) : null}
       </CardContent>

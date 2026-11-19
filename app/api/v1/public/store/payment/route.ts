@@ -7,10 +7,11 @@ import { requestIp } from "@/modules/storefront/buyer-route";
 import { organizationFromLink, publicStoreClient } from "@/modules/storefront/public";
 import { storeLinkFields, storeLinkRef } from "@/modules/storefront/schema";
 import {
-  confirmStorefrontPayment,
+  confirmRazorpayStorefrontPayment,
   resumeStorefrontPayment,
   storefrontPaymentState,
-} from "@/modules/merchant-payments/payments";
+  verifyCashfreeStorefrontPayment,
+} from "@/modules/merchant-payments/checkout";
 
 const attempt = {
   ...storeLinkFields,
@@ -18,7 +19,9 @@ const attempt = {
   paymentToken: z.string().trim().regex(/^[a-f0-9]{48}$/, "Payment not found."),
 };
 const body = z.discriminatedUnion("action", [
-  z.object({ action: z.literal("resume"), ...attempt }),
+  z.object({ action: z.literal("resume"), ...attempt, returnUrl: z.string().trim().max(500).optional() }),
+  // Cashfree: after checkout closes, re-check with Cashfree's API. No client-side proof is accepted.
+  z.object({ action: z.literal("verify"), ...attempt }),
   z.object({ action: z.literal("status"), ...attempt }),
   z.object({
     action: z.literal("confirm"),
@@ -30,7 +33,7 @@ const body = z.discriminatedUnion("action", [
 ]);
 
 /**
- * Storefront online payment (merchant's own Razorpay account). The organization is resolved from
+ * Storefront online payment (merchant's own Razorpay or Cashfree account). The organization is resolved from
  * the store link, the attempt from (organization, order id, attempt token). Amounts and payment
  * status are never read from this request.
  */
@@ -47,12 +50,14 @@ export const POST = apiRouteWithContext(async (request: NextRequest) => {
 
   switch (input.action) {
     case "resume":
-      return resumeStorefrontPayment(supabase, ref);
+      return resumeStorefrontPayment(supabase, { ...ref, returnUrl: input.returnUrl ?? null });
+    case "verify":
+      return { state: await verifyCashfreeStorefrontPayment(supabase, ref) };
     case "status":
       return { state: await storefrontPaymentState(supabase, ref) };
     case "confirm":
       return {
-        state: await confirmStorefrontPayment(supabase, {
+        state: await confirmRazorpayStorefrontPayment(supabase, {
           ...ref,
           razorpayOrderId: input.razorpayOrderId,
           razorpayPaymentId: input.razorpayPaymentId,

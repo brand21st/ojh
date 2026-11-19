@@ -24,6 +24,9 @@ describe("security headers", () => {
     expect(csp).not.toContain("tawk.to");
     expect(csp).toContain("style-src 'self' 'unsafe-inline' https://fonts.googleapis.com");
     expect(csp).toContain("form-action 'self'");
+    // Cashfree Hosted Checkout posts the session to its own page from the merchant storefront.
+    expect(csp).toMatch(/form-action [^;]*https:\/\/sandbox\.cashfree\.com/);
+    expect(csp).toMatch(/form-action [^;]*https:\/\/api\.cashfree\.com/);
     expect(csp).toContain("object-src 'none'");
     expect(csp).toContain("upgrade-insecure-requests");
 
