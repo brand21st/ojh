@@ -15,7 +15,7 @@ export async function sendWhatsappOtp(phone: string, otp: string) {
   if (!template) {
     throw new AppError(ERROR_CODES.PROVIDER_ERROR, OTP_MESSAGES.sendFailed);
   }
-  return sendVachatAuthenticationTemplate({
+  await sendVachatAuthenticationTemplate({
     to: phone,
     templateName: template.name,
     language: template.language,
