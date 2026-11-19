@@ -229,10 +229,11 @@ export function suggestContainingPresets(units: ShipmentUnit[], packages: Packag
   const active = units.filter((unit) => unit.quantity > 0);
   const unitCount = active.reduce((sum, unit) => sum + unit.quantity, 0);
   if (unitCount <= 1) return { code: null as string | null, presets: [] as PackageOption[] };
-  if (!active.length || active.some((unit) => !hasBox(unit))) {
+  const measured = active.filter(hasBox);
+  if (!active.length || measured.length !== active.length) {
     return { code: "PACKING_CONFIRMATION_REQUIRED" as const, presets: [] as PackageOption[] };
   }
-  const presets = packages.filter((box) => active.every((unit) => unitFitsPackage(unit, box)));
+  const presets = packages.filter((box) => measured.every((unit) => unitFitsPackage(unit, box)));
   return { code: "PACKING_CONFIRMATION_REQUIRED" as const, presets };
 }
 
