@@ -32,6 +32,7 @@ import {
   registerPlatformVachatWebhook,
   savePlatformVachatSettings,
   sendPlatformVachatTest,
+  sendPlatformVachatTestOtp,
   testPlatformVachatSettings,
 } from "@/modules/vachat/admin-settings";
 import { getRazorpayConfig, publicRazorpayStatus } from "@/modules/razorpay/config";
@@ -113,6 +114,7 @@ export async function handleAdminRoutes(
   if (key === "PATCH settings/vachat") return savePlatformVachatSettings(request, supabase, ctx);
   if (key === "POST settings/vachat/test") return testPlatformVachatSettings(request, supabase, ctx);
   if (key === "POST settings/vachat/send-test") return sendPlatformVachatTest(request, supabase, ctx);
+  if (key === "POST settings/vachat/send-test-otp") return sendPlatformVachatTestOtp(request, supabase, ctx);
   if (key === "POST settings/vachat/webhook") return registerPlatformVachatWebhook(request, supabase, ctx);
   if (key === "GET settings/vachat/stats") return loadPlatformVachatStats(supabase);
   if (key === "GET settings/vachat/logs") return loadPlatformVachatLogs(request, supabase);

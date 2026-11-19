@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { isPlatformVachatActive, type PlatformVachatConfig } from "@/modules/vachat/platform-config";
 
 function config(overrides: Partial<PlatformVachatConfig> = {}): PlatformVachatConfig {
@@ -19,6 +19,8 @@ function config(overrides: Partial<PlatformVachatConfig> = {}): PlatformVachatCo
     abandonedSignupEnabled: false,
     abandonedSignupTemplateName: "",
     abandonedSignupTemplateLanguage: "en",
+    otpTemplateName: "",
+    otpTemplateLanguage: "en",
     eventSettings: {
       order_confirmation: false,
       processing: false,
@@ -86,5 +88,33 @@ describe("merchant VaChat overrides PostBus WhatsApp", () => {
         status: "CONNECTED",
       })
     ).resolves.toBeNull();
+  });
+});
+
+describe("OTP template source", () => {
+  it("prefers the Super Admin template over the env fallback", async () => {
+    vi.resetModules();
+    process.env.VACHAT_OTP_TEMPLATE_NAME = "env_otp";
+    vi.doMock("@/lib/supabase/admin", () => ({
+      hasAdminClient: () => true,
+      createAdminClient: () => ({
+        from: () => ({
+          select: () => ({
+            eq: () => ({
+              maybeSingle: async () => ({
+                data: { vachat_enabled: true, vachat_otp_template_name: "db_otp", vachat_otp_template_language: "en_US" },
+                error: null,
+              }),
+            }),
+          }),
+        }),
+      }),
+    }));
+    const { getPlatformVachatConfig } = await import("@/modules/vachat/platform-config");
+    const saved = await getPlatformVachatConfig();
+    expect(saved.otpTemplateName).toBe("db_otp");
+    expect(saved.otpTemplateLanguage).toBe("en_US");
+    vi.doUnmock("@/lib/supabase/admin");
+    delete process.env.VACHAT_OTP_TEMPLATE_NAME;
   });
 });

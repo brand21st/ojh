@@ -14,7 +14,7 @@ import {
   vachatStatusWebhookUrl,
 } from "@/modules/vachat/platform-config";
 import { listVachatNotificationLogs, vachatNotificationStats } from "@/modules/vachat/logs";
-import { withApprovedVachatTemplates } from "@/modules/vachat/templates";
+import { readVachatTemplateCatalog, withApprovedVachatTemplates } from "@/modules/vachat/templates";
 
 const saveSchema = z.object({
   enabled: z.boolean().optional(),
@@ -44,6 +44,8 @@ const saveSchema = z.object({
       delivered_template_name: z.string().nullable().optional(),
       signup_welcome_template_name: z.string().nullable().optional(),
       abandoned_signup_template_name: z.string().nullable().optional(),
+      otp_template_name: z.string().nullable().optional(),
+      otp_template_language: z.string().nullable().optional(),
       notification_settings: z.record(z.string(), z.boolean()).optional(),
       template_language: z.string().optional(),
     })
@@ -93,6 +95,8 @@ function templateSyncPayload(body: z.infer<typeof saveSchema>, settings: ReturnT
   const {
     signup_welcome_template_name: _signupWelcome,
     abandoned_signup_template_name: _abandonedSignup,
+    otp_template_name: _otpTemplate,
+    otp_template_language: _otpLanguage,
     ...orderTemplates
   } = templates;
   const names = [
@@ -121,6 +125,7 @@ export async function loadPlatformVachatSettings() {
   } = { display_phone: null, verified_name: null, account_id: null };
   let templates: Record<string, unknown> | null = null;
   let templatesLoadError: string | null = null;
+  let authenticationTemplates: Array<{ name: string; language: string }> = [];
   if (status.hasApiKey) {
     try {
       const idJson = await vachatApi("/api/postbus/identity");
@@ -140,6 +145,7 @@ export async function loadPlatformVachatSettings() {
     try {
       const tplJson = await vachatApi("/api/postbus/templates");
       templates = withApprovedVachatTemplates(tplJson);
+      authenticationTemplates = authenticationTemplatesFrom(tplJson);
     } catch (error) {
       templatesLoadError = error instanceof Error ? error.message : "Could not load VaChat templates.";
       templates = { approved_templates: [] };
@@ -152,7 +158,11 @@ export async function loadPlatformVachatSettings() {
       ...(templates ?? {}),
       signup_welcome_template_name: config.signupWelcomeTemplateName || null,
       abandoned_signup_template_name: config.abandonedSignupTemplateName || null,
+      otp_template_name: config.otpTemplateName || null,
+      otp_template_language: config.otpTemplateLanguage || null,
+      authentication_templates: authenticationTemplates,
     },
+    otpReady: Boolean(status.hasApiKey && config.enabled && config.otpTemplateName),
     templatesLoadError,
   };
 }
@@ -212,6 +222,11 @@ export async function savePlatformVachatSettings(
   const abandonedTemplateName = body.templates?.abandoned_signup_template_name;
   if (abandonedTemplateName !== undefined) {
     patch.vachat_abandoned_signup_template_name = abandonedTemplateName?.trim() || null;
+  }
+  const otpTemplateName = body.templates?.otp_template_name;
+  if (otpTemplateName !== undefined) {
+    patch.vachat_otp_template_name = otpTemplateName?.trim() || null;
+    patch.vachat_otp_template_language = otpTemplateName?.trim() ? body.templates?.otp_template_language?.trim() || null : null;
   }
   const { error } = await supabase.from("platform_settings").update(patch).eq("id", 1);
   if (error) {
@@ -369,6 +384,56 @@ export async function sendPlatformVachatTest(
     metadata: { to: result.to, event: result.event },
   });
   return result;
+}
+
+const OTP_SEND_ERRORS: Record<string, string> = {
+  vachat_auth_unavailable: "Turn on global VaChat and choose an OTP template, then Save.",
+  vachat_auth_catalog_unavailable: "Could not load templates from VaChat. Check the API key and try again.",
+  vachat_auth_not_found: "VaChat doesn't have this template. Pick one from the list and Save.",
+  vachat_auth_category_unverified: "VaChat didn't report this template's category. Use an AUTHENTICATION template.",
+  vachat_auth_not_authentication: "OTP codes need an AUTHENTICATION template. This one is a different category.",
+  vachat_auth_not_approved: "This template isn't approved by WhatsApp yet.",
+  vachat_auth_send_failed: "VaChat refused the message. Check the template's code parameter and the number.",
+};
+
+/** Maps a VaChat OTP send error to a message an admin can act on. */
+export function otpSendErrorMessage(error: unknown) {
+  const code = error instanceof Error ? error.message : "";
+  return OTP_SEND_ERRORS[code] ?? (error instanceof AppError ? error.message : "Could not send the WhatsApp code.");
+}
+
+function authenticationTemplatesFrom(raw: unknown) {
+  return readVachatTemplateCatalog(raw)
+    .filter((row) => row.category?.toUpperCase() === "AUTHENTICATION" && (row.status ?? "APPROVED").toUpperCase() === "APPROVED")
+    .map((row) => ({ name: row.name, language: row.language || "en" }));
+}
+
+/** Sends a real one-time code through the saved OTP template so the admin can see it arrive. */
+export async function sendPlatformVachatTestOtp(
+  request: NextRequest,
+  supabase: ReturnType<typeof createAdminClient>,
+  ctx: AdminContext
+) {
+  const body = z.object({ phone: z.string().trim().min(10) }).parse(await request.json().catch(() => ({})));
+  const { generateOtpDigits } = await import("@/lib/auth/otp/crypto");
+  const { sendWhatsappOtp } = await import("@/lib/auth/otp/send-whatsapp");
+  const { vachatRecipientE164 } = await import("@/modules/vachat/send");
+  const to = vachatRecipientE164(body.phone);
+  try {
+    await sendWhatsappOtp(to, generateOtpDigits());
+  } catch (error) {
+    throw new AppError(ERROR_CODES.PROVIDER_ERROR, otpSendErrorMessage(error));
+  }
+  await writeBillingAudit(supabase, {
+    actorId: ctx.userId,
+    actorType: "SUPER_ADMIN",
+    action: "vachat.platform_test_otp_sent",
+    targetType: "platform_settings",
+    targetId: "1",
+    ip: ip(request),
+    metadata: { to },
+  });
+  return { sent: true, to };
 }
 
 export async function registerPlatformVachatWebhook(

@@ -73,9 +73,13 @@ type VachatSettings = {
       delivered_template_name?: string | null;
       signup_welcome_template_name?: string | null;
       abandoned_signup_template_name?: string | null;
+      otp_template_name?: string | null;
+      otp_template_language?: string | null;
+      authentication_templates?: Array<{ name: string; language: string }>;
       approved_templates?: Array<{ name: string; language: string }>;
     } | null;
     templatesLoadError?: string | null;
+    otpReady?: boolean;
 };
 
 type VachatStats = {
@@ -341,6 +345,15 @@ export default function AdminSettingsPage() {
               templateDraft.abandoned_signup_template_name ??
               vachat?.templates?.abandoned_signup_template_name ??
               null,
+            ...(templateDraft.otp_template_name !== undefined
+              ? {
+                  otp_template_name: templateDraft.otp_template_name || null,
+                  otp_template_language:
+                    vachat?.templates?.authentication_templates?.find(
+                      (tpl) => tpl.name === templateDraft.otp_template_name
+                    )?.language ?? null,
+                }
+              : {}),
           },
           signupWelcomeEnabled:
             eventDraft.signup_welcome ??
@@ -403,6 +416,16 @@ export default function AdminSettingsPage() {
       toast.success(`TEST Booked WhatsApp sent to ${result.to}.`);
       client.invalidateQueries({ queryKey: ["admin", "settings", "vachat"] });
     },
+    onError: (error: Error) => toast.error(error.message),
+  });
+
+  const sendVachatTestOtp = useMutation({
+    mutationFn: () =>
+      api<{ sent: boolean; to: string }>("/api/admin/settings/vachat/send-test-otp", {
+        method: "POST",
+        body: JSON.stringify({ phone: resolvedTestPhone.trim() || "918618456029" }),
+      }),
+    onSuccess: (result) => toast.success(`Test OTP sent to ${result.to}. Check WhatsApp.`),
     onError: (error: Error) => toast.error(error.message),
   });
 
@@ -940,6 +963,58 @@ export default function AdminSettingsPage() {
               );
             })()}
           </div>
+          {(() => {
+            const authTemplates = vachat?.templates?.authentication_templates ?? [];
+            const value = templateDraft.otp_template_name ?? vachat?.templates?.otp_template_name ?? "";
+            const options = authTemplates.map((tpl) => ({ value: tpl.name, label: `${tpl.name} (${tpl.language})` }));
+            if (value && !options.some((opt) => opt.value === value)) options.unshift({ value, label: value });
+            const saved = vachat?.templates?.otp_template_name ?? "";
+            const unsaved = templateDraft.otp_template_name !== undefined && templateDraft.otp_template_name !== saved;
+            return (
+              <div className="space-y-2 rounded-lg border p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <h3 className="text-sm font-medium">WhatsApp OTP codes</h3>
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                      vachat?.otpReady ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-800"
+                    }`}
+                  >
+                    {vachat?.otpReady ? "Ready" : "Not set up"}
+                  </span>
+                </div>
+                <p className="text-xs text-muted">
+                  Storefront checkout and WhatsApp login send their one-time codes with this template. WhatsApp only
+                  allows approved AUTHENTICATION templates with one code parameter (and a copy-code button).
+                </p>
+                <Combobox
+                  id="vachat-tpl-otp"
+                  options={options}
+                  value={value}
+                  onChange={(next) => setTemplateDraft((prev) => ({ ...prev, otp_template_name: next }))}
+                  placeholder="Select an AUTHENTICATION template"
+                  emptyText={
+                    authTemplates.length
+                      ? "No matching template"
+                      : "No approved AUTHENTICATION templates. Create one in VaChat and refresh."
+                  }
+                />
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => sendVachatTestOtp.mutate()}
+                    disabled={sendVachatTestOtp.isPending || !saved || unsaved}
+                  >
+                    {sendVachatTestOtp.isPending ? "Sending…" : "Send test code"}
+                  </Button>
+                  <span className="text-xs text-muted">
+                    {unsaved ? "Save first, then send a test." : "Goes to the TEST WhatsApp number below."}
+                  </span>
+                </div>
+              </div>
+            );
+          })()}
           <div className="space-y-2">
             <Label htmlFor="vachat-test-phone">TEST WhatsApp number</Label>
             <div className="flex flex-col gap-2 sm:flex-row">

@@ -1,4 +1,5 @@
 import { env } from "@/lib/env";
+import { vachatOtpTemplateLanguage, vachatOtpTemplateName } from "@/lib/auth/otp/secrets";
 import { logError } from "@/lib/logger";
 import { decryptSecret, maskSecret } from "@/lib/security/crypto";
 import { createAdminClient, hasAdminClient } from "@/lib/supabase/admin";
@@ -6,7 +7,7 @@ import { parseVachatBaseUrl } from "@/modules/vachat/signature";
 import { WATI_NOTIFY_EVENTS, type WatiNotifyEvent } from "@/modules/wati/notify";
 
 export const PLATFORM_VACHAT_COLUMNS =
-  "vachat_enabled, vachat_support_enabled, vachat_api_base_url, encrypted_vachat_api_key, encrypted_vachat_webhook_secret, vachat_webhook_endpoint_id, vachat_last_verified_at, vachat_last_error, vachat_event_settings, vachat_last_test_phone, vachat_signup_welcome_enabled, vachat_signup_welcome_template_name, vachat_abandoned_signup_enabled, vachat_abandoned_signup_template_name";
+  "vachat_enabled, vachat_support_enabled, vachat_api_base_url, encrypted_vachat_api_key, encrypted_vachat_webhook_secret, vachat_webhook_endpoint_id, vachat_last_verified_at, vachat_last_error, vachat_event_settings, vachat_last_test_phone, vachat_signup_welcome_enabled, vachat_signup_welcome_template_name, vachat_abandoned_signup_enabled, vachat_abandoned_signup_template_name, vachat_otp_template_name, vachat_otp_template_language";
 
 export type VachatEventSettings = Record<WatiNotifyEvent, boolean>;
 
@@ -49,6 +50,9 @@ export type PlatformVachatConfig = {
   abandonedSignupEnabled: boolean;
   abandonedSignupTemplateName: string;
   abandonedSignupTemplateLanguage: string;
+  /** AUTHENTICATION template for WhatsApp OTP codes (checkout + login). Database wins over env. */
+  otpTemplateName: string;
+  otpTemplateLanguage: string;
   source: "database" | "env" | "mixed" | "none";
 };
 
@@ -67,6 +71,8 @@ type SettingsRow = {
   vachat_signup_welcome_template_name?: string | null;
   vachat_abandoned_signup_enabled?: boolean | null;
   vachat_abandoned_signup_template_name?: string | null;
+  vachat_otp_template_name?: string | null;
+  vachat_otp_template_language?: string | null;
 };
 
 function decryptOptional(payload?: string | null) {
@@ -160,6 +166,10 @@ export async function getPlatformVachatConfig(): Promise<PlatformVachatConfig> {
         : Boolean(
             row?.vachat_abandoned_signup_template_name?.trim() || env.vachatAbandonedSignupTemplateName
           ),
+    otpTemplateName: row?.vachat_otp_template_name?.trim() || vachatOtpTemplateName(),
+    otpTemplateLanguage: row?.vachat_otp_template_name?.trim()
+      ? row?.vachat_otp_template_language?.trim() || "en"
+      : vachatOtpTemplateLanguage(),
     source,
   };
 }

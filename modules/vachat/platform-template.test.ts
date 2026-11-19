@@ -41,6 +41,8 @@ function activeConfig() {
     abandonedSignupEnabled: false,
     abandonedSignupTemplateName: "",
     abandonedSignupTemplateLanguage: "en",
+    otpTemplateName: "",
+    otpTemplateLanguage: "en",
     source: "env" as const,
   };
 }
