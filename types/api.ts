@@ -885,8 +885,10 @@ export type IntegrationCard = {
   lastVerifiedAt?: string | null;
   /** Merchant Razorpay: storefront online checkout switched on. */
   enabled?: boolean;
-  /** Merchant Razorpay: TEST or LIVE keys. */
+  /** Merchant Razorpay / Cashfree: TEST (Sandbox) or LIVE (Production) credentials. */
   mode?: string;
+  /** Merchant Cashfree: this gateway currently takes storefront online payments. */
+  isDefaultGateway?: boolean;
 };
 
 export type IntegrationsResponse = {
