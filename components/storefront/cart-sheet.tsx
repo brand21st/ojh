@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
-import { ArrowLeft, Minus, Plus, ShoppingBag, Trash2, X } from "lucide-react";
+import { ArrowLeft, Lock, Minus, Plus, ShoppingBag, Trash2, X } from "lucide-react";
 import { StoreImage } from "@/components/storefront/store-image";
 import type { CartLine, StoreProduct } from "@/components/storefront/store-types";
 import { formatStorePrice } from "@/modules/storefront/pricing";
@@ -76,12 +76,12 @@ export function CartSheet({
         aria-label="Checkout"
       >
         <header className="flex shrink-0 items-center gap-1 border-b border-zinc-100 px-3 py-2.5 md:px-6">
-          <button type="button" className="flex size-11 items-center justify-center rounded-full hover:bg-zinc-100" onClick={onBack} aria-label={checkoutStep === "summary" ? "Back to customer details" : "Back to cart"}>
+          <button type="button" className="flex size-11 items-center justify-center rounded-full hover:bg-zinc-100" onClick={onBack} aria-label="Back to cart">
             <ArrowLeft className="size-5" />
           </button>
           <div className="min-w-0 flex-1">
-            <h2 className="font-bold">Checkout</h2>
-            <p className="text-xs text-zinc-500">{checkoutStep === "summary" ? "Order summary" : "Customer details"}</p>
+            <h2 className="font-bold">{checkoutStep === "summary" ? "Review & place order" : "Checkout"}</h2>
+            <p className="flex items-center gap-1 text-xs text-emerald-700"><Lock className="size-3" aria-hidden />Secure checkout</p>
           </div>
           <button type="button" className="flex size-11 items-center justify-center rounded-full hover:bg-zinc-100" onClick={onClose} aria-label="Close checkout">
             <X className="size-5" />

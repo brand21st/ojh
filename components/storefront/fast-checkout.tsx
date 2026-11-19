@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, Loader2, Plus, ShieldCheck, Trash2 } from "lucide-react";
+import { Check, Loader2, MapPin, Plus, ShieldCheck, Trash2 } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Controller, useWatch, type UseFormReturn } from "react-hook-form";
 import { z } from "zod";
@@ -200,12 +200,15 @@ export function FastCheckoutDetails({
   apiRef,
   accent,
   onPhoneReset,
+  part = "all",
 }: {
   form: UseFormReturn<CheckoutValues>;
   buyer: FastCheckout;
   apiRef: StoreRef;
   accent: string;
-  onPhoneReset: () => void;
+  onPhoneReset?: () => void;
+  /** "phone" is the number + WhatsApp code gate; "address" is saved addresses or the address form. */
+  part?: "all" | "phone" | "address";
 }) {
   const errors = form.formState.errors;
   const pincode = useWatch({ control: form.control, name: "pincode" });
@@ -218,10 +221,14 @@ export function FastCheckoutDetails({
     [form]
   );
   const [otp, setOtp] = useState("");
+  const [choosing, setChoosing] = useState(false);
+  const showPhone = part !== "address";
+  const showAddress = part !== "phone";
   const verifyError = buyer.verifyCode.error?.message ?? buyer.sendCode.error?.message ?? null;
 
   return (
     <div className="space-y-5">
+      {showPhone ? (
       <section className="space-y-2">
         <IndiaWhatsappField control={form.control} name="phone" id="customer-phone" error={errors.phone?.message} />
         <div className="min-h-5 text-xs" aria-live="polite">
@@ -234,15 +241,16 @@ export function FastCheckoutDetails({
           ) : (
             <span className="text-zinc-500">Ordered before? Enter the same number to use your saved address.</span>
           )}
-          {buyer.phone ? (
+          {buyer.phone && onPhoneReset ? (
             <button type="button" className="ml-2 font-semibold text-zinc-600 underline underline-offset-2" onClick={onPhoneReset}>
               Use a different number
             </button>
           ) : null}
         </div>
       </section>
+      ) : null}
 
-      {buyer.needsVerification ? (
+      {showPhone && buyer.needsVerification ? (
         <section className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4" aria-labelledby="fast-checkout-verify">
           <div className="flex items-start gap-3">
             <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-white ring-1 ring-zinc-200">
@@ -315,9 +323,22 @@ export function FastCheckoutDetails({
         </section>
       ) : null}
 
-      {buyer.status === "ready" && buyer.addresses.length ? (
+      {showAddress && part === "address" && !choosing && buyer.selected && !buyer.manual ? (
+        <div className="flex items-start gap-3 rounded-2xl border border-zinc-200 bg-white p-3">
+          <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full bg-zinc-100">
+            <MapPin className="size-4" style={{ color: ink }} aria-hidden />
+          </span>
+          <div className="min-w-0 flex-1 text-sm">
+            <p className="font-semibold text-zinc-900">{buyer.selected.customerName}</p>
+            <p className="mt-0.5 leading-5 text-zinc-600">{formatAddress(buyer.selected)}</p>
+          </div>
+          <button type="button" className="min-h-9 shrink-0 rounded-lg px-2 text-sm font-bold hover:bg-zinc-50" style={{ color: ink }} onClick={() => setChoosing(true)}>
+            Change
+          </button>
+        </div>
+      ) : showAddress && buyer.status === "ready" && buyer.addresses.length ? (
         <fieldset className="space-y-2">
-          <legend className="mb-2 text-sm font-semibold text-zinc-900">Deliver to</legend>
+          {part === "address" ? <legend className="sr-only">Choose a delivery address</legend> : <legend className="mb-2 text-sm font-semibold text-zinc-900">Deliver to</legend>}
           {buyer.addresses.map((address) => {
             const active = !buyer.manual && buyer.selected?.id === address.id;
             return (
@@ -333,7 +354,10 @@ export function FastCheckoutDetails({
                   className="mt-1 size-4 shrink-0"
                   style={{ accentColor: ink }}
                   checked={active}
-                  onChange={() => buyer.chooseSaved(address.id)}
+                  onChange={() => {
+                    buyer.chooseSaved(address.id);
+                    setChoosing(false);
+                  }}
                 />
                 <label htmlFor={`saved-${address.id}`} className="min-w-0 flex-1 cursor-pointer text-sm after:absolute after:inset-0">
                   <span className="block font-semibold text-zinc-900">{address.customerName}</span>
@@ -365,7 +389,7 @@ export function FastCheckoutDetails({
         </fieldset>
       ) : null}
 
-      {buyer.manual ? (
+      {showAddress && buyer.manual ? (
         <section className="space-y-3" aria-label="Delivery address">
           <div>
             <Label htmlFor="customer-name">Full name</Label>

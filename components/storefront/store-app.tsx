@@ -5,28 +5,25 @@ import dynamic from "next/dynamic";
 import { MarketplaceHome, EMPTY_FILTERS, type CatalogFilters } from "./marketplace-home";
 import { MarketplaceProduct } from "./marketplace-product";
 import marketStyles from "./marketplace.module.css";
-import { contrastText, onAccent, readableAccent } from "@/modules/storefront/config";
+import { contrastText, onAccent } from "@/modules/storefront/config";
 import { bundleCartLine, cartRequest, ungroupBundle } from "@/modules/storefront/cart";
 import { commerceEvent, emitStoreEvent } from "@/modules/storefront/tracking-events";
 import { StoreTracking } from "./store-tracking";
-import { CouponBanner, CouponField, type QuoteCoupon } from "./coupon-field";
+import { CouponBanner } from "./coupon-field";
 import { useStoreCoupon } from "./coupon-storage";
-import { FastCheckoutDetails, checkoutSchema, rememberBuyerPhone, rememberedBuyerPhone, useFastCheckout, type CheckoutValues } from "./fast-checkout";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { Check, ShoppingBag } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
-import { useForm, useWatch } from "react-hook-form";
+import { rememberBuyerPhone } from "./fast-checkout";
+import { CheckoutForm } from "./checkout-form";
+import { ShoppingBag } from "lucide-react";
 import { StoreOrderSuccess, type StoreOrderReceipt } from "@/components/storefront/order-success";
 import { StoreHome } from "@/components/storefront/store-home";
 import { StoreSkeleton } from "@/components/storefront/store-skeleton";
 import type { CartLine, StorePayload, StoreProduct, StoreBundle } from "@/components/storefront/store-types";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/hooks/use-api";
-import { DEFAULT_INDIAN_STATE } from "@/lib/indian-states";
 import { extractIndiaMobileDigits } from "@/lib/phone/india-whatsapp";
 import { publicOrderLinkApiPath } from "@/modules/customer-order-links/schema";
 import { formatStorePrice } from "@/modules/storefront/pricing";
-import { returnPolicyLabel, summarizeReturnPolicy } from "@/modules/products/return-policy";
+import { summarizeReturnPolicy } from "@/modules/products/return-policy";
 import { pickStoreRecommendations } from "@/modules/storefront/recommendations";
 import { trendingProducts } from "@/modules/storefront/trending";
 
@@ -552,6 +549,8 @@ export function StoreApp({
                 storeCoupon.apply(code, null);
               }}
               onCouponRemove={(automatic) => (automatic ? storeCoupon.skipAutomatic(true) : storeCoupon.clear())}
+              recommendations={pickStoreRecommendations(catalogPool, cart, cart.flatMap((line) => line.product.crossSellIds ?? []), { limit: 6 })}
+              onAdd={addToCart}
               onSubmit={async (values) => {
                 const path = publicOrderLinkApiPath(apiRef, "submit");
                 if (!path) {
@@ -621,10 +620,7 @@ export function StoreApp({
             trackEvent("CHECKOUT_STARTED", { value: total });
           }}
           onBack={() => {
-            if (checkoutStep === "summary") {
-              setCheckoutStep("details");
-              return;
-            }
+            setCheckoutStep("details");
             setSheet("cart");
           }}
           onAdd={addToCart}
@@ -634,328 +630,5 @@ export function StoreApp({
       ) : null}
       {store.marketplace ? <StoreTracking workspace={workspaceKey} config={store.tracking} preview={isPreview} /> : null}
     </div>
-  );
-}
-
-function CheckoutForm({
-  apiRef,
-  workspace,
-  accent,
-  preview = false,
-  cart,
-  submitting,
-  error,
-  step,
-  onStepChange,
-  onSubmit,
-  couponCode = null,
-  skipAutoCoupon = false,
-  onCouponApply,
-  onCouponRemove,
-}: {
-  couponCode?: string | null;
-  skipAutoCoupon?: boolean;
-  onCouponApply?: (code: string) => void;
-  onCouponRemove?: (automatic: boolean) => void;
-  apiRef: StoreRef;
-  workspace: string;
-  accent: string;
-  preview?: boolean;
-  cart: CartLine[];
-  submitting: boolean;
-  error: string | null;
-  step: "details" | "summary";
-  onStepChange: (step: "details" | "summary") => void;
-  onSubmit: (values: CheckoutValues) => Promise<void>;
-}) {
-  const form = useForm<CheckoutValues>({
-    resolver: zodResolver(checkoutSchema),
-    defaultValues: {
-      customerName: "",
-      // Checkout only renders in the browser, so the remembered number is safe to read here.
-      phone: preview ? "" : rememberedBuyerPhone(workspace),
-      line1: "",
-      line2: "",
-      city: "",
-      state: DEFAULT_INDIAN_STATE,
-      pincode: "",
-      paymentPreference: cart.every((line) => line.product.codEnabled) ? "COD" : "PREPAID",
-      saveAddress: true,
-    },
-  });
-  const buyer = useFastCheckout({ form, apiRef, preview, workspace });
-  const prepaid = cart.every((line) => line.product.prepaidEnabled);
-  const cod = cart.every((line) => line.product.codEnabled);
-  const preference = useWatch({ control: form.control, name: "paymentPreference" }) ?? (cod ? "COD" : "PREPAID");
-  const productAmount = cart.reduce((sum, line) => sum + line.product.price * line.quantity, 0);
-  const returns = summarizeReturnPolicy(cart.map((line) => line.product.returnAvailable !== false));
-  // Set by the explicit Apply action so only that quote counts toward the coupon funnel.
-  const trackApply = useRef(false);
-  const [couponError, setCouponError] = useState<string | null>(null);
-  const quote = useQuery({
-    queryKey: ["store-quote", apiRef, preference, cart.map((line) => `${line.product.id}:${line.quantity}`).join(","), couponCode, skipAutoCoupon],
-    enabled: !preview && Boolean(cart.length && (preference === "PREPAID" || preference === "COD") && (prepaid || cod)),
-    queryFn: async () => {
-      const track = trackApply.current;
-      trackApply.current = false;
-      const result = await api<{
-        total: number;
-        subtotal?: number;
-        discount?: number;
-        amountDueNow: number;
-        amountOnDelivery: number;
-        expectedAdvance: number;
-        quoteVersion: string;
-        coupon?: QuoteCoupon | null;
-        couponError?: string | null;
-      }>("/api/v1/public/store/quote", {
-        method: "POST",
-        body: JSON.stringify({
-          workspace: apiRef.workspace,
-          code: apiRef.publicId,
-          token: apiRef.token,
-          paymentPreference: preference,
-          ...cartRequest(cart),
-          couponCode,
-          skipAutoCoupon,
-          trackCouponApply: track,
-        }),
-      });
-      // A typed code that doesn't fit this cart is dropped so it can't block the order; the reason stays visible.
-      if (result.couponError && couponCode) {
-        setCouponError(result.couponError);
-        onCouponRemove?.(false);
-      }
-      return result;
-    },
-  });
-  const quotedCoupon = quote.data?.coupon ?? null;
-
-  const watchedName = useWatch({ control: form.control, name: "customerName" });
-  const watchedPhone = useWatch({ control: form.control, name: "phone" });
-  const watchedAddress = useWatch({ control: form.control, name: ["line1", "city", "pincode"] });
-  const detailsDone = step === "summary";
-  const phoneDigits = extractIndiaMobileDigits(watchedPhone ?? "") ?? "";
-
-  return (
-    <form
-      data-clarity-mask="true"
-      className="flex min-h-0 min-w-0 flex-1 flex-col"
-      onSubmit={(event) => {
-        if (step === "details" && buyer.needsVerification) {
-          event.preventDefault();
-          buyer.continueVerification();
-          return;
-        }
-        return form.handleSubmit(async (values) => {
-        if (step !== "summary") {
-          onStepChange("summary");
-          return;
-        }
-        if (preview) return;
-        const fresh = await quote.refetch();
-        if (!fresh.data || fresh.error) return;
-        if (fresh.data.quoteVersion !== quote.data?.quoteVersion) { form.setError("root", { message: "Prices changed. Review the updated total and place your order again." }); return; }
-        await onSubmit({ ...values, quoteVersion: fresh.data.quoteVersion });
-      })(event);
-      }}
-      noValidate
-    >
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain px-4 py-4 [scrollbar-width:none] md:px-6 md:py-5 [&::-webkit-scrollbar]:hidden">
-        <ol className="mx-auto max-w-lg">
-          <li className="flex gap-3" aria-current={step === "details" ? "step" : undefined}>
-            <div className="flex w-7 shrink-0 flex-col items-center">
-              <span
-                className="relative z-10 flex size-7 items-center justify-center rounded-full border text-xs font-semibold"
-                style={detailsDone ? { ...onAccent(accent), borderColor: accent } : { borderColor: readableAccent(accent), color: readableAccent(accent), backgroundColor: "#fff" }}
-              >
-                {detailsDone ? <Check className="size-3.5" aria-hidden="true" /> : "1"}
-              </span>
-              <span className="mt-1 w-px flex-1 min-h-6 bg-zinc-200" style={detailsDone ? { backgroundColor: accent, opacity: 0.4 } : undefined} aria-hidden="true" />
-            </div>
-            <div className="min-w-0 flex-1 pb-6">
-              {detailsDone ? (
-                <button type="button" className="block w-full text-left" onClick={() => onStepChange("details")}>
-                  <p className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-500">Customer details</p>
-                  <p className="mt-1 truncate text-sm text-zinc-700">
-                    {[watchedName?.trim(), phoneDigits ? `+91 ${phoneDigits}` : null].filter(Boolean).join(" · ")}
-                  </p>
-                  <p className="mt-0.5 truncate text-sm text-zinc-500">{[watchedAddress[0], watchedAddress[1], watchedAddress[2]].filter(Boolean).join(", ")}</p>
-                </button>
-              ) : (
-                <div className="space-y-3">
-                  <h3 className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-500">Contact and delivery</h3>
-                  <FastCheckoutDetails
-                    form={form}
-                    buyer={buyer}
-                    apiRef={apiRef}
-                    accent={accent}
-                    onPhoneReset={() => {
-                      rememberBuyerPhone(workspace, null);
-                      form.setValue("phone", "");
-                      requestAnimationFrame(() => document.getElementById("customer-phone")?.focus());
-                    }}
-                  />
-                </div>
-              )}
-            </div>
-          </li>
-          <li className="flex gap-3" aria-current={step === "summary" ? "step" : undefined}>
-            <div className="flex w-7 shrink-0 flex-col items-center">
-              <span
-                className={`relative z-10 flex size-7 items-center justify-center rounded-full border text-xs font-semibold ${
-                  step === "summary" ? "bg-white" : "border-zinc-200 bg-zinc-50 text-zinc-400"
-                }`}
-                style={step === "summary" ? { borderColor: readableAccent(accent), color: readableAccent(accent) } : undefined}
-              >
-                2
-              </span>
-            </div>
-            <div className="min-w-0 flex-1 pb-2">
-              <h3 className={`text-xs font-bold uppercase tracking-[0.16em] ${step === "summary" ? "text-zinc-500" : "text-zinc-300"}`}>
-                Order summary
-              </h3>
-              {step === "summary" ? (
-                <div className="mt-3 space-y-4">
-                  <section className="space-y-2 rounded-2xl bg-zinc-50 p-3 text-sm">
-                    {cart.map((line) => (
-                      <div key={line.product.id} className="flex justify-between gap-3">
-                        <span className="min-w-0">
-                          <span className="block truncate font-medium">{line.product.name}</span>
-                          {line.bundle ? <span className="block text-xs text-zinc-500">{line.bundle.components.map((item) => `${item.quantity} × ${item.product.name}`).join(" + ")}</span> : null}
-                          <span className="text-xs text-zinc-500">
-                            Qty {line.quantity}
-                            {line.product.sku ? ` · ${line.product.sku}` : ""} · {returnPolicyLabel(line.product.returnAvailable !== false)}
-                          </span>
-                        </span>
-                        <span className="shrink-0 font-semibold tabular-nums">{formatStorePrice(line.product.price * line.quantity)}</span>
-                      </div>
-                    ))}
-                  </section>
-                  {prepaid || cod ? (
-                    <fieldset className="min-w-0 rounded-2xl border border-zinc-200 p-3">
-                      <legend className="px-1 text-sm font-semibold">Payment summary</legend>
-                      <p className="mb-3 text-xs leading-5 text-zinc-500">Pay the merchant using these amounts. India Post shipment starts after confirmation.</p>
-                      <div className="grid min-w-0 gap-2">
-                        {prepaid ? (
-                          <label className="flex min-h-11 min-w-0 items-center gap-3 rounded-xl bg-zinc-50 px-3 py-2 text-sm">
-                            <input type="radio" value="PREPAID" className="shrink-0" {...form.register("paymentPreference")} />
-                            <span className="min-w-0">
-                              <span className="block font-semibold">Prepaid — full amount</span>
-                              <span className="text-xs text-zinc-500">{formatStorePrice(quote.data?.total ?? productAmount)}</span>
-                            </span>
-                          </label>
-                        ) : null}
-                        {cod ? (
-                          <label className="flex min-h-11 min-w-0 items-center gap-3 rounded-xl bg-zinc-50 px-3 py-2 text-sm">
-                            <input type="radio" value="COD" className="shrink-0" {...form.register("paymentPreference")} />
-                            <span className="min-w-0">
-                              <span className="block font-semibold">Cash on delivery</span>
-                              {quote.data && preference === "COD" && quote.data.amountDueNow > 0 ? (
-                                <span className="block text-xs leading-5 text-zinc-500">
-                                  Advance {formatStorePrice(quote.data.amountDueNow)} · COD {formatStorePrice(quote.data.amountOnDelivery)}
-                                </span>
-                              ) : (
-                                <span className="text-xs text-zinc-500">Pay the full amount on delivery.</span>
-                              )}
-                            </span>
-                          </label>
-                        ) : null}
-                      </div>
-                      {!preview && onCouponApply ? (
-                        <div className="mt-3">
-                          <CouponField
-                            coupon={quotedCoupon}
-                            error={couponError}
-                            pending={quote.isFetching}
-                            accentColor={readableAccent(accent)}
-                            onApply={(code) => {
-                              setCouponError(null);
-                              trackApply.current = true;
-                              onCouponApply(code);
-                            }}
-                            onRemove={() => {
-                              setCouponError(null);
-                              onCouponRemove?.(quotedCoupon?.automatic ?? false);
-                            }}
-                          />
-                        </div>
-                      ) : null}
-                      <dl className="mt-3 min-w-0 space-y-1.5 rounded-xl bg-white p-3 text-sm">
-                        <div className="flex min-w-0 justify-between gap-3">
-                          <dt className="min-w-0 text-zinc-500">Product amount</dt>
-                          <dd className="shrink-0 font-semibold tabular-nums">{formatStorePrice(quotedCoupon?.applied ? quotedCoupon.subtotal : (quote.data?.total ?? productAmount))}</dd>
-                        </div>
-                        {quotedCoupon?.applied ? (
-                          <div className="flex min-w-0 justify-between gap-3 text-emerald-700">
-                            <dt className="min-w-0">Coupon <span className="font-mono">{quotedCoupon.code}</span></dt>
-                            <dd className="shrink-0 font-semibold tabular-nums">−{formatStorePrice(quotedCoupon.discount)}</dd>
-                          </div>
-                        ) : null}
-                        <div className="flex min-w-0 justify-between gap-3">
-                          <dt className="min-w-0 text-zinc-500">Advance payment</dt>
-                          <dd className="shrink-0 font-semibold tabular-nums">
-                            {formatStorePrice(preference === "COD" ? (quote.data?.amountDueNow ?? 0) : 0)}
-                          </dd>
-                        </div>
-                        <div className="flex min-w-0 justify-between gap-3">
-                          <dt className="min-w-0 text-zinc-500">COD amount</dt>
-                          <dd className="shrink-0 font-semibold tabular-nums">
-                            {formatStorePrice(preference === "COD" ? (quote.data?.amountOnDelivery ?? quote.data?.total ?? productAmount) : 0)}
-                          </dd>
-                        </div>
-                        <div className="flex min-w-0 justify-between gap-3 border-t border-zinc-100 pt-2 text-base">
-                          <dt className="min-w-0 font-bold">Final total</dt>
-                          <dd className="shrink-0 font-bold tabular-nums">{formatStorePrice(quote.data?.total ?? productAmount)}</dd>
-                        </div>
-                      </dl>
-                      {quote.data && preference === "COD" && quote.data.amountDueNow > 0 ? (
-                        <p className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-sm font-medium text-amber-950">
-                          Advance payment of {formatStorePrice(quote.data.amountDueNow)} is required to confirm this order.
-                        </p>
-                      ) : null}
-                    </fieldset>
-                  ) : (
-                    <p className="rounded-2xl bg-red-50 p-3 text-sm text-red-700">These products cannot be ordered together. Remove prepaid-only or COD-only items.</p>
-                  )}
-                  <section className="rounded-2xl border border-zinc-200 p-3">
-                    <h3 className="text-sm font-semibold">Return policy</h3>
-                    <p className="mt-1 text-sm text-zinc-700">{returns.label}</p>
-                    {returns.kind === "mixed" ? (
-                      <ul className="mt-2 space-y-1 text-xs text-zinc-500">
-                        {cart.map((line) => (
-                          <li key={line.product.id} className="flex justify-between gap-2">
-                            <span className="min-w-0 truncate">{line.product.name}</span>
-                            <span className="shrink-0">{returnPolicyLabel(line.product.returnAvailable !== false)}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    ) : null}
-                  </section>
-                  {error ? (
-                    <div role="alert" className="rounded-2xl bg-red-50 p-3 text-sm text-red-700">
-                      {error}
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-            </div>
-          </li>
-        </ol>
-      </div>
-      <div className="mt-auto shrink-0 border-t border-zinc-100 bg-white px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:px-6">
-        <div className="mx-auto max-w-lg">
-          {quote.error || form.formState.errors.root ? <p role="alert" className="mb-2 text-sm text-red-600">{quote.error?.message ?? form.formState.errors.root?.message}</p> : null}
-          <Button
-            type="submit"
-            className="h-12 w-full rounded-2xl hover:brightness-95 disabled:bg-zinc-200 disabled:text-zinc-500"
-            style={submitting || !cart.length ? undefined : onAccent(accent)}
-            disabled={submitting || !cart.length || (step === "summary" && (preview || quote.isFetching || quote.isError || !quote.data || (!prepaid && !cod)))}
-          >
-            {step === "summary" ? (submitting ? "Placing order…" : "Place order") : buyer.selected ? "Deliver to this address" : buyer.needsVerification ? (buyer.codeSentTo ? "Enter the code to continue" : "Send WhatsApp code") : "Next"}
-          </Button>
-        </div>
-      </div>
-    </form>
   );
 }
