@@ -130,6 +130,7 @@ describe("merchant razorpay payments (service + real schema)", () => {
     db = new PGlite();
     await db.exec(BASE_SCHEMA);
     await db.exec(readFileSync("supabase/migrations/20261120090000_merchant_razorpay_payments.sql", "utf8"));
+    await db.exec(readFileSync("supabase/migrations/20261120100000_merchant_cashfree_payments.sql", "utf8"));
     admin = pgSupabase(db);
   }, 30000);
 

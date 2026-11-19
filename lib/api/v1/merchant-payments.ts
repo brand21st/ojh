@@ -13,14 +13,23 @@ import {
   setMerchantRazorpayEnabled,
   verifyMerchantRazorpay,
 } from "@/modules/merchant-payments/integration";
+import { reconcileOpenAttemptsForIntegration } from "@/modules/merchant-payments/payments";
+import { orderOnlinePayment, reconcileOrderOnlinePayment } from "@/modules/merchant-payments/checkout";
 import {
-  orderOnlinePayment,
-  reconcileOpenAttemptsForIntegration,
-  reconcileOrderOnlinePayment,
-} from "@/modules/merchant-payments/payments";
+  disconnectMerchantCashfree,
+  getCashfreeView,
+  saveMerchantCashfree,
+  setMerchantCashfreeEnabled,
+  verifyMerchantCashfree,
+} from "@/modules/merchant-payments/cashfree/integration";
+import { reconcileOpenCashfreeAttempts } from "@/modules/merchant-payments/cashfree/payments";
+import { ensureDefaultProvider, gatewayOverview, setDefaultProvider } from "@/modules/merchant-payments/gateway";
 
 /**
- * Dashboard routes for the merchant's own Razorpay account (Domain B).
+ * Dashboard routes for the merchant's own Razorpay / Cashfree accounts (Domain B).
+ *
+ *   GET/PUT/PATCH/DELETE integrations/cashfree, POST integrations/cashfree/verify   (same shape as Razorpay)
+ *   GET/PUT integrations/payment-gateway   default gateway for storefront online payments
  *
  *   GET    integrations/razorpay          masked status, webhook URL
  *   PUT    integrations/razorpay          connect / replace keys (verified with Razorpay first)
@@ -41,6 +50,12 @@ const saveSchema = z.object({
   webhookSecret: z.string().trim().max(256).optional().nullable(),
 });
 const toggleSchema = z.object({ enabled: z.boolean() });
+const cashfreeSaveSchema = z.object({
+  mode: z.enum(["TEST", "LIVE"]),
+  clientId: z.string().trim().max(100).optional().nullable(),
+  clientSecret: z.string().trim().max(200).optional().nullable(),
+});
+const gatewaySchema = z.object({ defaultProvider: z.enum(["RAZORPAY", "CASHFREE"]) });
 
 function admin(): SupabaseClient {
   if (!hasAdminClient()) throw new AppError(ERROR_CODES.PROVIDER_ERROR, "Server is not configured.");
@@ -59,6 +74,30 @@ export async function merchantRazorpaySummary(organizationId: string) {
       status: view.status,
       enabled: view.enabled,
       mode: view.mode,
+      lastVerifiedAt: view.lastVerifiedAt,
+      lastError: view.lastError,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Lightweight Cashfree card for GET integrations. Null when the Cashfree migration is not deployed. */
+export async function merchantCashfreeSummary(organizationId: string) {
+  if (!hasAdminClient()) return null;
+  try {
+    const client = createAdminClient();
+    const overview = await gatewayOverview(client, organizationId);
+    if (!overview.available) return null;
+    const view = await getCashfreeView(client, organizationId);
+    if (!view.available) return null;
+    return {
+      provider: "cashfree",
+      name: "Cashfree Payments",
+      status: view.status,
+      enabled: view.enabled,
+      mode: view.mode,
+      isDefaultGateway: overview.activeProvider === "CASHFREE",
       lastVerifiedAt: view.lastVerifiedAt,
       lastError: view.lastError,
     };
@@ -93,13 +132,61 @@ export async function handleMerchantPaymentRoutes(
     if (key === "POST integrations/razorpay/verify") return verifyMerchantRazorpay(admin(), actor);
     if (key === "PATCH integrations/razorpay") {
       const body = toggleSchema.parse(await request.json().catch(() => ({})));
-      return setMerchantRazorpayEnabled(admin(), actor, body.enabled);
+      const client = admin();
+      const view = await setMerchantRazorpayEnabled(client, actor, body.enabled);
+      if (body.enabled) await ensureDefaultProvider(client, actor, "RAZORPAY");
+      return view;
     }
     if (key === "DELETE integrations/razorpay") {
       const client = admin();
       return disconnectMerchantRazorpay(client, actor, {
         reconcileOpen: (row) => reconcileOpenAttemptsForIntegration(client, row),
       });
+    }
+    return null;
+  }
+
+  if (slugs[0] === "integrations" && slugs[1] === "cashfree") {
+    // dispatchTenantRoutes already required integrations.manage for every route below.
+    if (key === "GET integrations/cashfree") {
+      const client = admin();
+      const [view, gateway] = await Promise.all([getCashfreeView(client, ctx.organizationId), gatewayOverview(client, ctx.organizationId)]);
+      return { ...view, gateway };
+    }
+    const limited = rateLimit(`merchant-cashfree:${ctx.organizationId}`, 20, 60_000);
+    if (!limited.ok) throw new AppError(ERROR_CODES.RATE_LIMITED, "Too many attempts. Try again in a minute.");
+
+    if (key === "PUT integrations/cashfree" || key === "POST integrations/cashfree") {
+      const body = cashfreeSaveSchema.parse(await request.json().catch(() => ({})));
+      const client = admin();
+      return saveMerchantCashfree(client, actor, body, {
+        reconcileOpen: (row) => reconcileOpenCashfreeAttempts(client, row),
+      });
+    }
+    if (key === "POST integrations/cashfree/verify") return verifyMerchantCashfree(admin(), actor);
+    if (key === "PATCH integrations/cashfree") {
+      const body = toggleSchema.parse(await request.json().catch(() => ({})));
+      const client = admin();
+      const view = await setMerchantCashfreeEnabled(client, actor, body.enabled);
+      if (body.enabled) await ensureDefaultProvider(client, actor, "CASHFREE");
+      return view;
+    }
+    if (key === "DELETE integrations/cashfree") {
+      const client = admin();
+      return disconnectMerchantCashfree(client, actor, {
+        reconcileOpen: (row) => reconcileOpenCashfreeAttempts(client, row),
+      });
+    }
+    return null;
+  }
+
+  if (slugs[0] === "integrations" && slugs[1] === "payment-gateway") {
+    if (key === "GET integrations/payment-gateway") return gatewayOverview(admin(), ctx.organizationId);
+    if (key === "PUT integrations/payment-gateway") {
+      const limited = rateLimit(`merchant-gateway:${ctx.organizationId}`, 20, 60_000);
+      if (!limited.ok) throw new AppError(ERROR_CODES.RATE_LIMITED, "Too many attempts. Try again in a minute.");
+      const body = gatewaySchema.parse(await request.json().catch(() => ({})));
+      return setDefaultProvider(admin(), actor, body.defaultProvider);
     }
     return null;
   }

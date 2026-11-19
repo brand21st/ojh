@@ -24,6 +24,7 @@ import {
   parcelDefaultsValidationError,
   parseParcelDefaultsInput,
 } from "@/modules/india-post/parcel-defaults";
+import { dimensionConfigPayload, parseDimensionConfig } from "@/modules/shopify/dimension-config";
 import { listContracts, saveContracts, saveParcelContract, syncPageContracts } from "@/modules/india-post/contracts";
 import { syncOpenShipmentsService, workspaceBookingChoice } from "@/modules/shipments/service";
 import { DEFAULT_INDIA_POST_SERVICE, DEFAULT_PROVIDER_ENVIRONMENT } from "@/types/domain";
@@ -328,8 +329,8 @@ export async function handleIntegrationRoutes(
         };
     const shopifyConfigured = shopifyAppConfiguredFor(shopify);
     const shopifySyncReady = shopifyReadyToSync(shopify);
-    const { merchantRazorpaySummary } = await import("@/lib/api/v1/merchant-payments");
-    const razorpay = await merchantRazorpaySummary(ctx.organizationId);
+    const { merchantCashfreeSummary, merchantRazorpaySummary } = await import("@/lib/api/v1/merchant-payments");
+    const [razorpay, cashfree] = await Promise.all([merchantRazorpaySummary(ctx.organizationId), merchantCashfreeSummary(ctx.organizationId)]);
     return {
       shopify: {
         provider: "shopify",
@@ -398,6 +399,7 @@ export async function handleIntegrationRoutes(
           lastError: vachat?.last_error,
         },
         ...(razorpay ? [razorpay] : []),
+        ...(cashfree ? [cashfree] : []),
       ],
     };
   }
@@ -425,7 +427,29 @@ export async function handleIntegrationRoutes(
       readyToSync: shopifyReadyToSync(data),
       lastSyncAt: data?.last_sync_at,
       lastError: data?.last_error,
+      dimensionConfig: dimensionConfigPayload(parseDimensionConfig(data?.dimension_config)),
     };
+  }
+
+  if (key === "PUT integrations/shopify/dimensions" || key === "PATCH integrations/shopify/dimensions") {
+    const body = await request.json().catch(() => ({}));
+    const config = parseDimensionConfig(body);
+    const { data: existing } = await supabase
+      .from("shopify_connections")
+      .select("id")
+      .eq("organization_id", ctx.organizationId)
+      .maybeSingle();
+    if (!existing?.id) {
+      throw new AppError(ERROR_CODES.VALIDATION_ERROR, "Connect Shopify before saving parcel dimensions.");
+    }
+    const payload = dimensionConfigPayload(config);
+    const { error } = await supabase
+      .from("shopify_connections")
+      .update({ dimension_config: payload })
+      .eq("id", existing.id)
+      .eq("organization_id", ctx.organizationId);
+    if (error) throw new AppError(ERROR_CODES.VALIDATION_ERROR, error.message);
+    return { dimensionConfig: payload };
   }
 
   if (key === "POST integrations/shopify" || key === "PUT integrations/shopify" || key === "PATCH integrations/shopify") {

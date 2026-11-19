@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Plug } from "lucide-react";
 import { GoogleSheetsLogo } from "@/components/brand/google-sheets-logo";
 import { IndiaPostLogo } from "@/components/brand/india-post-logo";
+import { CashfreeLogo } from "@/components/brand/cashfree-logo";
 import { RazorpayLogo } from "@/components/brand/razorpay-logo";
 import { ShopifyLogo } from "@/components/brand/shopify-logo";
 import { WatiLogo } from "@/components/brand/wati-logo";
@@ -35,6 +36,7 @@ const FALLBACK: IntegrationCard[] = [
   { provider: "POSTBUS_WHATSAPP", name: "Postbus-Whatsapp Notifications", status: "NOT_CONNECTED" },
   { provider: "VACHAT", name: "Vachat", status: "NOT_CONNECTED" },
   { provider: "RAZORPAY", name: "Razorpay — Online Payments", status: "NOT_CONNECTED" },
+  { provider: "CASHFREE", name: "Cashfree Payments", status: "NOT_CONNECTED" },
 ];
 
 function cardsFromPayload(payload?: IntegrationsResponse | null): IntegrationCard[] {
@@ -75,7 +77,7 @@ export default function IntegrationsPage() {
     <div className="space-y-6">
       <PageHeader
         title="Integrations"
-        description="Shopify, WooCommerce, India Post, Razorpay payments, Google Sheets, Wati, PostBus WhatsApp, merchant Vachat, Developer API, and paid add-ons."
+        description="Shopify, WooCommerce, India Post, Razorpay and Cashfree payments, Google Sheets, Wati, PostBus WhatsApp, merchant Vachat, Developer API, and paid add-ons."
       />
 
       <AiAccountantCard />
@@ -143,6 +145,8 @@ export default function IntegrationsPage() {
                       ? "/dashboard/integrations/vachat"
                     : provider === "RAZORPAY"
                       ? "/dashboard/integrations/razorpay"
+                    : provider === "CASHFREE"
+                      ? "/dashboard/integrations/cashfree"
                     : undefined;
 
             const feature =
@@ -166,6 +170,17 @@ export default function IntegrationsPage() {
                       ? `Accepting online payments on your Mini Store · ${payments.mode === "LIVE" ? "Live" : "Test"} mode`
                       : `Connected · online checkout is off · ${payments.mode === "LIVE" ? "Live" : "Test"} mode`
                     : "Connect your Razorpay account to accept secure online payments directly from your PostBus Mini Store.")
+              : provider === "CASHFREE"
+                ? card.lastError ??
+                  (card.status && card.status !== "NOT_CONNECTED"
+                    ? `${payments.mode === "LIVE" ? "Live mode" : "Test mode"} · ${
+                        payments.enabled
+                          ? payments.isDefaultGateway
+                            ? "taking your Mini Store's online payments"
+                            : "enabled, but another gateway is the default"
+                          : "payments disabled"
+                      }`
+                    : "Connect your Cashfree account to accept online payments directly through your PostBus Mini Store.")
               : card.lastError || card.last_error
                 ? card.lastError ?? card.last_error
                 : provider === "POSTBUS_WHATSAPP"
@@ -200,6 +215,11 @@ export default function IntegrationsPage() {
                             <RazorpayLogo />
                             <span className="text-sm font-medium text-muted">Online Payments</span>
                           </span>
+                        ) : provider === "CASHFREE" ? (
+                          <span className="flex flex-wrap items-center gap-2">
+                            <CashfreeLogo />
+                            <span className="text-sm font-medium text-muted">Payments</span>
+                          </span>
                         ) : (
                           card.name ?? card.provider
                         )}
@@ -222,7 +242,7 @@ export default function IntegrationsPage() {
                 </CardHeader>
                 <CardContent className="flex items-center justify-between">
                   <p className="text-xs text-muted">
-                    {provider === "RAZORPAY"
+                    {provider === "RAZORPAY" || provider === "CASHFREE"
                       ? `Last verified ${formatDate(card.lastVerifiedAt ?? null, true)}`
                       : `Last sync ${formatDate(card.lastSyncAt ?? card.last_sync_at, true)}`}
                   </p>
@@ -238,6 +258,10 @@ export default function IntegrationsPage() {
                         ? card.status && card.status !== "NOT_CONNECTED"
                           ? "Manage integration"
                           : "Connect Razorpay"
+                        : provider === "CASHFREE"
+                          ? card.status && card.status !== "NOT_CONNECTED"
+                            ? "Manage Integration"
+                            : "Connect Cashfree"
                         : connected || card.appConfigured === false
                           ? "Configure"
                           : "Connect"}

@@ -79,6 +79,9 @@ function tokenHash(token: string) {
   return hashSecret(`postbus.storefront-payment.v1\0${token}`);
 }
 
+/** Shared by every gateway: the storefront's per-order bearer token is stored only as this hash. */
+export const paymentTokenHash = tokenHash;
+
 /** Bearer token the storefront holds for one order's payment. Only its hash is stored. */
 export function newPaymentToken() {
   return randomToken(24);
@@ -346,7 +349,11 @@ export async function applyPayment(
   return result;
 }
 
-/** One-time side effects of a newly paid order. Never books India Post. */
+/** One-time side effects of a newly paid order (any gateway). Never books India Post. */
+export async function notifyStorefrontPaymentSettled(admin: SupabaseClient, organizationId: string, orderId: string) {
+  return afterSettled(admin, organizationId, orderId);
+}
+
 async function afterSettled(admin: SupabaseClient, organizationId: string, orderId: string) {
   try {
     const { error: claimError } = await admin.from("idempotency_keys").insert({
@@ -537,6 +544,7 @@ export async function sweepOpenStorefrontPayments(admin: SupabaseClient, deps: D
   const { data, error } = await admin
     .from("merchant_storefront_payments")
     .select(PAYMENT_COLUMNS)
+    .eq("provider", "RAZORPAY")
     .in("payment_status", OPEN_STATUSES)
     .lte("created_at", new Date(now - 5 * 60_000).toISOString())
     .gte("created_at", new Date(now - 3 * 86_400_000).toISOString())

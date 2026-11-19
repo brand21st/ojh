@@ -133,8 +133,10 @@ export const submitCustomerOrderLinkSchema = z.object({
   state: z.string().trim().min(2, "State is required."),
   pincode: z.string().trim().regex(/^\d{6}$/, "Enter a 6-digit PIN code."),
   paymentPreference: z.enum(["PREPAID", "COD"]).optional(),
-  /** Pay the amount due now through the merchant's own Razorpay account. */
+  /** Pay the amount due now through the merchant's own payment gateway (Razorpay or Cashfree). */
   payOnline: z.boolean().optional(),
+  /** Storefront page to come back to after a redirect-style gateway checkout. Sanitised server-side. */
+  returnUrl: z.string().trim().max(500).optional(),
   clientRequestId: z.string().uuid().optional(),
   items: z
     .array(

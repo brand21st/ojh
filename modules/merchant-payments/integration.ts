@@ -43,6 +43,7 @@ export type MerchantPaymentIntegrationRow = {
   connected_at: string | null;
   disconnected_at: string | null;
   updated_at: string | null;
+  last_webhook_at?: string | null;
 };
 
 export type MerchantPaymentIntegrationView = {
@@ -88,26 +89,43 @@ export function mapIntegrationView(row: MerchantPaymentIntegrationRow | null): M
   };
 }
 
-const COLUMNS =
-  "id, organization_id, provider, webhook_token, encrypted_key_id, encrypted_key_secret, encrypted_webhook_secret, key_fingerprint, key_id_hint, payment_mode, connection_status, enabled, last_verified_at, last_error, connected_at, disconnected_at, updated_at";
+export type MerchantPaymentProvider = "RAZORPAY" | "CASHFREE";
 
-export async function loadIntegration(admin: SupabaseClient, organizationId: string) {
+export const INTEGRATION_COLUMNS =
+  "id, organization_id, provider, webhook_token, encrypted_key_id, encrypted_key_secret, encrypted_webhook_secret, key_fingerprint, key_id_hint, payment_mode, connection_status, enabled, last_verified_at, last_error, connected_at, disconnected_at, updated_at, last_webhook_at";
+const COLUMNS = INTEGRATION_COLUMNS;
+
+export async function loadIntegration(
+  admin: SupabaseClient,
+  organizationId: string,
+  provider: MerchantPaymentProvider = MERCHANT_PAYMENT_PROVIDER
+) {
   const { data, error } = await admin
     .from("merchant_payment_integrations")
     .select(COLUMNS)
     .eq("organization_id", organizationId)
-    .eq("provider", MERCHANT_PAYMENT_PROVIDER)
+    .eq("provider", provider)
     .maybeSingle();
   if (error) {
     if (isMissingTable(error)) return { row: null, available: false as const };
-    throw new AppError(ERROR_CODES.PROVIDER_ERROR, "Could not load the Razorpay integration.");
+    throw new AppError(ERROR_CODES.PROVIDER_ERROR, "Could not load the payment integration.");
   }
   return { row: (data as MerchantPaymentIntegrationRow | null) ?? null, available: true as const };
 }
 
-export async function loadIntegrationByWebhookToken(admin: SupabaseClient, token: string) {
+/** A webhook URL token only ever resolves to an integration of the provider whose route it hit. */
+export async function loadIntegrationByWebhookToken(
+  admin: SupabaseClient,
+  token: string,
+  provider: MerchantPaymentProvider = MERCHANT_PAYMENT_PROVIDER
+) {
   if (!/^[a-f0-9]{48}$/.test(token)) return null;
-  const { data, error } = await admin.from("merchant_payment_integrations").select(COLUMNS).eq("webhook_token", token).maybeSingle();
+  const { data, error } = await admin
+    .from("merchant_payment_integrations")
+    .select(COLUMNS)
+    .eq("webhook_token", token)
+    .eq("provider", provider)
+    .maybeSingle();
   if (error) {
     if (isMissingTable(error)) return null;
     throw new Error("integration lookup failed");

@@ -53,9 +53,13 @@ export function contentSecurityPolicy(options?: { embedShopify?: boolean; shop?:
     "https://*.shopify.com",
     "https://api.razorpay.com",
     "https://lumberjack.razorpay.com",
+    // Merchant storefront Cashfree Hosted Checkout (SDK telemetry and session calls).
+    "https://*.cashfree.com",
     "https://api.stripe.com",
     // PostHog product analytics (instrumentation-client.ts): event ingest, flags and remote config.
     "https://*.i.posthog.com",
+    // Debug-session ingest is local-only. Production CSP stays unchanged.
+    ...(process.env.NODE_ENV === "development" ? ["http://127.0.0.1:7701"] : []),
   ].join(" ");
 
   const scriptSrc = [
@@ -69,6 +73,7 @@ export function contentSecurityPolicy(options?: { embedShopify?: boolean; shop?:
     "https://www.googletagmanager.com",
     "https://static.cloudflareinsights.com",
     "https://checkout.razorpay.com",
+    "https://sdk.cashfree.com",
     "https://cdn.jsdelivr.net",
     // PostHog loads its remote config and lazy extensions (surveys, recorder) from its asset host.
     "https://*.i.posthog.com",
@@ -101,7 +106,7 @@ export function contentSecurityPolicy(options?: { embedShopify?: boolean; shop?:
       : "font-src 'self' data: https://fonts.gstatic.com",
     `connect-src ${connectSrc}`,
     "worker-src 'self' blob:",
-    "frame-src 'self' blob: https://api.razorpay.com https://checkout.razorpay.com https://js.stripe.com https://hooks.stripe.com https://*.myshopify.com https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com https://www.facebook.com https://www.instagram.com",
+    "frame-src 'self' blob: https://api.razorpay.com https://checkout.razorpay.com https://*.cashfree.com https://js.stripe.com https://hooks.stripe.com https://*.myshopify.com https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com https://www.facebook.com https://www.instagram.com",
     "upgrade-insecure-requests",
   ].join("; ");
 }

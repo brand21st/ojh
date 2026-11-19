@@ -15,6 +15,7 @@ const MERCHANT_CODE = [
   ...files("modules/merchant-payments").filter((path) => !path.includes(".test.") && !path.includes(".testkit.")),
   "lib/api/v1/merchant-payments.ts",
   "app/api/webhooks/merchant/razorpay/[token]/route.ts",
+  "app/api/webhooks/merchant/cashfree/[token]/route.ts",
   "app/api/v1/public/store/payment/route.ts",
   "app/api/cron/merchant-payments/route.ts",
 ];
@@ -38,6 +39,8 @@ describe("merchant payments stay separate from PostBus SaaS billing", () => {
       expect(source, path).not.toMatch(/@\/lib\/api\/v1\/billing/);
       expect(source, path).not.toMatch(/platform_settings|razorpay_webhook_events|from\("payments"\)|\.from\("subscriptions"\)/);
       expect(source, path).not.toMatch(/env\.razorpay|RAZORPAY_KEY|RAZORPAY_WEBHOOK_SECRET/);
+      // No platform-level Cashfree account exists; merchant credentials are the only source.
+      expect(source, path).not.toMatch(/process\.env\.CASHFREE|env\.cashfree/i);
     }
   });
 

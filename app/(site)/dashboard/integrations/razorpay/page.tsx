@@ -8,6 +8,7 @@ import { ArrowLeft, CheckCircle2, Copy, Loader2, ShieldCheck, Unplug } from "luc
 import { RazorpayLogo } from "@/components/brand/razorpay-logo";
 import { PageHeader } from "@/components/dashboard/page-header";
 import { StatusBadge } from "@/components/dashboard/status-badge";
+import { GATEWAY_QUERY_KEY, PaymentGatewayDefault } from "@/components/integrations/payment-gateway-default";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -73,6 +74,7 @@ export default function RazorpayIntegrationPage() {
   function update(next: IntegrationView) {
     queryClient.setQueryData(QUERY_KEY, next);
     void queryClient.invalidateQueries({ queryKey: ["integrations"], exact: true });
+    void queryClient.invalidateQueries({ queryKey: GATEWAY_QUERY_KEY });
   }
 
   const save = useMutation({
@@ -365,6 +367,8 @@ export default function RazorpayIntegrationPage() {
                 />
               </CardContent>
             </Card>
+
+            <PaymentGatewayDefault />
 
             {connected ? (
               <Card>
