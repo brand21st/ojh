@@ -18,7 +18,8 @@ import { createOrderSchema } from "@/modules/orders/schema";
 import { formatWhatsAppOrderNumber } from "@/modules/orders/order-number";
 import { createManualOrder } from "@/modules/orders/service";
 import { loadCatalogProducts } from "@/modules/products/service";
-import { quoteCatalogPayment } from "@/modules/storefront/quote";
+import { priceStoreCart, quoteCatalogPayment } from "@/modules/storefront/quote";
+import { attachRedemptionOrder, releaseCouponRedemption, reserveCouponRedemption } from "@/modules/storefront/coupons/service";
 import { resolveStoreCart } from "@/modules/storefront/resolve-cart";
 
 type PublicLinkRow = {
@@ -226,10 +227,29 @@ export async function submitPublicCustomerOrderLink(
       throw new AppError(ERROR_CODES.CONFLICT, "This order is already being submitted.");
     }
   }
-  const resolved = (input.items?.length || input.bundles?.length)
+  const baseCart = (input.items?.length || input.bundles?.length)
     ? await resolveStoreCart(supabase, row.organization_id, input.items ?? [], input.bundles ?? []) : null;
+  const preference = input.paymentPreference === "COD" ? "COD" : "PREPAID";
+  // Re-price with the customer's phone so per-customer and first-order coupon rules apply.
+  const priced = baseCart
+    ? await priceStoreCart(supabase, row.organization_id, baseCart, preference, {
+        code: input.couponCode,
+        skipAuto: input.skipAutoCoupon,
+        phone,
+      })
+    : null;
+  if (priced?.couponError) {
+    throw new AppError(ERROR_CODES.CONFLICT, `${priced.couponError} Remove the coupon to place your order.`);
+  }
+  const resolved = baseCart && priced ? { ...baseCart, lines: priced.lines, quoteVersion: priced.quoteVersion } : null;
   if (resolved && input.quoteVersion && resolved.quoteVersion !== input.quoteVersion) {
-    throw new AppError(ERROR_CODES.CONFLICT, "Prices changed. Review the updated quote before placing your order.");
+    const couponMessage = priced?.coupon && !priced.coupon.applied ? priced.coupon.message : null;
+    throw new AppError(
+      ERROR_CODES.CONFLICT,
+      couponMessage
+        ? `${couponMessage} Review the updated total and place your order again.`
+        : "Prices changed. Review the updated quote before placing your order."
+    );
   }
   if (input.bundles?.length && !input.quoteVersion) throw new AppError(ERROR_CODES.VALIDATION_ERROR, "Review your bundle quote before placing an order.");
   if (idempotencyKey) {
@@ -245,6 +265,7 @@ export async function submitPublicCustomerOrderLink(
         paymentPreference: input.paymentPreference ?? null,
         items: input.items ?? [],
         bundles: input.bundles ?? [],
+        couponCode: input.couponCode?.trim().toUpperCase() || null,
       })
     );
     const { error: reservationError } = await supabase.from("idempotency_keys").insert({
@@ -375,10 +396,42 @@ export async function submitPublicCustomerOrderLink(
             items: messageItems,
             bundles: resolved?.bundles ?? [],
             quoteVersion: resolved?.quoteVersion,
+            ...(priced?.coupon?.applied
+              ? {
+                  coupon: {
+                    code: priced.coupon.code,
+                    label: priced.coupon.label,
+                    automatic: priced.coupon.automatic,
+                    subtotal: priced.coupon.subtotal,
+                    discount: priced.coupon.discount,
+                  },
+                }
+              : {}),
           },
         }
       : undefined,
   });
+
+  // Reserve the coupon use before the order exists; the row lock enforces usage limits.
+  let redemptionId: string | null = null;
+  if (priced?.coupon?.applied && quote) {
+    try {
+      redemptionId = await reserveCouponRedemption(supabase, {
+        organizationId: row.organization_id,
+        couponId: priced.coupon.couponId,
+        phone,
+        subtotal: priced.coupon.subtotal,
+        discount: priced.coupon.discount,
+        total: quote.total,
+        preference: quote.preference,
+      });
+    } catch (error) {
+      if (idempotencyKey) {
+        await supabase.from("idempotency_keys").delete().eq("organization_id", row.organization_id).eq("key", idempotencyKey);
+      }
+      throw error;
+    }
+  }
 
   let order: Awaited<ReturnType<typeof createManualOrder>>;
   try {
@@ -389,6 +442,7 @@ export async function submitPublicCustomerOrderLink(
       resolved?.lines
     );
   } catch (error) {
+    if (redemptionId) await releaseCouponRedemption(supabase, row.organization_id, redemptionId);
     if (idempotencyKey) {
       await supabase
         .from("idempotency_keys")
@@ -398,6 +452,7 @@ export async function submitPublicCustomerOrderLink(
     }
     throw error;
   }
+  if (redemptionId) await attachRedemptionOrder(supabase, row.organization_id, redemptionId, order.id);
 
   await supabase.from("audit_logs").insert({
     organization_id: row.organization_id,

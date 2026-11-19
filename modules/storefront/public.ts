@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { findAutoApplyCoupon, publicCouponSummary } from "@/modules/storefront/coupons/service";
 import { AppError, ERROR_CODES } from "@/lib/api/errors";
 import { orIlike } from "@/lib/api/filters";
 import { mapProductImageUrls } from "@/modules/products/images";
@@ -51,6 +52,22 @@ function firstBalance(value: unknown) {
   return 0;
 }
 
+const NAMED_ENTITIES: Record<string, string> = { quot: '"', apos: "'", lt: "<", gt: ">", nbsp: " ", rsquo: "’", lsquo: "‘", rdquo: "”", ldquo: "“", ndash: "–", mdash: "—", hellip: "…" };
+
+/** Decode HTML entities left in text pasted from Shopify or other HTML sources. React re-escapes on render. */
+export function decodeTextEntities(value: string) {
+  if (!value.includes("&")) return value;
+  return value
+    .replace(/&#(\d+);/g, (match, code: string) => safeCodePoint(Number(code)) ?? match)
+    .replace(/&#x([0-9a-f]+);/gi, (match, code: string) => safeCodePoint(parseInt(code, 16)) ?? match)
+    .replace(/&([a-z]+);/gi, (match, name: string) => (name.toLowerCase() === "amp" ? match : NAMED_ENTITIES[name.toLowerCase()] ?? match))
+    .replace(/&amp;/gi, "&");
+}
+
+function safeCodePoint(code: number) {
+  return Number.isInteger(code) && code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : null;
+}
+
 export function mapPublicProduct(row: Record<string, unknown>) {
   const price = Number(row.price ?? 0);
   const compareAt = row.compare_at_price == null ? null : Number(row.compare_at_price);
@@ -58,10 +75,10 @@ export function mapPublicProduct(row: Record<string, unknown>) {
   const onHand = firstBalance(row.inventory_balances);
   return {
     id: String(row.id),
-    name: String(row.name),
+    name: decodeTextEntities(String(row.name)),
     sku: String(row.sku ?? ""),
     slug: String(row.public_slug ?? ""),
-    description: (row.description as string | null) ?? null,
+    description: typeof row.description === "string" ? decodeTextEntities(row.description) : null,
     price,
     compareAtPrice: compareAt != null && compareAt > price ? compareAt : null,
     discountPercent: discountPercent(price, compareAt),
@@ -121,6 +138,7 @@ export async function loadPublicStorefront(supabase: SupabaseClient, ref: Public
     ? await loadPublicProductsByIds(supabase, organizationId, settings.featuredProductIds)
     : [];
   const marketplace = env.storefrontMarketplaceEnabled;
+  const autoCoupon = settings.published ? await findAutoApplyCoupon(supabase, organizationId) : null;
   const bundleRows = settings.published && marketplace ? await listStoreBundles(supabase, organizationId, true) : [];
   const bundleProducts = await loadPublicProductsByIds(supabase, organizationId, bundleRows.flatMap((bundle) => bundle.items.map((item) => item.productId)), 800);
   const bundles = bundleRows.flatMap((bundle) => {
@@ -153,6 +171,8 @@ export async function loadPublicStorefront(supabase: SupabaseClient, ref: Public
     products: { ...catalog, featured },
     workspace: settings.workspace,
     footer: settings.published ? settings.footerPreview ?? null : null,
+    /** The store's auto-apply coupon, shown as a banner and applied at checkout. */
+    promo: autoCoupon ? publicCouponSummary(autoCoupon) : null,
   };
 }
 
@@ -265,7 +285,11 @@ export async function loadPublicProductsByIds(supabase: SupabaseClient, organiza
     .eq("active", true)
     .eq("store_visible", true)
     .in("id", unique);
-  return (data ?? []).map((row) => mapPublicProduct(row as Record<string, unknown>));
+  // `.in()` returns rows in table order; keep the merchant's featured order.
+  const rank = new Map(unique.map((id, index) => [id, index]));
+  return (data ?? [])
+    .map((row) => mapPublicProduct(row as Record<string, unknown>))
+    .sort((a, b) => (rank.get(a.id) ?? 0) - (rank.get(b.id) ?? 0));
 }
 
 export async function getPublicProduct(supabase: SupabaseClient, organizationId: string, id: string) {

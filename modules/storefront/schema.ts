@@ -3,6 +3,11 @@ import { storeThemeSchema, storeTrackingSchema } from "./config";
 import { bundleSelectionSchema } from "./bundle-pricing";
 import type { PublicLinkRef } from "@/modules/customer-order-links/public";
 
+/** NPCI VPA shape: handle@psp. Shared with the dashboard so it can flag mistakes before saving. */
+export const UPI_ID = /^[a-zA-Z0-9._-]{2,256}@[a-zA-Z][a-zA-Z0-9.-]{1,63}$/;
+/** 10-digit Indian mobile, optionally prefixed with +91 / 91 / 0. */
+export const INDIAN_MOBILE = /^(?:\+?91|0)?[6-9]\d{9}$/;
+
 export function storeLinkRef(parsed: { workspace?: string; token?: string; code?: string }): PublicLinkRef {
   if (parsed.token) return { kind: "token", token: parsed.token };
   return { kind: "path", workspace: parsed.workspace ?? "", publicId: parsed.code };
@@ -18,6 +23,16 @@ export const storeLinkFields = {
   token: z.string().trim().optional(),
   code: z.string().trim().optional(),
 };
+
+export const publicCouponLookupSchema = z
+  .object({
+    ...storeLinkFields,
+    coupon: z.string().trim().min(1).max(40),
+    /** "link" when the shopper arrived through a ?discount= magic link (counted once per session). */
+    source: z.enum(["link", "manual"]).default("manual"),
+    sessionId: z.string().trim().max(80).optional(),
+  })
+  .refine((value) => Boolean(value.workspace || value.token), { message: "This store link is not valid." });
 
 export const publicStoreQuery = z.object(storeLinkFields).refine((value) => Boolean(value.workspace || value.token), {
   message: "This store link is not valid.",
@@ -52,6 +67,11 @@ export const publicStoreQuoteSchema = z
   .object({
     ...storeLinkFields,
     paymentPreference: z.enum(["PREPAID", "COD"]),
+    couponCode: z.string().trim().max(40).optional().nullable(),
+    /** When true the store's auto-apply coupon is skipped (customer removed it). */
+    skipAutoCoupon: z.boolean().optional(),
+    /** Set only by the explicit "Apply" action so re-quotes don't inflate the funnel. */
+    trackCouponApply: z.boolean().optional(),
     bundles: bundleSelectionSchema,
     items: z
       .array(
@@ -98,8 +118,24 @@ export const storefrontSettingsSchema = z.object({
   seoTitle: z.string().trim().max(70).optional().nullable(),
   seoDescription: z.string().trim().max(180).optional().nullable(),
   footer: z.unknown().optional(),
-  upiId: z.string().trim().max(80).optional().nullable(),
-  gpayNumber: z.string().trim().max(20).optional().nullable(),
+  upiId: z
+    .string()
+    .trim()
+    .max(80)
+    .refine((value) => !value || UPI_ID.test(value), "Use a UPI ID like name@okbank.")
+    .optional()
+    .nullable(),
+  gpayNumber: z
+    .string()
+    .trim()
+    .max(20)
+    .refine((value) => !value || INDIAN_MOBILE.test(value.replace(/[\s-]/g, "")), "Use a 10-digit Indian mobile number.")
+    .optional()
+    .nullable(),
+  /** Only null is accepted: clears the logo. Uploads go through POST inventory/storefront/logo. */
+  logoPath: z.null().optional(),
+  /** Only null is accepted: clears the payment QR. Uploads go through POST inventory/storefront/qr. */
+  qrImagePath: z.null().optional(),
   coverAutoplay: z.boolean().optional(),
   brandKit: z
     .object({

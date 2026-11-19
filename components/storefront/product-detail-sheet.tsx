@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, Minus, Plus, X } from "lucide-react";
 import { ProductCard } from "@/components/storefront/product-card";
 import { StoreImage } from "@/components/storefront/store-image";
 import type { CartLine, StoreProduct } from "@/components/storefront/store-types";
 import { formatStorePrice } from "@/modules/storefront/pricing";
 import { cn } from "@/lib/utils";
+import { useDialogFocus } from "@/components/storefront/use-dialog-focus";
+import { onAccent, readableAccent } from "@/modules/storefront/config";
 
 function ProductGallery({ product }: { product: StoreProduct }) {
   const scrollerRef = useRef<HTMLDivElement>(null);
@@ -154,17 +156,11 @@ export function ProductDetailSheet({
   onDecrease: (productId: string) => void;
   onOpenProduct: (product: StoreProduct) => void;
 }) {
-  useEffect(() => {
-    function close(event: KeyboardEvent) {
-      if (event.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", close);
-    return () => window.removeEventListener("keydown", close);
-  }, [onClose]);
+  const dialogRef = useDialogFocus<HTMLDivElement>(onClose, product.id);
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/45 backdrop-blur-[2px]" role="dialog" aria-modal="true" aria-label={product.name}>
-      <button className="absolute inset-0 cursor-default" type="button" onClick={onClose} aria-label="Close product" />
+    <div ref={dialogRef} className="fixed inset-0 z-50 bg-black/45 backdrop-blur-[2px]" role="dialog" aria-modal="true" aria-label={product.name}>
+      <button className="absolute inset-0 cursor-default" type="button" tabIndex={-1} onClick={onClose} aria-label="Close product" />
       <section className="absolute inset-x-0 bottom-0 flex max-h-[94dvh] w-full min-w-0 flex-col overflow-hidden rounded-t-[1.75rem] bg-white shadow-2xl sm:inset-y-5 sm:left-1/2 sm:right-auto sm:w-[min(92vw,600px)] sm:-translate-x-1/2 sm:rounded-3xl">
         <div className="mx-auto mt-2 h-1.5 w-12 shrink-0 rounded-full bg-zinc-200 sm:hidden" />
         <button
@@ -172,6 +168,7 @@ export function ProductDetailSheet({
           className="absolute right-3 top-3 z-20 flex size-10 items-center justify-center rounded-full bg-white/95 shadow ring-1 ring-zinc-200 sm:right-4 sm:top-4 sm:size-11"
           onClick={onClose}
           aria-label="Close"
+          data-autofocus
         >
           <X className="size-5" />
         </button>
@@ -183,7 +180,7 @@ export function ProductDetailSheet({
             {product.bestSeller ? <span className="rounded-full bg-zinc-950 px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-white">Best seller</span> : null}
           </div>
           <div className="mt-2 flex flex-wrap items-baseline gap-2">
-            <span className="text-2xl font-bold" style={{ color: accent }}>
+            <span className="text-2xl font-bold" style={{ color: readableAccent(accent) }}>
               {formatStorePrice(product.price)}
             </span>
             {product.compareAtPrice ? (
@@ -217,11 +214,11 @@ export function ProductDetailSheet({
               ) : null}
             </div>
             <p className="mt-2 font-semibold text-zinc-900">Return policy</p>
-            <p className="mt-1">{product.returnAvailable === false ? "No Return" : "Return Available"}</p>
+            <p className="mt-1">{product.returnAvailable === false ? "No returns on this item" : "Returns accepted"}</p>
           </div>
         </div>
-        <OfferRail title="Upgrade this order" note="Upsells chosen for this product." products={related.filter((item) => product.upsellIds?.includes(item.id))} cart={cart} accent={accent} onOpenProduct={onOpenProduct} onAdd={onAdd} onDecrease={onDecrease} />
-        <OfferRail title="Frequently bought together" note="Cross-sells at their current price." products={related.filter((item) => product.crossSellIds?.includes(item.id) && !product.upsellIds?.includes(item.id))} cart={cart} accent={accent} onOpenProduct={onOpenProduct} onAdd={onAdd} onDecrease={onDecrease} />
+        <OfferRail title="Upgrade your order" note="Picked to go with this product." products={related.filter((item) => product.upsellIds?.includes(item.id))} cart={cart} accent={accent} onOpenProduct={onOpenProduct} onAdd={onAdd} onDecrease={onDecrease} />
+        <OfferRail title="Frequently bought together" note="Customers often order these together." products={related.filter((item) => product.crossSellIds?.includes(item.id) && !product.upsellIds?.includes(item.id))} cart={cart} accent={accent} onOpenProduct={onOpenProduct} onAdd={onAdd} onDecrease={onDecrease} />
         <OfferRail title="You may also like" products={related.filter((item) => !product.upsellIds?.includes(item.id) && !product.crossSellIds?.includes(item.id))} cart={cart} accent={accent} onOpenProduct={onOpenProduct} onAdd={onAdd} onDecrease={onDecrease} />
         </div>
         <div className="flex shrink-0 gap-3 border-t border-zinc-100 bg-white p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:p-4">
@@ -249,7 +246,7 @@ export function ProductDetailSheet({
             <button
               type="button"
               className="h-12 min-w-0 flex-1 rounded-2xl px-4 text-sm font-bold text-white shadow-sm transition active:scale-[0.98] disabled:bg-zinc-200 disabled:text-zinc-500"
-              style={product.inStock ? { backgroundColor: accent } : undefined}
+              style={product.inStock ? onAccent(accent) : undefined}
               disabled={!product.inStock}
               onClick={() => onAdd(product)}
             >

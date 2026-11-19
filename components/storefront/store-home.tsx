@@ -15,6 +15,7 @@ import type {
 } from "@/components/storefront/store-types";
 import { cn } from "@/lib/utils";
 import { ChevronLeft, ChevronRight, Pause, Play } from "lucide-react";
+import { onAccent } from "@/modules/storefront/config";
 
 function HeroSlider({
   slides,
@@ -200,7 +201,7 @@ function CategoryScroller({
                   "relative flex size-12 items-center justify-center overflow-hidden rounded-full border bg-white text-xs font-bold shadow-sm transition group-active:scale-95 sm:size-14 sm:text-sm lg:size-7 lg:text-[10px] lg:shadow-none",
                   active ? "text-white" : "border-zinc-100 text-zinc-700"
                 )}
-                style={active ? { backgroundColor: accent, borderColor: accent } : undefined}
+                style={active ? { ...onAccent(accent), borderColor: accent } : undefined}
               >
                 {category.id === "all" ? (
                   "•••"

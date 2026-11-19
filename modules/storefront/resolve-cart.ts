@@ -22,12 +22,13 @@ export async function resolveStoreCart(db: SupabaseClient, organizationId: strin
     if (!row || !row.active || row.store_visible === false) throw new AppError(ERROR_CODES.VALIDATION_ERROR, "A product is no longer available.");
     return row;
   };
-  const lines: ResolvedOrderLine[] = [];
+  const lines: Array<ResolvedOrderLine & { fromBundle?: boolean }> = [];
   function add(productId: string, quantity: number, unitPrice?: number) {
     const row = getProduct(productId);
     demand.set(productId, (demand.get(productId) ?? 0) + quantity);
     const line = resolveLineFromCatalog({ ...row, price: Number(row.price), cod_advance_percent: row.cod_advance_percent ?? 0 }, quantity);
-    lines.push({ ...line, ...(unitPrice === undefined ? {} : { unitPrice }) });
+    // Bundle lines carry their allocated price and never combine with coupons.
+    lines.push({ ...line, ...(unitPrice === undefined ? {} : { unitPrice, fromBundle: true }) });
   }
   for (const item of items) add(item.productId, item.quantity);
   const snapshots = bundles.map((bundle) => {

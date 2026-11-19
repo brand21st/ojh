@@ -63,6 +63,24 @@ export async function handleInventoryRoutes(
   method: string,
   slugs: string[]
 ) {
+  if (slugs[0] === "inventory" && slugs[1] === "coupons") {
+    const coupons = await import("@/modules/storefront/coupons/service");
+    const { couponInputSchema, couponRangeSchema, couponStatusPatchSchema } = await import("@/modules/storefront/coupons/schema");
+    if (slugs.length === 2) {
+      if (method === "GET") return coupons.listCoupons(supabase, ctx, couponRangeSchema.parse(request.nextUrl.searchParams.get("range") ?? undefined));
+      if (method === "POST") return coupons.createCoupon(supabase, ctx, couponInputSchema.parse(await request.json()));
+    }
+    const id = z.string().uuid().parse(slugs[2]);
+    if (slugs.length === 3) {
+      if (method === "PATCH") return coupons.updateCoupon(supabase, ctx, id, couponInputSchema.parse(await request.json()));
+      if (method === "DELETE") return coupons.deleteCoupon(supabase, ctx, id);
+    }
+    if (slugs.length === 4 && slugs[3] === "status" && method === "POST") {
+      return coupons.setCouponStatus(supabase, ctx, id, couponStatusPatchSchema.parse(await request.json()).status);
+    }
+    if (slugs.length === 4 && slugs[3] === "redemptions" && method === "GET") return coupons.listCouponRedemptions(supabase, ctx, id);
+    throw new AppError(ERROR_CODES.RESOURCE_NOT_FOUND, "Unknown coupon route.");
+  }
   if (key === "GET inventory/bundles") return listStoreBundles(supabase, ctx.organizationId);
   if (key === "POST inventory/bundles") return saveStoreBundle(supabase, ctx, null, bundleInputSchema.parse(await request.json()));
   if (slugs[0] === "inventory" && slugs[1] === "bundles" && slugs[2] && slugs.length === 3) {

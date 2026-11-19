@@ -67,6 +67,8 @@ export type StorePayload = {
   coverAutoplay?: boolean;
   categories: StoreCategory[];
   featuredProductIds: string[];
+  /** Auto-apply coupon banner; absent on older payloads and in the dashboard preview. */
+  promo?: { code: string; label: string; description: string | null; autoApply: boolean; prepaidOnly: boolean; endsAt: string | null } | null;
   products: {
     items: StoreProduct[];
     page: number;

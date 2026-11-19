@@ -31,3 +31,27 @@ export function contrastText(hex: string) {
   });
   return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722 > 0.179 ? "#18181b" : "#ffffff";
 }
+
+function luminance(hex: string) {
+  const [r, g, b] = [1, 3, 5].map((offset) => {
+    const n = parseInt(hex.slice(offset, offset + 2), 16) / 255;
+    return n <= 0.04045 ? n / 12.92 : ((n + 0.055) / 1.055) ** 2.4;
+  });
+  return r * 0.2126 + g * 0.7152 + b * 0.0722;
+}
+
+/** Accent background with whichever of white or near-black text reads best on it. */
+export function onAccent(hex: string) {
+  return { backgroundColor: hex, color: contrastText(hex) };
+}
+
+/** The accent, darkened only as much as needed to read as text on white (WCAG AA 4.5:1). */
+export function readableAccent(hex: string) {
+  if (!/^#[0-9a-f]{6}$/i.test(hex)) return "#18181b";
+  const base = [1, 3, 5].map((offset) => parseInt(hex.slice(offset, offset + 2), 16));
+  for (let factor = 1; factor > 0; factor -= 0.04) {
+    const candidate = `#${base.map((c) => Math.round(c * factor).toString(16).padStart(2, "0")).join("")}`;
+    if (1.05 / (luminance(candidate) + 0.05) >= 4.5) return candidate;
+  }
+  return "#18181b";
+}
