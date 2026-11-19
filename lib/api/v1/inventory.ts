@@ -20,6 +20,7 @@ import {
   updateProductSchema,
 } from "@/modules/products/schema";
 import { getInventoryAnalytics } from "@/modules/products/analytics";
+import { getInventoryOverview, inventoryOverviewQuery } from "@/modules/products/overview";
 import {
   createCategory,
   deleteCategory,
@@ -180,6 +181,14 @@ export async function handleInventoryRoutes(
       supabase,
       ctx,
       inventoryAnalyticsQuery.parse(Object.fromEntries(request.nextUrl.searchParams))
+    );
+  }
+
+  if (key === "GET inventory/overview") {
+    return getInventoryOverview(
+      supabase,
+      ctx,
+      inventoryOverviewQuery.parse(Object.fromEntries(request.nextUrl.searchParams))
     );
   }
 

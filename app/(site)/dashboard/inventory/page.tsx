@@ -26,9 +26,9 @@ export default function InventoryPage() {
   const me = useMe();
   const canWrite = hasPermission(me.data?.role ?? "VIEWER", "products.write");
   const tab = (TABS.includes(searchParams.get("tab") as Tab) ? searchParams.get("tab") : "overview") as Tab;
-  const range = (["today", "7d", "30d"].includes(searchParams.get("range") ?? "")
+  const range = (["today", "7d", "30d", "90d"].includes(searchParams.get("range") ?? "")
     ? searchParams.get("range")
-    : "30d") as "today" | "7d" | "30d";
+    : "30d") as "today" | "7d" | "30d" | "90d";
   const params = useMemo(() => new URLSearchParams(searchParams.toString()), [searchParams]);
 
   function setTab(next: string) {
