@@ -2,15 +2,17 @@
 
 import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { GripVertical, ImagePlus, Loader2, MoreHorizontal, Plus, X } from "lucide-react";
+import { GripVertical, ImagePlus, Loader2, MoreHorizontal, Plus, Search, X } from "lucide-react";
 import { toast } from "sonner";
 import { StoreImage } from "@/components/storefront/store-image";
+import { LineItemThumb } from "@/components/dashboard/line-item-thumb";
 import { SideSheet } from "@/components/dashboard/side-sheet";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
@@ -18,7 +20,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { api } from "@/lib/hooks/use-api";
+import { api, toSearchParams } from "@/lib/hooks/use-api";
 import { optimizeImageFile } from "@/lib/images/optimize-client";
 import type { Paginated, ProductRecord } from "@/types/api";
 
@@ -53,14 +55,27 @@ export function InventoryCategoriesManager({ canWrite }: { canWrite: boolean }) 
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [removeImageOnSave, setRemoveImageOnSave] = useState(false);
   const [imageBusy, setImageBusy] = useState<string | null>(null);
+  const [pickerQuery, setPickerQuery] = useState("");
+  const [pickerSearch, setPickerSearch] = useState("");
+  const pickerTimer = useRef<number | null>(null);
 
   const list = useQuery({
     queryKey: ["product-categories"],
     queryFn: () => api<Category[]>("/api/v1/inventory/categories"),
   });
+  // The picker searches server-side so catalogs larger than one page stay assignable.
   const products = useQuery({
-    queryKey: ["products", "category-picker"],
-    queryFn: () => api<Paginated<ProductRecord>>("/api/v1/products?page=1&pageSize=100&sort=nameAsc"),
+    queryKey: ["products", "category-picker", pickerSearch],
+    enabled: Boolean(draft),
+    queryFn: () =>
+      api<Paginated<ProductRecord>>(
+        `/api/v1/products?${toSearchParams({ page: 1, pageSize: 100, sort: "nameAsc", q: pickerSearch || undefined })}`
+      ),
+  });
+  const storefront = useQuery({
+    queryKey: ["inventory-storefront"],
+    queryFn: () => api<{ storeUrl: string }>("/api/v1/inventory/storefront"),
+    staleTime: 5 * 60_000,
   });
 
   async function uploadImage(id: string, file: File) {
@@ -91,14 +106,25 @@ export function InventoryCategoriesManager({ canWrite }: { canWrite: boolean }) 
               productIds: value.productIds,
             }),
           });
-      if (imageFile) return uploadImage(category.id, imageFile);
+      // Remember the new id so a retry after a failed image upload updates instead of duplicating.
+      if (!value.id) setDraft((current) => (current ? { ...current, id: category.id } : current));
+      if (imageFile) {
+        try {
+          return await uploadImage(category.id, imageFile);
+        } catch (error) {
+          await queryClient.invalidateQueries({ queryKey: ["product-categories"] });
+          throw new Error(
+            `Category saved, but the image did not upload (${error instanceof Error ? error.message : "unknown error"}). Save again to retry.`
+          );
+        }
+      }
       if (removeImageOnSave && value.id) {
         return api<Category>(`/api/v1/inventory/categories/${category.id}/image`, { method: "DELETE" });
       }
       return category;
     },
-    onSuccess: () => {
-      toast.success(draft?.id ? "Category updated." : "Category created.");
+    onSuccess: (_category, value) => {
+      toast.success(value.id ? "Category updated." : "Category created.");
       closeEditor();
       queryClient.invalidateQueries({ queryKey: ["product-categories"] });
     },
@@ -125,6 +151,8 @@ export function InventoryCategoriesManager({ canWrite }: { canWrite: boolean }) 
     setImageFile(null);
     setImagePreview(category?.imageUrl ?? null);
     setRemoveImageOnSave(false);
+    setPickerQuery("");
+    setPickerSearch("");
   }
 
   function closeEditor() {
@@ -136,14 +164,54 @@ export function InventoryCategoriesManager({ canWrite }: { canWrite: boolean }) 
   }
 
   async function persistOrder(ids: string[]) {
+    // Optimistic: show the new order immediately, then reconcile with the server.
+    queryClient.setQueryData<Category[]>(["product-categories"], (current) =>
+      current?.map((item) => ({ ...item, sortOrder: Math.max(0, ids.indexOf(item.id)) }))
+    );
     try {
       await api("/api/v1/inventory/categories/reorder", {
         method: "POST",
         body: JSON.stringify({ ids }),
       });
-      await queryClient.invalidateQueries({ queryKey: ["product-categories"] });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not reorder categories.");
+    } finally {
+      await queryClient.invalidateQueries({ queryKey: ["product-categories"] });
+    }
+  }
+
+  function moveCategory(from: number, to: number) {
+    if (to < 0 || to >= ordered.length || from === to) return;
+    const ids = ordered.map((item) => item.id);
+    const [moved] = ids.splice(from, 1);
+    ids.splice(to, 0, moved);
+    void persistOrder(ids);
+  }
+
+  async function toggleCategory(category: Category) {
+    try {
+      await api(`/api/v1/inventory/categories/${category.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ active: !category.active }),
+      });
+      toast.success(category.active ? `${category.name} is hidden from the store.` : `${category.name} is visible on the store.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not update the category.");
+    } finally {
+      await queryClient.invalidateQueries({ queryKey: ["product-categories"] });
+    }
+  }
+
+  async function deleteCategoryRow(category: Category) {
+    if (!window.confirm(`Delete ${category.name}? Products stay in the catalog. This cannot be undone.`)) return;
+    try {
+      await api(`/api/v1/inventory/categories/${category.id}`, { method: "DELETE" });
+      toast.success("Category deleted.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not delete the category.");
+    } finally {
+      await queryClient.invalidateQueries({ queryKey: ["product-categories"] });
+      await queryClient.invalidateQueries({ queryKey: ["products"] });
     }
   }
 
@@ -174,7 +242,11 @@ export function InventoryCategoriesManager({ canWrite }: { canWrite: boolean }) 
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h2 className="font-semibold text-ink">Store categories</h2>
-          <p className="text-sm text-muted">Drag categories to control their storefront order.</p>
+          <p className="text-sm text-muted">
+            {canWrite
+              ? "Drag cards, or use Move up / Move down, to set the storefront order."
+              : "Categories in the order they appear on your storefront."}
+          </p>
         </div>
         <div className="flex flex-wrap gap-2">
           {ordered.length > 1 && canWrite ? (
@@ -222,7 +294,7 @@ export function InventoryCategoriesManager({ canWrite }: { canWrite: boolean }) 
                 ids.splice(index, 0, moved);
                 void persistOrder(ids);
               }}
-              className="group overflow-hidden rounded-2xl border border-border bg-card shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+              className="group overflow-hidden rounded-2xl border border-border bg-card shadow-sm transition-shadow hover:shadow-md"
             >
               <div className="relative aspect-[16/7] bg-surface-soft">
                 <StoreImage src={category.imageUrl} alt={category.name} sizes="(max-width: 768px) 100vw, 33vw" />
@@ -232,12 +304,22 @@ export function InventoryCategoriesManager({ canWrite }: { canWrite: boolean }) 
               </div>
               <div className="flex items-start gap-3 p-4">
                 {canWrite ? (
-                  <button type="button" className="mt-0.5 cursor-grab text-muted active:cursor-grabbing" aria-label={`Drag ${category.name}`}>
+                  <span className="mt-0.5 cursor-grab text-muted active:cursor-grabbing" aria-hidden="true" title="Drag to reorder">
                     <GripVertical className="size-5" />
-                  </button>
+                  </span>
                 ) : null}
                 <div className="min-w-0 flex-1">
-                  <p className="truncate font-semibold text-ink">{category.name}</p>
+                  {canWrite ? (
+                    <button
+                      type="button"
+                      className="block max-w-full truncate text-left font-semibold text-ink hover:underline"
+                      onClick={() => openEditor(category)}
+                    >
+                      {category.name}
+                    </button>
+                  ) : (
+                    <p className="truncate font-semibold text-ink">{category.name}</p>
+                  )}
                   <p className="mt-0.5 text-sm text-muted">{category.productCount} {category.productCount === 1 ? "product" : "products"}</p>
                   {category.description ? <p className="mt-2 line-clamp-2 text-xs text-muted">{category.description}</p> : null}
                 </div>
@@ -250,22 +332,25 @@ export function InventoryCategoriesManager({ canWrite }: { canWrite: boolean }) 
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
                       <DropdownMenuItem onClick={() => openEditor(category)}>Edit</DropdownMenuItem>
-                      <DropdownMenuItem onClick={async () => {
-                        await api(`/api/v1/inventory/categories/${category.id}`, {
-                          method: "PATCH",
-                          body: JSON.stringify({ active: !category.active }),
-                        });
-                        await queryClient.invalidateQueries({ queryKey: ["product-categories"] });
-                      }}>
-                        {category.active ? "Hide" : "Show"}
+                      <DropdownMenuItem onClick={() => void toggleCategory(category)}>
+                        {category.active ? "Hide from store" : "Show on store"}
+                      </DropdownMenuItem>
+                      {category.active && storefront.data?.storeUrl ? (
+                        <DropdownMenuItem asChild>
+                          <a href={`${storefront.data.storeUrl}/category/${category.slug}`} target="_blank" rel="noreferrer">
+                            View on store
+                          </a>
+                        </DropdownMenuItem>
+                      ) : null}
+                      <DropdownMenuItem disabled={index === 0} onClick={() => moveCategory(index, index - 1)}>
+                        Move up
+                      </DropdownMenuItem>
+                      <DropdownMenuItem disabled={index === ordered.length - 1} onClick={() => moveCategory(index, index + 1)}>
+                        Move down
                       </DropdownMenuItem>
                       {category.imageUrl ? <DropdownMenuItem onClick={() => void removeImage(category)}>Remove image</DropdownMenuItem> : null}
-                      <DropdownMenuItem onClick={async () => {
-                        if (!window.confirm(`Delete ${category.name}? Products will remain in the catalog.`)) return;
-                        await api(`/api/v1/inventory/categories/${category.id}`, { method: "DELETE" });
-                        toast.success("Category deleted.");
-                        await queryClient.invalidateQueries({ queryKey: ["product-categories"] });
-                      }}>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem className="text-red-600 focus:text-red-600" onClick={() => void deleteCategoryRow(category)}>
                         Delete
                       </DropdownMenuItem>
                     </DropdownMenuContent>
@@ -366,8 +451,29 @@ export function InventoryCategoriesManager({ canWrite }: { canWrite: boolean }) 
             </section>
 
             <section>
-              <Label>Assigned products</Label>
-              <div className="mt-2 max-h-64 space-y-1 overflow-y-auto rounded-xl border border-border p-2">
+              <div className="flex items-center justify-between gap-2">
+                <Label htmlFor="category-product-search">Products</Label>
+                <span className="text-xs text-muted" aria-live="polite">
+                  {draft.productIds.length} selected
+                </span>
+              </div>
+              <div className="relative mt-2">
+                <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted" aria-hidden="true" />
+                <Input
+                  id="category-product-search"
+                  className="h-10 pl-9"
+                  placeholder="Search products or SKU"
+                  value={pickerQuery}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    setPickerQuery(value);
+                    if (pickerTimer.current) window.clearTimeout(pickerTimer.current);
+                    pickerTimer.current = window.setTimeout(() => setPickerSearch(value.trim()), 250);
+                  }}
+                />
+              </div>
+              <div className="mt-2 max-h-72 space-y-1 overflow-y-auto rounded-xl border border-border p-2">
+                {products.isLoading ? <p className="p-3 text-sm text-muted">Loading products…</p> : null}
                 {(products.data?.items ?? []).map((product) => {
                   const checked = draft.productIds.includes(product.id);
                   return (
@@ -382,12 +488,17 @@ export function InventoryCategoriesManager({ canWrite }: { canWrite: boolean }) 
                           setDraft({ ...draft, productIds: [...ids] });
                         }}
                       />
+                      <LineItemThumb title={product.name} imageUrl={product.imageUrls?.[0]} />
                       <span className="min-w-0 flex-1 truncate">{product.name}</span>
                       <span className="text-xs text-muted">{product.sku}</span>
                     </label>
                   );
                 })}
-                {!products.isLoading && !products.data?.items.length ? <p className="p-3 text-sm text-muted">Add products first, then assign them here.</p> : null}
+                {!products.isLoading && !products.data?.items.length ? (
+                  <p className="p-3 text-sm text-muted">
+                    {pickerSearch ? `No products match "${pickerSearch}".` : "Add products first, then assign them here."}
+                  </p>
+                ) : null}
               </div>
             </section>
           </div>
