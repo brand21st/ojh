@@ -8,6 +8,7 @@ import { storeHomePath } from "@/modules/storefront/footer";
 import { formatStorePrice } from "@/modules/storefront/pricing";
 import { formatOrderWindow, orderWindowRemaining, searchMatches, trendingProducts } from "@/modules/storefront/trending";
 import type { StorePayload, StoreProduct } from "@/components/storefront/store-types";
+import { onAccent } from "@/modules/storefront/config";
 
 export function StoreHeader({
   store,
@@ -78,7 +79,7 @@ export function StoreHeader({
               {count ? (
                 <span
                   className="absolute right-0.5 top-0.5 flex min-w-5 items-center justify-center rounded-full px-1 text-[10px] font-bold text-white"
-                  style={{ backgroundColor: store.accentColor }}
+                  style={onAccent(store.accentColor)}
                 >
                   {count > 99 ? "99+" : count}
                 </span>
@@ -145,6 +146,7 @@ export function StoreHeader({
                       <button
                         type="button"
                         role="option"
+                        aria-selected={false}
                         className="flex min-h-11 w-full items-center gap-2 rounded-xl px-2 text-left hover:bg-zinc-50"
                         onMouseDown={(event) => event.preventDefault()}
                         onClick={() => { setFocused(false); onOpenProduct?.(product); }}
@@ -175,7 +177,7 @@ export function StoreHeader({
             {count ? (
               <span
                 className="absolute right-0.5 top-0.5 flex min-w-5 items-center justify-center rounded-full px-1 text-[10px] font-bold text-white"
-                style={{ backgroundColor: store.accentColor }}
+                style={onAccent(store.accentColor)}
               >
                 {count > 99 ? "99+" : count}
               </span>

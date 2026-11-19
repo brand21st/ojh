@@ -6,6 +6,8 @@ import { StoreImage } from "@/components/storefront/store-image";
 import type { CartLine, StoreProduct } from "@/components/storefront/store-types";
 import { formatStorePrice } from "@/modules/storefront/pricing";
 import { formatOrderWindow, orderWindowRemaining } from "@/modules/storefront/trending";
+import { useDialogFocus } from "@/components/storefront/use-dialog-focus";
+import { onAccent, readableAccent } from "@/modules/storefront/config";
 
 export function CartSheet({
   cart,
@@ -39,6 +41,8 @@ export function CartSheet({
   onUngroup?: (productId: string) => void;
 }) {
   const [windowLeft, setWindowLeft] = useState<number | null>(null);
+  // Escape closes the cart, but never checkout: that would discard the typed address.
+  const dialogRef = useDialogFocus<HTMLDivElement>(() => { if (!checkout) onClose(); }, checkout ? "checkout" : "cart");
   useEffect(() => {
     const tick = () => setWindowLeft(orderWindowRemaining());
     tick();
@@ -65,6 +69,7 @@ export function CartSheet({
   if (checkout) {
     return (
       <div
+        ref={dialogRef}
         className="fixed inset-0 z-50 flex h-dvh min-h-0 w-full flex-col bg-white"
         role="dialog"
         aria-modal="true"
@@ -88,8 +93,8 @@ export function CartSheet({
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/45 backdrop-blur-[2px]" role="dialog" aria-modal="true" aria-label="Your cart">
-      <button className="absolute inset-0 cursor-default" type="button" onClick={onClose} aria-label="Close cart" />
+    <div ref={dialogRef} className="fixed inset-0 z-50 bg-black/45 backdrop-blur-[2px]" role="dialog" aria-modal="true" aria-label="Your cart">
+      <button className="absolute inset-0 cursor-default" type="button" tabIndex={-1} onClick={onClose} aria-label="Close cart" />
       <section className="absolute inset-x-0 bottom-0 flex max-h-[94dvh] w-full flex-col rounded-t-[1.75rem] bg-white shadow-2xl sm:inset-y-0 sm:left-auto sm:right-0 sm:w-[min(100%,440px)] sm:max-h-none sm:rounded-none">
         <header className="flex shrink-0 items-center gap-1 border-b border-zinc-100 px-3 py-2.5 sm:gap-2 sm:px-4 sm:py-3">
           <span className="flex size-11 items-center justify-center rounded-full bg-zinc-100">
@@ -99,7 +104,7 @@ export function CartSheet({
             <h2 className="font-bold">Your cart</h2>
             <p className="text-xs text-zinc-500">{cart.reduce((sum, line) => sum + line.quantity, 0)} items</p>
           </div>
-          <button type="button" className="flex size-11 items-center justify-center rounded-full hover:bg-zinc-100" onClick={onClose} aria-label="Close">
+          <button type="button" className="flex size-11 items-center justify-center rounded-full hover:bg-zinc-100" onClick={onClose} aria-label="Close" data-autofocus>
             <X className="size-5" />
           </button>
         </header>
@@ -121,12 +126,12 @@ export function CartSheet({
                         <p className="truncate text-sm font-semibold">{product.name}</p>
                         <p className="text-xs font-bold">{formatStorePrice(product.price)}</p>
                       </div>
-                      <button type="button" className="h-10 rounded-xl px-3 text-xs font-bold text-white" style={{ backgroundColor: accent }} onClick={() => onAdd(product)}>Add</button>
+                      <button type="button" className="h-10 rounded-xl px-3 text-xs font-bold text-white" style={onAccent(accent)} onClick={() => onAdd(product)}>Add</button>
                     </div>
                   ))}
                 </div>
               ) : (
-                <button type="button" className="mt-5 h-11 rounded-2xl px-6 text-sm font-bold text-white" style={{ backgroundColor: accent }} onClick={onClose}>Continue shopping</button>
+                <button type="button" className="mt-5 h-11 rounded-2xl px-6 text-sm font-bold text-white" style={onAccent(accent)} onClick={onClose}>Continue shopping</button>
               )}
             </div>
           ) : (
@@ -141,7 +146,7 @@ export function CartSheet({
                       <div className="flex items-start gap-2">
                         <div className="min-w-0 flex-1">
                           <h3 className="line-clamp-2 text-sm font-semibold">{line.product.name}</h3>
-                          {line.bundle ? <div className="my-1 text-xs text-zinc-500"><p>{line.bundle.components.map((item) => `${item.quantity} x ${item.product.name}`).join(" + ")}</p><button className="mt-1 underline" onClick={() => onUngroup?.(line.product.id)}>Edit items (removes bundle discount)</button></div> : null}
+                          {line.bundle ? <div className="my-1 text-xs text-zinc-500"><p>{line.bundle.components.map((item) => `${item.quantity} x ${item.product.name}`).join(" + ")}</p><button type="button" className="mt-1 underline" onClick={() => onUngroup?.(line.product.id)}>Edit items (removes bundle discount)</button></div> : null}
                           <p className="mt-1 text-sm font-bold">{formatStorePrice(line.product.price)}</p>
                           {line.product.onHand > 0 && line.product.onHand <= (line.product.lowStockThreshold ?? 5) ? <p className="text-xs font-medium text-amber-700">Only {line.product.onHand} left</p> : null}
                         </div>
@@ -175,7 +180,7 @@ export function CartSheet({
               {!checkout && recommendations.length ? (
                 <section className="mt-6">
                   <h3 className="font-bold">Customers also add</h3>
-                  <p className="mt-0.5 text-xs text-zinc-500">Cross-sells at their current price.</p>
+                  <p className="mt-0.5 text-xs text-zinc-500">Popular with the items in your cart.</p>
                   <div className="mt-3 space-y-2">
                     {recommendations.slice(0, 3).map((product) => (
                       <div key={product.id} className="flex items-center gap-3 rounded-2xl bg-zinc-50 p-2">
@@ -189,7 +194,7 @@ export function CartSheet({
                         <button
                           type="button"
                           className="h-10 rounded-xl border bg-white px-3 text-xs font-bold active:scale-95"
-                          style={{ borderColor: accent, color: accent }}
+                          style={{ borderColor: readableAccent(accent), color: readableAccent(accent) }}
                           onClick={() => onAdd(product)}
                         >
                           + Add
@@ -240,7 +245,7 @@ export function CartSheet({
             <button
               type="button"
               className="h-12 w-full rounded-2xl text-sm font-bold text-white shadow-sm transition active:scale-[0.99]"
-              style={{ backgroundColor: accent }}
+              style={onAccent(accent)}
               onClick={onCheckout}
             >
               Proceed to checkout · {formatStorePrice(subtotal)}

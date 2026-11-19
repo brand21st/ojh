@@ -5,27 +5,24 @@ import dynamic from "next/dynamic";
 import { MarketplaceHome, EMPTY_FILTERS, type CatalogFilters } from "./marketplace-home";
 import { MarketplaceProduct } from "./marketplace-product";
 import marketStyles from "./marketplace.module.css";
-import { contrastText } from "@/modules/storefront/config";
+import { contrastText, onAccent, readableAccent } from "@/modules/storefront/config";
 import { bundleCartLine, cartRequest, ungroupBundle } from "@/modules/storefront/cart";
 import { commerceEvent, emitStoreEvent } from "@/modules/storefront/tracking-events";
 import { StoreTracking } from "./store-tracking";
+import { CouponBanner, CouponField, type QuoteCoupon } from "./coupon-field";
+import { useStoreCoupon } from "./coupon-storage";
+import { FastCheckoutDetails, checkoutSchema, rememberBuyerPhone, rememberedBuyerPhone, useFastCheckout, type CheckoutValues } from "./fast-checkout";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Check, ShoppingBag } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import { Controller, useForm, useWatch } from "react-hook-form";
-import { z } from "zod";
+import { useForm, useWatch } from "react-hook-form";
 import { StoreOrderSuccess, type StoreOrderReceipt } from "@/components/storefront/order-success";
 import { StoreHome } from "@/components/storefront/store-home";
-import { StorePincodeLookup } from "@/components/storefront/store-pincode-lookup";
 import { StoreSkeleton } from "@/components/storefront/store-skeleton";
 import type { CartLine, StorePayload, StoreProduct, StoreBundle } from "@/components/storefront/store-types";
-import { IndiaWhatsappField } from "@/components/auth/india-whatsapp-field";
 import { Button } from "@/components/ui/button";
-import { Combobox } from "@/components/ui/combobox";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { api } from "@/lib/hooks/use-api";
-import { DEFAULT_INDIAN_STATE, INDIAN_STATE_OPTIONS } from "@/lib/indian-states";
+import { DEFAULT_INDIAN_STATE } from "@/lib/indian-states";
 import { extractIndiaMobileDigits } from "@/lib/phone/india-whatsapp";
 import { publicOrderLinkApiPath } from "@/modules/customer-order-links/schema";
 import { formatStorePrice } from "@/modules/storefront/pricing";
@@ -33,18 +30,6 @@ import { returnPolicyLabel, summarizeReturnPolicy } from "@/modules/products/ret
 import { pickStoreRecommendations } from "@/modules/storefront/recommendations";
 import { trendingProducts } from "@/modules/storefront/trending";
 
-const checkoutSchema = z.object({
-  customerName: z.string().trim().min(2, "Enter your full name."),
-  phone: z.string().trim().refine((value) => extractIndiaMobileDigits(value) !== null, "Enter a valid 10-digit mobile number."),
-  line1: z.string().trim().min(3, "Enter your delivery address."),
-  line2: z.string().trim().optional(),
-  city: z.string().trim().min(2, "Enter your city."),
-  state: z.string().trim().min(2, "Select your state."),
-  pincode: z.string().trim().regex(/^\d{6}$/, "Enter a valid 6-digit PIN code."),
-  paymentPreference: z.enum(["PREPAID", "COD"]).optional(),
-});
-
-type CheckoutValues = z.infer<typeof checkoutSchema> & { quoteVersion?: string };
 type StoreRef = { workspace?: string; publicId?: string; token?: string };
 const CartSheet = dynamic(() => import("./cart-sheet").then((m) => m.CartSheet));
 const ProductDetailSheet = dynamic(() => import("./product-detail-sheet").then((m) => m.ProductDetailSheet));
@@ -89,6 +74,7 @@ export function StoreApp({
   const [urlReady, setUrlReady] = useState(false);
   const browseUrl = useRef<string | null>(null);
   const browseScroll = useRef(0);
+  const browseTitle = useRef<string | null>(null);
   const pushedProduct = useRef(false);
   const onProductPath = useRef(false);
   const [categoryId, setCategoryId] = useState<string | "all">(initialCategoryId);
@@ -106,6 +92,9 @@ export function StoreApp({
   const dismissReceipt = useCallback(() => setOrderReceipt(null), []);
   const apiRef = useMemo(() => ({ workspace, publicId, token }), [workspace, publicId, token]);
   const workspaceKey = workspace || initialStore?.workspace || preview?.workspace || "preview";
+  // Coupon chosen by the shopper (typed or from a ?discount= magic link), remembered per store.
+  const storeCoupon = useStoreCoupon(workspaceKey);
+  const [promoDismissed, setPromoDismissed] = useState(false);
   useEffect(() => {
     if (isPreview) return;
     const read = () => {
@@ -113,10 +102,13 @@ export function StoreApp({
       const nextOnProduct = window.location.pathname.includes("/products/");
       setQuery(params.get("q") ?? "");
       setCategoryId(params.get("category") ?? initialCategoryId);
-      setFilters({ sort: params.get("sort") ?? "newest", priceMin: params.get("priceMin") ?? "", priceMax: params.get("priceMax") ?? "", inStock: params.get("inStock") === "true" });
+      const nextFilters = { sort: params.get("sort") ?? "newest", priceMin: params.get("priceMin") ?? "", priceMax: params.get("priceMax") ?? "", inStock: params.get("inStock") === "true" };
+      // Keep the same object when nothing changed so closing a product doesn't refetch the catalog.
+      setFilters((current) => (JSON.stringify(current) === JSON.stringify(nextFilters) ? current : nextFilters));
       if (onProductPath.current && !nextOnProduct) {
         pushedProduct.current = false;
         setProduct(null);
+        if (browseTitle.current) document.title = browseTitle.current;
         const y = browseScroll.current;
         requestAnimationFrame(() => window.scrollTo(0, y));
       }
@@ -277,6 +269,7 @@ export function StoreApp({
   function closeProduct() {
     setProduct(null);
     if (isPreview) return;
+    if (store) document.title = browseTitle.current ?? `${store.seoTitle || `${store.storeName} · Shop`} · PostBus`;
     const y = browseScroll.current;
     if (pushedProduct.current) {
       pushedProduct.current = false;
@@ -290,7 +283,12 @@ export function StoreApp({
   }
 
   function openProduct(next: StoreProduct) {
-    if (!isPreview && !product) { browseUrl.current = window.location.href; browseScroll.current = window.scrollY; }
+    if (!isPreview && !product) {
+      browseUrl.current = window.location.href;
+      browseScroll.current = window.scrollY;
+      if (!window.location.pathname.includes("/products/")) browseTitle.current = document.title;
+    }
+    if (!isPreview && store) document.title = `${next.name} · ${store.storeName} · PostBus`;
     if (!isPreview && next.slug && !window.location.pathname.endsWith(`/products/${next.slug}`)) {
       const url = `/store/${workspaceKey}/products/${next.slug}`;
       if (product || window.location.pathname.includes("/products/")) window.history.replaceState({ storefrontProduct: next.slug }, "", url);
@@ -449,8 +447,22 @@ export function StoreApp({
     { categoryIds: product?.categoryIds, excludeId: product?.id, limit: 8 }
   );
 
+  const bannerCoupon = storeCoupon.coupon?.label
+    ? { code: storeCoupon.coupon.code, label: storeCoupon.coupon.label, description: null }
+    : store.promo && !storeCoupon.skipAuto
+      ? { code: store.promo.code, label: store.promo.label, description: store.promo.description }
+      : null;
+
   return (
     <div className={store.marketplace ? marketStyles.store : undefined} data-font={store.theme?.font ?? "geist"} style={store.marketplace ? { "--accent": store.accentColor, "--accent-text": contrastText(store.accentColor), "--secondary": store.theme?.secondaryColor, paddingBottom: product ? 0 : count ? 80 : 0 } as CSSProperties : undefined}>
+      {storeCoupon.notice?.tone === "error" ? (
+        <div role="alert" className="flex items-center justify-center gap-2 bg-zinc-900 px-4 py-2 text-center text-xs text-white sm:text-sm">
+          <span>{storeCoupon.notice.text}</span>
+          <button type="button" className="underline underline-offset-2" onClick={storeCoupon.dismissNotice}>Dismiss</button>
+        </div>
+      ) : bannerCoupon && !promoDismissed && !product ? (
+        <CouponBanner {...bannerCoupon} accentColor={store.accentColor} onDismiss={() => setPromoDismissed(true)} />
+      ) : null}
       {store.marketplace ? <MarketplaceHome store={store} cart={cart} query={query} categoryId={categoryId} searching={searching} filters={filters} onFilters={setFilters} onQueryChange={(value) => { setQuery(value); if (product) { pushedProduct.current = false; onProductPath.current = false; setProduct(null); } }} onCategoryChange={setCategoryId} onOpenCart={openCart} onOpenProduct={openProduct} onAdd={addToCart} onDecrease={decrease} onLoadMore={() => void loadMore()} onBundle={addBundle} onHome={closeProduct} onCoverEvent={(type, slideId) => {
           if (type === "COVER_IMPRESSION") {
             if (seenCovers.current.has(slideId)) return;
@@ -486,14 +498,14 @@ export function StoreApp({
             className="mx-auto flex h-12 w-full max-w-xl items-center gap-2 rounded-2xl bg-white px-2 text-left shadow-[0_12px_40px_rgba(0,0,0,0.22)] ring-1 ring-zinc-200 transition active:scale-[0.99] sm:h-14 sm:gap-3 sm:px-3 lg:mx-0 lg:max-w-none"
             onClick={openCart}
           >
-            <span className="flex size-9 shrink-0 items-center justify-center rounded-xl text-white sm:size-11" style={{ backgroundColor: store.accentColor }}>
+            <span className="flex size-9 shrink-0 items-center justify-center rounded-xl text-white sm:size-11" style={onAccent(store.accentColor)}>
               <ShoppingBag className="size-4 sm:size-5" />
             </span>
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[11px] text-zinc-500 sm:text-xs">{count} {count === 1 ? "item" : "items"}</span>
               <span className="block truncate text-sm font-bold sm:text-base">{formatStorePrice(total)}</span>
             </span>
-            <span className="shrink-0 rounded-xl px-2.5 py-2 text-xs font-bold text-white sm:px-4 sm:py-2.5 sm:text-sm" style={{ backgroundColor: store.accentColor }}>
+            <span className="shrink-0 rounded-xl px-2.5 py-2 text-xs font-bold text-white sm:px-4 sm:py-2.5 sm:text-sm" style={onAccent(store.accentColor)}>
               Cart
             </span>
           </button>
@@ -525,12 +537,21 @@ export function StoreApp({
           checkoutForm={
             <CheckoutForm
               apiRef={apiRef}
+              workspace={workspaceKey}
+              accent={store.accentColor}
               preview={isPreview}
               cart={cart}
               submitting={submitting}
               error={submitError}
               step={checkoutStep}
               onStepChange={setCheckoutStep}
+              couponCode={storeCoupon.coupon?.code ?? null}
+              skipAutoCoupon={storeCoupon.skipAuto}
+              onCouponApply={(code) => {
+                storeCoupon.skipAutomatic(false);
+                storeCoupon.apply(code, null);
+              }}
+              onCouponRemove={(automatic) => (automatic ? storeCoupon.skipAutomatic(true) : storeCoupon.clear())}
               onSubmit={async (values) => {
                 const path = publicOrderLinkApiPath(apiRef, "submit");
                 if (!path) {
@@ -556,13 +577,19 @@ export function StoreApp({
                       ...values,
                       clientRequestId: submissionId(),
                       ...cartRequest(cart),
+                      couponCode: storeCoupon.coupon?.code ?? null,
+                      skipAutoCoupon: storeCoupon.skipAuto,
                     }),
                   });
                   sessionStorage.removeItem(`postbus-store-submit:${workspaceKey}`);
                   submissionIdRef.current = null;
+                  if (values.saveAddress) rememberBuyerPhone(workspaceKey, extractIndiaMobileDigits(values.phone));
                   setCart([]);
                   setSheet(null);
                   setCheckoutStep("details");
+                  // A coupon is used once per order; the next visit starts clean.
+                  storeCoupon.clear();
+                  storeCoupon.skipAutomatic(false);
                   setOrderReceipt({
                     orderNumber: result.orderNumber ?? "",
                     total: Number(result.total ?? 0),
@@ -610,12 +637,10 @@ export function StoreApp({
   );
 }
 
-function FieldError({ message }: { message?: string }) {
-  return message ? <p className="mt-1 text-xs text-red-600">{message}</p> : null;
-}
-
 function CheckoutForm({
   apiRef,
+  workspace,
+  accent,
   preview = false,
   cart,
   submitting,
@@ -623,8 +648,18 @@ function CheckoutForm({
   step,
   onStepChange,
   onSubmit,
+  couponCode = null,
+  skipAutoCoupon = false,
+  onCouponApply,
+  onCouponRemove,
 }: {
+  couponCode?: string | null;
+  skipAutoCoupon?: boolean;
+  onCouponApply?: (code: string) => void;
+  onCouponRemove?: (automatic: boolean) => void;
   apiRef: StoreRef;
+  workspace: string;
+  accent: string;
   preview?: boolean;
   cart: CartLine[];
   submitting: boolean;
@@ -637,52 +672,68 @@ function CheckoutForm({
     resolver: zodResolver(checkoutSchema),
     defaultValues: {
       customerName: "",
-      phone: "",
+      // Checkout only renders in the browser, so the remembered number is safe to read here.
+      phone: preview ? "" : rememberedBuyerPhone(workspace),
       line1: "",
       line2: "",
       city: "",
       state: DEFAULT_INDIAN_STATE,
       pincode: "",
       paymentPreference: cart.every((line) => line.product.codEnabled) ? "COD" : "PREPAID",
+      saveAddress: true,
     },
   });
-  const pincode = useWatch({ control: form.control, name: "pincode" });
-  const resolvePincode = useCallback(
-    (city: string, state: string) => {
-      if (city && form.getValues("city").trim() !== city) {
-        form.setValue("city", city, { shouldDirty: true, shouldValidate: true });
-      }
-      if (state && form.getValues("state") !== state) {
-        form.setValue("state", state, { shouldDirty: true, shouldValidate: true });
-      }
-    },
-    [form]
-  );
+  const buyer = useFastCheckout({ form, apiRef, preview, workspace });
   const prepaid = cart.every((line) => line.product.prepaidEnabled);
   const cod = cart.every((line) => line.product.codEnabled);
   const preference = useWatch({ control: form.control, name: "paymentPreference" }) ?? (cod ? "COD" : "PREPAID");
   const productAmount = cart.reduce((sum, line) => sum + line.product.price * line.quantity, 0);
   const returns = summarizeReturnPolicy(cart.map((line) => line.product.returnAvailable !== false));
+  // Set by the explicit Apply action so only that quote counts toward the coupon funnel.
+  const trackApply = useRef(false);
+  const [couponError, setCouponError] = useState<string | null>(null);
   const quote = useQuery({
-    queryKey: ["store-quote", apiRef, preference, cart.map((line) => `${line.product.id}:${line.quantity}`).join(",")],
+    queryKey: ["store-quote", apiRef, preference, cart.map((line) => `${line.product.id}:${line.quantity}`).join(","), couponCode, skipAutoCoupon],
     enabled: !preview && Boolean(cart.length && (preference === "PREPAID" || preference === "COD") && (prepaid || cod)),
-    queryFn: () =>
-      api<{ total: number; amountDueNow: number; amountOnDelivery: number; expectedAdvance: number; quoteVersion: string }>(
-        "/api/v1/public/store/quote",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            workspace: apiRef.workspace,
-            code: apiRef.publicId,
-            token: apiRef.token,
-            paymentPreference: preference,
-            ...cartRequest(cart),
-          }),
-        }
-      ),
+    queryFn: async () => {
+      const track = trackApply.current;
+      trackApply.current = false;
+      const result = await api<{
+        total: number;
+        subtotal?: number;
+        discount?: number;
+        amountDueNow: number;
+        amountOnDelivery: number;
+        expectedAdvance: number;
+        quoteVersion: string;
+        coupon?: QuoteCoupon | null;
+        couponError?: string | null;
+      }>("/api/v1/public/store/quote", {
+        method: "POST",
+        body: JSON.stringify({
+          workspace: apiRef.workspace,
+          code: apiRef.publicId,
+          token: apiRef.token,
+          paymentPreference: preference,
+          ...cartRequest(cart),
+          couponCode,
+          skipAutoCoupon,
+          trackCouponApply: track,
+        }),
+      });
+      // A typed code that doesn't fit this cart is dropped so it can't block the order; the reason stays visible.
+      if (result.couponError && couponCode) {
+        setCouponError(result.couponError);
+        onCouponRemove?.(false);
+      }
+      return result;
+    },
   });
+  const quotedCoupon = quote.data?.coupon ?? null;
+
   const watchedName = useWatch({ control: form.control, name: "customerName" });
   const watchedPhone = useWatch({ control: form.control, name: "phone" });
+  const watchedAddress = useWatch({ control: form.control, name: ["line1", "city", "pincode"] });
   const detailsDone = step === "summary";
   const phoneDigits = extractIndiaMobileDigits(watchedPhone ?? "") ?? "";
 
@@ -690,7 +741,13 @@ function CheckoutForm({
     <form
       data-clarity-mask="true"
       className="flex min-h-0 min-w-0 flex-1 flex-col"
-      onSubmit={form.handleSubmit(async (values) => {
+      onSubmit={(event) => {
+        if (step === "details" && buyer.needsVerification) {
+          event.preventDefault();
+          buyer.continueVerification();
+          return;
+        }
+        return form.handleSubmit(async (values) => {
         if (step !== "summary") {
           onStepChange("summary");
           return;
@@ -700,7 +757,8 @@ function CheckoutForm({
         if (!fresh.data || fresh.error) return;
         if (fresh.data.quoteVersion !== quote.data?.quoteVersion) { form.setError("root", { message: "Prices changed. Review the updated total and place your order again." }); return; }
         await onSubmit({ ...values, quoteVersion: fresh.data.quoteVersion });
-      })}
+      })(event);
+      }}
       noValidate
     >
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain px-4 py-4 [scrollbar-width:none] md:px-6 md:py-5 [&::-webkit-scrollbar]:hidden">
@@ -708,13 +766,12 @@ function CheckoutForm({
           <li className="flex gap-3" aria-current={step === "details" ? "step" : undefined}>
             <div className="flex w-7 shrink-0 flex-col items-center">
               <span
-                className={`relative z-10 flex size-7 items-center justify-center rounded-full border text-xs font-semibold ${
-                  detailsDone ? "border-brand bg-brand text-white" : "border-brand bg-white text-brand"
-                }`}
+                className="relative z-10 flex size-7 items-center justify-center rounded-full border text-xs font-semibold"
+                style={detailsDone ? { ...onAccent(accent), borderColor: accent } : { borderColor: readableAccent(accent), color: readableAccent(accent), backgroundColor: "#fff" }}
               >
                 {detailsDone ? <Check className="size-3.5" aria-hidden="true" /> : "1"}
               </span>
-              <span className={`mt-1 w-px flex-1 min-h-6 ${detailsDone ? "bg-brand/40" : "bg-zinc-200"}`} aria-hidden="true" />
+              <span className="mt-1 w-px flex-1 min-h-6 bg-zinc-200" style={detailsDone ? { backgroundColor: accent, opacity: 0.4 } : undefined} aria-hidden="true" />
             </div>
             <div className="min-w-0 flex-1 pb-6">
               {detailsDone ? (
@@ -723,58 +780,22 @@ function CheckoutForm({
                   <p className="mt-1 truncate text-sm text-zinc-700">
                     {[watchedName?.trim(), phoneDigits ? `+91 ${phoneDigits}` : null].filter(Boolean).join(" · ")}
                   </p>
+                  <p className="mt-0.5 truncate text-sm text-zinc-500">{[watchedAddress[0], watchedAddress[1], watchedAddress[2]].filter(Boolean).join(", ")}</p>
                 </button>
               ) : (
-                <div className="space-y-5">
-                  <section className="space-y-3">
-                    <h3 className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-500">Customer details</h3>
-                    <div>
-                      <Label htmlFor="customer-name">Full name</Label>
-                      <Input id="customer-name" className="mt-1 h-11" autoComplete="name" {...form.register("customerName")} />
-                      <FieldError message={form.formState.errors.customerName?.message} />
-                    </div>
-                    <div>
-                      <IndiaWhatsappField control={form.control} name="phone" />
-                      <FieldError message={form.formState.errors.phone?.message} />
-                    </div>
-                  </section>
-                  <section className="space-y-3">
-                    <h3 className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-500">Delivery address</h3>
-                    <div>
-                      <Label htmlFor="delivery-address">Address</Label>
-                      <Input id="delivery-address" className="mt-1 h-11" autoComplete="street-address" {...form.register("line1")} />
-                      <FieldError message={form.formState.errors.line1?.message} />
-                    </div>
-                    <div>
-                      <Label htmlFor="delivery-area">Area / locality</Label>
-                      <Input id="delivery-area" className="mt-1 h-11" {...form.register("line2")} />
-                      <FieldError message={form.formState.errors.line2?.message} />
-                    </div>
-                    <div className="grid grid-cols-1 gap-3 min-[380px]:grid-cols-2">
-                      <div>
-                        <Label htmlFor="delivery-pincode">PIN code</Label>
-                        <Input id="delivery-pincode" className="mt-1 h-11" inputMode="numeric" autoComplete="postal-code" maxLength={6} {...form.register("pincode")} />
-                        <FieldError message={form.formState.errors.pincode?.message} />
-                      </div>
-                      <div>
-                        <Label htmlFor="delivery-city">City</Label>
-                        <Input id="delivery-city" className="mt-1 h-11" autoComplete="address-level2" {...form.register("city")} />
-                        <FieldError message={form.formState.errors.city?.message} />
-                      </div>
-                    </div>
-                    <StorePincodeLookup linkRef={apiRef} pincode={pincode} onResolve={resolvePincode} />
-                    <div>
-                      <Label>State</Label>
-                      <Controller
-                        control={form.control}
-                        name="state"
-                        render={({ field }) => (
-                          <Combobox className="mt-1" options={INDIAN_STATE_OPTIONS} value={field.value} onChange={field.onChange} />
-                        )}
-                      />
-                      <FieldError message={form.formState.errors.state?.message} />
-                    </div>
-                  </section>
+                <div className="space-y-3">
+                  <h3 className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-500">Contact and delivery</h3>
+                  <FastCheckoutDetails
+                    form={form}
+                    buyer={buyer}
+                    apiRef={apiRef}
+                    accent={accent}
+                    onPhoneReset={() => {
+                      rememberBuyerPhone(workspace, null);
+                      form.setValue("phone", "");
+                      requestAnimationFrame(() => document.getElementById("customer-phone")?.focus());
+                    }}
+                  />
                 </div>
               )}
             </div>
@@ -783,8 +804,9 @@ function CheckoutForm({
             <div className="flex w-7 shrink-0 flex-col items-center">
               <span
                 className={`relative z-10 flex size-7 items-center justify-center rounded-full border text-xs font-semibold ${
-                  step === "summary" ? "border-brand bg-white text-brand" : "border-zinc-200 bg-zinc-50 text-zinc-400"
+                  step === "summary" ? "bg-white" : "border-zinc-200 bg-zinc-50 text-zinc-400"
                 }`}
+                style={step === "summary" ? { borderColor: readableAccent(accent), color: readableAccent(accent) } : undefined}
               >
                 2
               </span>
@@ -840,11 +862,36 @@ function CheckoutForm({
                           </label>
                         ) : null}
                       </div>
+                      {!preview && onCouponApply ? (
+                        <div className="mt-3">
+                          <CouponField
+                            coupon={quotedCoupon}
+                            error={couponError}
+                            pending={quote.isFetching}
+                            accentColor={readableAccent(accent)}
+                            onApply={(code) => {
+                              setCouponError(null);
+                              trackApply.current = true;
+                              onCouponApply(code);
+                            }}
+                            onRemove={() => {
+                              setCouponError(null);
+                              onCouponRemove?.(quotedCoupon?.automatic ?? false);
+                            }}
+                          />
+                        </div>
+                      ) : null}
                       <dl className="mt-3 min-w-0 space-y-1.5 rounded-xl bg-white p-3 text-sm">
                         <div className="flex min-w-0 justify-between gap-3">
                           <dt className="min-w-0 text-zinc-500">Product amount</dt>
-                          <dd className="shrink-0 font-semibold tabular-nums">{formatStorePrice(quote.data?.total ?? productAmount)}</dd>
+                          <dd className="shrink-0 font-semibold tabular-nums">{formatStorePrice(quotedCoupon?.applied ? quotedCoupon.subtotal : (quote.data?.total ?? productAmount))}</dd>
                         </div>
+                        {quotedCoupon?.applied ? (
+                          <div className="flex min-w-0 justify-between gap-3 text-emerald-700">
+                            <dt className="min-w-0">Coupon <span className="font-mono">{quotedCoupon.code}</span></dt>
+                            <dd className="shrink-0 font-semibold tabular-nums">−{formatStorePrice(quotedCoupon.discount)}</dd>
+                          </div>
+                        ) : null}
                         <div className="flex min-w-0 justify-between gap-3">
                           <dt className="min-w-0 text-zinc-500">Advance payment</dt>
                           <dd className="shrink-0 font-semibold tabular-nums">
@@ -901,10 +948,11 @@ function CheckoutForm({
           {quote.error || form.formState.errors.root ? <p role="alert" className="mb-2 text-sm text-red-600">{quote.error?.message ?? form.formState.errors.root?.message}</p> : null}
           <Button
             type="submit"
-            className="h-12 w-full rounded-2xl"
+            className="h-12 w-full rounded-2xl hover:brightness-95 disabled:bg-zinc-200 disabled:text-zinc-500"
+            style={submitting || !cart.length ? undefined : onAccent(accent)}
             disabled={submitting || !cart.length || (step === "summary" && (preview || quote.isFetching || quote.isError || !quote.data || (!prepaid && !cod)))}
           >
-            {step === "summary" ? (submitting ? "Placing order…" : "Place order") : "Next"}
+            {step === "summary" ? (submitting ? "Placing order…" : "Place order") : buyer.selected ? "Deliver to this address" : buyer.needsVerification ? (buyer.codeSentTo ? "Enter the code to continue" : "Send WhatsApp code") : "Next"}
           </Button>
         </div>
       </div>

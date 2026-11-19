@@ -116,6 +116,10 @@ export const customerOrderLinkListQuery = z.object({
 
 export const submitCustomerOrderLinkSchema = z.object({
   bundles: bundleSelectionSchema.optional(),
+  couponCode: z.string().trim().max(40).optional().nullable(),
+  skipAutoCoupon: z.boolean().optional(),
+  // Save this delivery address for faster checkout next time (storefront fast checkout).
+  saveAddress: z.boolean().optional(),
   quoteVersion: z.string().regex(/^[a-f0-9]{64}$/).optional(),
   customerName: z.string().trim().min(2, "Name is required."),
   phone: z

@@ -4,6 +4,7 @@ import { apiRouteWithContext } from "@/lib/api/handler";
 import { rateLimit } from "@/lib/security/rate-limit";
 import { createAdminClient, hasAdminClient } from "@/lib/supabase/admin";
 import { submitPublicCustomerOrderLink } from "@/modules/customer-order-links/public";
+import { respondWithRememberedBuyer } from "@/modules/storefront/buyer-route";
 import {
   publicOrderLinkPathQuery,
   submitCustomerOrderLinkSchema,
@@ -24,9 +25,8 @@ export const POST = apiRouteWithContext(async (request: NextRequest) => {
     throw new AppError(ERROR_CODES.PROVIDER_ERROR, "This form is temporarily unavailable.");
   }
   const body = submitCustomerOrderLinkSchema.parse(await request.json().catch(() => ({})));
-  return submitPublicCustomerOrderLink(
-    createAdminClient(),
-    { kind: "path", workspace: parsed.workspace, publicId: parsed.code },
-    body
-  );
+  const supabase = createAdminClient();
+  const ref = { kind: "path", workspace: parsed.workspace, publicId: parsed.code } as const;
+  const result = await submitPublicCustomerOrderLink(supabase, ref, body);
+  return respondWithRememberedBuyer(request, supabase, ref, body, result);
 });

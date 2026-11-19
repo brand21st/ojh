@@ -5,6 +5,7 @@ import { StoreImage } from "@/components/storefront/store-image";
 import type { StoreProduct } from "@/components/storefront/store-types";
 import { formatStorePrice } from "@/modules/storefront/pricing";
 import { cn } from "@/lib/utils";
+import { onAccent } from "@/modules/storefront/config";
 
 const NEW_PRODUCT_CUTOFF = Date.now() - 30 * 86_400_000;
 
@@ -50,7 +51,7 @@ export function ProductCard({
           {product.discountPercent ? (
             <span
               className="absolute bottom-1.5 left-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-bold leading-none text-white shadow-sm sm:bottom-2 sm:left-2 sm:px-2 sm:py-1"
-              style={{ backgroundColor: accent }}
+              style={onAccent(accent)}
             >
               {product.discountPercent}% OFF
             </span>
@@ -75,7 +76,7 @@ export function ProductCard({
           ) : null}
         </div>
         <div className={cn("min-w-0 flex-1 px-2 pt-2 sm:px-3 sm:pt-2.5", compact && "px-2 pt-2")}>
-          <h3 className="line-clamp-2 min-h-9 text-[13px] font-semibold leading-tight text-zinc-900 sm:min-h-10 sm:text-sm sm:leading-5">
+          <h3 className="line-clamp-2 min-h-9 text-[13px] font-semibold leading-[18px] text-zinc-900 sm:min-h-10 sm:text-sm sm:leading-5">
             {product.name}
           </h3>
           <div className="mt-1 flex min-w-0 items-baseline gap-1.5">
@@ -99,7 +100,7 @@ export function ProductCard({
         {quantity > 0 ? (
           <div
             className="flex h-9 items-center justify-between rounded-xl border px-0.5 text-white shadow-sm sm:h-10 sm:px-1"
-            style={{ backgroundColor: accent, borderColor: accent }}
+            style={{ ...onAccent(accent), borderColor: accent }}
           >
             <button
               type="button"
@@ -125,7 +126,7 @@ export function ProductCard({
           <button
             type="button"
             className="flex h-9 w-full items-center justify-center gap-1.5 rounded-xl text-[13px] font-semibold text-white shadow-sm transition hover:brightness-95 active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-zinc-200 disabled:text-zinc-500 sm:h-10 sm:gap-2 sm:text-sm"
-            style={product.inStock ? { backgroundColor: accent } : undefined}
+            style={product.inStock ? onAccent(accent) : undefined}
             disabled={!product.inStock}
             onClick={onAdd}
           >

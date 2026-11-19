@@ -16,5 +16,11 @@ export const POST = apiRouteWithContext(async (request: NextRequest) => {
   const supabase = publicStoreClient();
   const organizationId = await organizationFromLink(supabase, storeLinkRef(body));
   await assertStorePublished(supabase, organizationId);
-  return ok(await quotePublicStorePayment(supabase, organizationId, body.items, body.paymentPreference, body.bundles));
+  return ok(
+    await quotePublicStorePayment(supabase, organizationId, body.items, body.paymentPreference, body.bundles, {
+      code: body.couponCode,
+      skipAuto: body.skipAutoCoupon,
+      trackApply: body.trackCouponApply,
+    })
+  );
 });
