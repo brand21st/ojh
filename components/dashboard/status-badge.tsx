@@ -62,6 +62,7 @@ const ERROR = new Set([
   "SUSPENDED",
   "BLOCKED",
   "EXPIRED",
+  "VERIFICATION_FAILED",
 ]);
 
 const BRAND = new Set(["SHIPPED", "IMPORTED", "SHOPIFY", "WHATSAPP", "WOOCOMMERCE", "CLOSED"]);

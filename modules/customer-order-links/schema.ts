@@ -133,6 +133,8 @@ export const submitCustomerOrderLinkSchema = z.object({
   state: z.string().trim().min(2, "State is required."),
   pincode: z.string().trim().regex(/^\d{6}$/, "Enter a 6-digit PIN code."),
   paymentPreference: z.enum(["PREPAID", "COD"]).optional(),
+  /** Pay the amount due now through the merchant's own Razorpay account. */
+  payOnline: z.boolean().optional(),
   clientRequestId: z.string().uuid().optional(),
   items: z
     .array(

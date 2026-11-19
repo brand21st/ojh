@@ -15,6 +15,7 @@ import { loadOrganizationPolicies } from "@/modules/vachat/policies";
 import { env } from "@/lib/env";
 import { listStoreBundles } from "./bundles";
 import { allocateBundlePrices } from "./bundle-pricing";
+import { storefrontOnlinePaymentEnabled } from "@/modules/merchant-payments/integration";
 
 export function publicStoreClient() {
   if (!hasAdminClient()) {
@@ -173,6 +174,8 @@ export async function loadPublicStorefront(supabase: SupabaseClient, ref: Public
     footer: settings.published ? settings.footerPreview ?? null : null,
     /** The store's auto-apply coupon, shown as a banner and applied at checkout. */
     promo: autoCoupon ? publicCouponSummary(autoCoupon) : null,
+    /** True when checkout can take payment through the merchant's own Razorpay account. */
+    onlinePayment: settings.published ? await storefrontOnlinePaymentEnabled(supabase, organizationId) : false,
   };
 }
 

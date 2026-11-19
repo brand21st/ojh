@@ -882,6 +882,11 @@ export type IntegrationCard = {
   shopDomain?: string | null;
   platformManaged?: boolean;
   eventSettings?: Partial<Record<string, boolean>>;
+  lastVerifiedAt?: string | null;
+  /** Merchant Razorpay: storefront online checkout switched on. */
+  enabled?: boolean;
+  /** Merchant Razorpay: TEST or LIVE keys. */
+  mode?: string;
 };
 
 export type IntegrationsResponse = {

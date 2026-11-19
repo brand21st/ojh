@@ -21,6 +21,13 @@ import { loadCatalogProducts } from "@/modules/products/service";
 import { priceStoreCart, quoteCatalogPayment } from "@/modules/storefront/quote";
 import { attachRedemptionOrder, releaseCouponRedemption, reserveCouponRedemption } from "@/modules/storefront/coupons/service";
 import { resolveStoreCart } from "@/modules/storefront/resolve-cart";
+import {
+  assertOnlinePaymentAvailable,
+  createStorefrontPayment,
+  newPaymentToken,
+  pendingOnlinePaymentMeta,
+  type CheckoutSession,
+} from "@/modules/merchant-payments/payments";
 
 type PublicLinkRow = {
   id: string;
@@ -252,6 +259,8 @@ export async function submitPublicCustomerOrderLink(
     );
   }
   if (input.bundles?.length && !input.quoteVersion) throw new AppError(ERROR_CODES.VALIDATION_ERROR, "Review your bundle quote before placing an order.");
+  // Fail before anything is saved when the store cannot take online payments right now.
+  if (input.payOnline === true) await assertOnlinePaymentAvailable(supabase, row.organization_id);
   if (idempotencyKey) {
     const requestHash = hashSecret(
       JSON.stringify({
@@ -266,6 +275,7 @@ export async function submitPublicCustomerOrderLink(
         items: input.items ?? [],
         bundles: input.bundles ?? [],
         couponCode: input.couponCode?.trim().toUpperCase() || null,
+        payOnline: input.payOnline === true,
       })
     );
     const { error: reservationError } = await supabase.from("idempotency_keys").insert({
@@ -368,6 +378,18 @@ export async function submitPublicCustomerOrderLink(
   }
 
   const paymentStatus = "PENDING";
+  // Online payment covers whatever is due now: the full prepaid total or the COD advance.
+  const payOnline = input.payOnline === true && Boolean(quote) && Number(quote?.amountDueNow ?? 0) > 0;
+  const paymentToken = payOnline ? newPaymentToken() : null;
+  const onlinePayment =
+    payOnline && quote && paymentToken
+      ? pendingOnlinePaymentMeta({
+          kind: quote.preference === "COD" ? "COD_ADVANCE" : "FULL",
+          amountDue: Number(quote.amountDueNow),
+          orderTotal: Number(quote.total),
+          token: paymentToken,
+        })
+      : null;
 
   const orderInput = createOrderSchema.parse({
     source: "WHATSAPP",
@@ -396,6 +418,7 @@ export async function submitPublicCustomerOrderLink(
             items: messageItems,
             bundles: resolved?.bundles ?? [],
             quoteVersion: resolved?.quoteVersion,
+            ...(onlinePayment ? { onlinePayment } : {}),
             ...(priced?.coupon?.applied
               ? {
                   coupon: {
@@ -469,9 +492,29 @@ export async function submitPublicCustomerOrderLink(
   const paymentMethod =
     quote?.preference === "COD"
       ? advanceAmount > 0
-        ? "COD with advance"
+        ? onlinePayment ? "COD with online advance" : "COD with advance"
         : "Cash on delivery"
-      : "Prepaid";
+      : onlinePayment ? "Online payment" : "Prepaid";
+
+  // Razorpay order on the MERCHANT's account. If this fails, the order still exists and the
+  // customer can retry from the confirmation screen with the same token.
+  let payment: CheckoutSession | null = null;
+  let paymentError: string | null = null;
+  if (onlinePayment && paymentToken) {
+    try {
+      payment = await createStorefrontPayment(supabase, {
+        organizationId: row.organization_id,
+        orderId: order.id as string,
+        orderNumber: (order.orderNumber ?? order.order_number ?? null) as string | null,
+        kind: onlinePayment.kind,
+        amountDue: onlinePayment.amountDue,
+        orderTotal: onlinePayment.orderTotal,
+        token: paymentToken,
+      });
+    } catch (error) {
+      paymentError = error instanceof AppError ? error.message : "Could not start the payment. Please try again.";
+    }
+  }
   const result = {
     orderId: order.id as string,
     currency: "INR" as const,
@@ -486,6 +529,9 @@ export async function submitPublicCustomerOrderLink(
     codAmount,
     paymentMethod,
     returnPolicy: returnSummary.label,
+    ...(onlinePayment && paymentToken
+      ? { onlinePayment: { orderId: order.id as string, token: paymentToken, session: payment, error: paymentError } }
+      : {}),
   };
   if (idempotencyKey) {
     await supabase
@@ -494,6 +540,9 @@ export async function submitPublicCustomerOrderLink(
       .eq("organization_id", row.organization_id)
       .eq("key", idempotencyKey);
   }
+
+  // Online-payment orders are confirmed by paying; the YES/NO WhatsApp prompt would contradict that.
+  if (onlinePayment) return result;
 
   try {
     const { notifyStorefrontOrderCreated } = await import("@/modules/storefront/order-notify");

@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import { PageHeader } from "@/components/dashboard/page-header";
 import { LineItemThumb } from "@/components/dashboard/line-item-thumb";
 import { TariffEstimateCard } from "@/components/orders/tariff-estimate-card";
+import { OnlinePaymentCard } from "@/components/orders/online-payment-card";
 import { ServiceToggle } from "@/components/dashboard/service-toggle";
 import { WhatsAppLogo } from "@/components/brand/whatsapp-logo";
 import { orderStatusBadgeValue, orderVisibleStatus, StatusBadge } from "@/components/dashboard/status-badge";
@@ -518,6 +519,7 @@ export default function OrderDetailPage() {
           </CardContent>
         </Card>
       </div>
+      <OnlinePaymentCard orderId={record.id} customerName={customerName(record)} />
       <EditShippingAddressDialog
         open={addressOpen}
         onOpenChange={setAddressOpen}

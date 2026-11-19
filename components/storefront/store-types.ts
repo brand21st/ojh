@@ -80,6 +80,8 @@ export type StorePayload = {
   };
   workspace: string;
   footer?: StoreFooter | null;
+  /** Checkout can take payment through the merchant's own Razorpay account. */
+  onlinePayment?: boolean;
 };
 
 export type CartLine = {

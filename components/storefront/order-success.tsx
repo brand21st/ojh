@@ -1,6 +1,8 @@
 "use client";
 
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
+import { OnlinePaymentPanel, type OnlinePaymentHandle } from "@/components/storefront/online-payment";
 import { formatStorePrice } from "@/modules/storefront/pricing";
 
 export type StoreOrderReceipt = {
@@ -10,15 +12,29 @@ export type StoreOrderReceipt = {
   codAmount: number;
   paymentMethod: string;
   returnPolicy: string;
+  /** Present when the customer chose to pay online through the merchant's Razorpay account. */
+  onlinePayment?: OnlinePaymentHandle | null;
+  customer?: { name: string; phone: string };
+};
+
+export type StoreOrderPaymentContext = {
+  apiRef: { workspace?: string; publicId?: string; token?: string };
+  storeName: string;
+  accent: string;
 };
 
 export function StoreOrderSuccess({
   receipt,
   onContinue,
+  payment,
 }: {
   receipt: StoreOrderReceipt;
   onContinue: () => void;
+  payment?: StoreOrderPaymentContext;
 }) {
+  const [paid, setPaid] = useState(false);
+  const online = receipt.onlinePayment && payment ? receipt.onlinePayment : null;
+  const pendingOnline = Boolean(online) && !paid;
 
   return (
     <div data-clarity-mask="true" className="flex min-h-screen items-center justify-center bg-zinc-50 px-4 py-8 text-center">
@@ -40,7 +56,23 @@ export function StoreOrderSuccess({
         <p className="mt-3 rounded-2xl bg-zinc-50 px-3 py-2 text-sm font-semibold">
           Order {receipt.orderNumber || "received"}
         </p>
-        <p className="mt-2 text-sm text-zinc-500">Your order is placed. Payment is still pending until the merchant confirms it.</p>
+        <p className="mt-2 text-sm text-zinc-500">
+          {online
+            ? pendingOnline
+              ? "Your order is saved. Complete the payment below to confirm it."
+              : "Your order is placed and paid."
+            : "Your order is placed. Payment is still pending until the merchant confirms it."}
+        </p>
+        {online && payment ? (
+          <OnlinePaymentPanel
+            apiRef={payment.apiRef}
+            handle={online}
+            storeName={payment.storeName}
+            accent={payment.accent}
+            customer={receipt.customer ?? { name: "", phone: "" }}
+            onStatus={(status) => setPaid(status === "PAID")}
+          />
+        ) : null}
         <dl className="mt-4 space-y-1.5 text-left text-sm">
           <div className="flex justify-between gap-3">
             <dt className="text-zinc-500">Total</dt>
