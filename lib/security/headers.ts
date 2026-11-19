@@ -97,7 +97,10 @@ export function contentSecurityPolicy(options?: { embedShopify?: boolean; shop?:
       : options?.frameSelf
         ? "frame-ancestors 'self'"
         : "frame-ancestors 'none'",
-    "form-action 'self'",
+    // Cashfree's JS SDK opens Hosted Checkout by POSTing the payment session to its own
+    // /pg/view/sessions/checkout page (Sandbox and Production hosts). Without these, the
+    // merchant storefront's Cashfree checkout modal stays blank.
+    "form-action 'self' https://sandbox.cashfree.com https://api.cashfree.com",
     `script-src ${scriptSrc}`,
     `style-src ${styleSrc}`,
     "img-src 'self' data: blob: https:",

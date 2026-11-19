@@ -77,6 +77,11 @@ function loadScript(src: string, ready: () => boolean) {
   });
 }
 
+/** Removes the Cashfree SDK's modal (and its backdrop) when it cannot finish loading. */
+function closeCashfreeModal() {
+  document.getElementById("cashfree-modal-container")?.remove();
+}
+
 const loadCheckout = () => loadScript(CHECKOUT_SRC, () => Boolean(window.Razorpay));
 const loadCashfree = () => loadScript(CASHFREE_SRC, () => Boolean(window.Cashfree));
 
@@ -111,6 +116,7 @@ export function OnlinePaymentPanel({
   const [state, setState] = useState<BuyerState | null>(null);
   const [busy, setBusy] = useState<"opening" | "verifying" | "checking" | null>(null);
   const [message, setMessage] = useState<string | null>(handle.error);
+  const [blocked, setBlocked] = useState(false);
   const autoOpened = useRef(false);
   const restoredChecked = useRef(false);
   const status: PaymentStatus = state?.status ?? "CREATED";
@@ -209,9 +215,30 @@ export function OnlinePaymentPanel({
         if (!window.Cashfree) throw new Error("Could not load the payment window.");
         const cashfree = window.Cashfree({ mode: active.environment });
         setBusy(null);
-        const result = await cashfree.checkout({ paymentSessionId: active.paymentSessionId, redirectTarget: "_modal" });
+        setBlocked(false);
+        // If the browser blocks Cashfree's payment page (stale page policy, extension, network
+        // filter) the SDK leaves an empty white modal forever. Detect it, close the modal and tell
+        // the customer how to recover instead of leaving them stuck.
+        let onBlocked: (event: SecurityPolicyViolationEvent) => void = () => undefined;
+        const blockedSignal = new Promise<"blocked">((resolve) => {
+          onBlocked = (event) => {
+            if (/cashfree\.com/i.test(event.blockedURI || "")) resolve("blocked");
+          };
+          document.addEventListener("securitypolicyviolation", onBlocked);
+        });
+        const outcome = await Promise.race([
+          cashfree.checkout({ paymentSessionId: active.paymentSessionId, redirectTarget: "_modal" }),
+          blockedSignal,
+        ]).finally(() => document.removeEventListener("securitypolicyviolation", onBlocked));
         // Any retry gets a fresh session from the server (Get Order).
         setSession(null);
+        if (outcome === "blocked") {
+          closeCashfreeModal();
+          setBlocked(true);
+          setMessage("Your browser blocked the payment window. Reload this page, then tap Pay again. Your order is saved.");
+          return;
+        }
+        const result = outcome;
         // In-app browsers redirect instead; the receipt is restored when the customer returns.
         if (result?.redirect) return;
         await verifyCashfree(Boolean(result?.error));
@@ -286,7 +313,13 @@ export function OnlinePaymentPanel({
           : "Complete the payment to confirm your order. UPI, cards, net banking and wallets are accepted."}
       </p>
       {message ? <p className="mt-2 rounded-xl bg-amber-50 px-2.5 py-2 text-xs font-medium text-amber-950">{message}</p> : null}
-      {!processing ? (
+      {blocked ? (
+        // This page cannot open the payment window again; a reload restores this receipt.
+        <Button type="button" className="mt-3 h-11 w-full rounded-xl" onClick={() => window.location.reload()}>
+          <RefreshCw className="size-4" aria-hidden />
+          Reload and pay
+        </Button>
+      ) : !processing ? (
         <Button type="button" className="mt-3 h-11 w-full rounded-xl" onClick={() => void pay()} disabled={busy !== null}>
           {busy === "opening" || busy === "verifying" ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <ShieldCheck className="size-4" aria-hidden />}
           {busy === "verifying" ? "Verifying payment…" : amountPaise ? `Pay ${formatStorePrice(amountPaise / 100)} securely` : "Pay securely"}
