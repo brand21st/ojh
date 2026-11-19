@@ -272,6 +272,56 @@ export type InventoryAnalytics = {
   }>;
 };
 
+export type InventoryOverviewPeriod = {
+  orders: number;
+  units: number;
+  orderValue: number;
+  collected: number;
+  codDue: number;
+  prepaidDue: number;
+  returned: number;
+  cancelled: number;
+  refunded: number;
+};
+
+export type InventoryOverview = {
+  range: "today" | "7d" | "30d" | "90d";
+  from: string;
+  to: string;
+  /** False until the inventory_overview migration is applied; comparisons and trend are then unavailable. */
+  complete: boolean;
+  catalog: {
+    totalProducts: number;
+    activeProducts: number;
+    stockUnits: number;
+    stockValue: number;
+    outOfStock: number;
+    lowStock: number;
+  };
+  current: InventoryOverviewPeriod;
+  previous: InventoryOverviewPeriod | null;
+  series: Array<{ bucket: string; orders: number; orderValue: number }>;
+  bucket: "hour" | "day";
+  topProducts: Array<{
+    productId: string;
+    name: string;
+    sku: string;
+    orders: number;
+    units: number;
+    revenue: number;
+    onHand: number;
+    active: boolean;
+  }>;
+  attention: Array<{
+    productId: string;
+    name: string;
+    sku: string;
+    onHand: number;
+    threshold: number;
+    units30d: number | null;
+  }>;
+};
+
 export type LineItem = {
   id?: string;
   productId?: string | null;
@@ -286,6 +336,14 @@ export type LineItem = {
   weight_edited?: boolean | null;
   imageUrl?: string | null;
   image_url?: string | null;
+  lengthCm?: number | null;
+  length_cm?: number | null;
+  widthCm?: number | null;
+  width_cm?: number | null;
+  heightCm?: number | null;
+  height_cm?: number | null;
+  dimensionStatus?: string | null;
+  dimension_status?: string | null;
 };
 
 export type OrderRecord = {
@@ -918,6 +976,14 @@ export type ShopifyConfig = {
   last_sync_at?: string | null;
   lastError?: string | null;
   last_error?: string | null;
+  dimensionConfig?: {
+    namespace?: string;
+    lengthKey?: string;
+    widthKey?: string;
+    heightKey?: string;
+    jsonKey?: string;
+    overrides?: Array<{ variantId: string; lengthCm: number; widthCm: number; heightCm: number }>;
+  };
 };
 
 export type IndiaPostConfig = {
