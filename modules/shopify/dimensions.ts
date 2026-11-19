@@ -14,7 +14,12 @@ export type DimensionSource =
   | "postbus"
   | "postbus_preset"
   | "postbus_custom"
+  | "postbus_override"
   | "autopack_history";
+
+export type LineDimensionSource = "shopify_variant" | "shopify_product" | "shopify_custom" | "postbus_override";
+
+export type LineDimensionStatus = "complete" | "missing" | "incomplete" | "invalid" | "query_failed";
 
 export type CmBox = {
   lengthCm: number;
@@ -32,6 +37,7 @@ export type ShipmentUnit = {
   lengthCm?: number | null;
   widthCm?: number | null;
   heightCm?: number | null;
+  dimensionSource?: DimensionSource | null;
 };
 
 export type ResolvedShipmentDimensions = CmBox & {
@@ -143,12 +149,48 @@ function tripleFromText(value: string | null | undefined): CmBox | null {
   return { lengthCm, widthCm, heightCm };
 }
 
+const DIMENSION_JSON_KEYS = /(?:^|_)(dimensions?|package_size|size)$/;
+const DIMENSION_JSON_FIELDS = new Set(["length", "width", "height", "breadth", "unit", "l", "w", "h"]);
+
+/** A dimension object is accepted only when every key is a known axis or unit. */
+export function boxFromDimensionJson(value: unknown): CmBox | null {
+  let parsed: unknown = value;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed.startsWith("{")) return null;
+    try {
+      parsed = JSON.parse(trimmed) as unknown;
+    } catch {
+      return null;
+    }
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+  const row = parsed as Record<string, unknown>;
+  const keys = Object.keys(row);
+  if (!keys.length || keys.some((key) => !DIMENSION_JSON_FIELDS.has(key.toLowerCase()))) return null;
+  const sharedUnit = typeof row.unit === "string" ? row.unit : null;
+  const read = (...names: string[]) => {
+    const match = keys.find((key) => names.includes(key.toLowerCase()));
+    if (!match) return null;
+    return shopifyDimensionToCm(row[match], sharedUnit);
+  };
+  const lengthCm = read("length", "l");
+  const widthCm = read("width", "breadth", "w");
+  const heightCm = read("height", "h");
+  if (lengthCm == null || widthCm == null || heightCm == null) return null;
+  return { lengthCm, widthCm, heightCm };
+}
+
 export function dimsFromMetafieldEntries(entries: MetafieldEntry[]): CmBox | null {
   for (const entry of entries) {
     const key = String(entry.key ?? "").trim().toLowerCase();
-    if (!/size|dimension/.test(key)) continue;
+    if (!DIMENSION_JSON_KEYS.test(key) && !/size|dimension/.test(key)) continue;
     const triple = tripleFromText(entry.value);
     if (triple) return triple;
+    if (DIMENSION_JSON_KEYS.test(key)) {
+      const json = boxFromDimensionJson(entry.value);
+      if (json) return json;
+    }
   }
 
   const groups = new Map<string, Partial<Record<"length" | "width" | "height", number>>>();
@@ -178,18 +220,35 @@ function sorted(box: CmBox) {
   return [box.lengthCm, box.widthCm, box.heightCm].sort((left, right) => left - right);
 }
 
+/**
+ * Presets large enough for every measured piece, considered one at a time.
+ * Fitting each piece inside a box does not prove the pieces pack together.
+ * Callers must ask the merchant to confirm. Nothing here is auto-applied.
+ */
+export function suggestContainingPresets(units: ShipmentUnit[], packages: PackageOption[]) {
+  const active = units.filter((unit) => unit.quantity > 0);
+  const unitCount = active.reduce((sum, unit) => sum + unit.quantity, 0);
+  if (unitCount <= 1) return { code: null as string | null, presets: [] as PackageOption[] };
+  if (!active.length || active.some((unit) => !hasBox(unit))) {
+    return { code: "PACKING_CONFIRMATION_REQUIRED" as const, presets: [] as PackageOption[] };
+  }
+  const presets = packages.filter((box) => active.every((unit) => unitFitsPackage(unit, box)));
+  return { code: "PACKING_CONFIRMATION_REQUIRED" as const, presets };
+}
+
 export function unitFitsPackage(unit: CmBox, box: CmBox) {
   const item = sorted(unit);
   const pack = sorted(box);
   return item[0] <= pack[0] && item[1] <= pack[1] && item[2] <= pack[2];
 }
 
-function singleShopifyBox(units: ShipmentUnit[]): CmBox | null {
+function singleShopifyBox(units: ShipmentUnit[]): (CmBox & { source: DimensionSource }) | null {
   if (units.length !== 1 || units[0]?.quantity !== 1 || !hasBox(units[0])) return null;
   return {
     lengthCm: units[0].lengthCm,
     widthCm: units[0].widthCm,
     heightCm: units[0].heightCm,
+    source: units[0].dimensionSource === "postbus_override" ? "postbus_override" : "shopify",
   };
 }
 
@@ -213,7 +272,7 @@ export function resolveShipmentDimensions(input: {
 }): ResolvedShipmentDimensions | null {
   const units = input.units.filter((unit) => unit.quantity > 0);
   const product = singleShopifyBox(units);
-  if (product) return { ...product, source: "shopify" };
+  if (product) return product;
   if (!singleUnmeasuredUnit(units)) return null;
 
   const packages = input.packages ?? [];
@@ -305,6 +364,8 @@ export function dimensionSourceLabel(source: string | null | undefined) {
       return "Source: Shopify product measurement";
     case "postbus_default":
       return "Source: PostBus Default Package";
+    case "postbus_override":
+      return "Source: PostBus product size";
     case "postbus_preset":
       return "Source: Saved pack size";
     case "postbus_custom":
@@ -327,6 +388,8 @@ export function dimensionSourceShort(source: string | null | undefined) {
       return "Shopify";
     case "postbus_default":
       return "Default";
+    case "postbus_override":
+      return "Product";
     case "postbus_preset":
       return "Saved";
     case "postbus_custom":
