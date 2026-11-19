@@ -230,7 +230,9 @@ export async function handleInventoryRoutes(
   }
 
   if (key === "POST inventory/categories") {
-    return createCategory(supabase, ctx, categorySchema.parse(await request.json()));
+    // imagePath is server-managed (upload/remove endpoints); never accept it from the client.
+    const body = categorySchema.parse(await request.json());
+    return createCategory(supabase, ctx, { ...body, imagePath: undefined });
   }
 
   if (key === "POST inventory/categories/reorder") {
@@ -238,7 +240,8 @@ export async function handleInventoryRoutes(
   }
 
   if (method === "PATCH" && slugs[0] === "inventory" && slugs[1] === "categories" && slugs[2]) {
-    return updateCategory(supabase, ctx, slugs[2], categoryUpdateSchema.parse(await request.json()));
+    const body = categoryUpdateSchema.parse(await request.json());
+    return updateCategory(supabase, ctx, slugs[2], { ...body, imagePath: undefined });
   }
 
   if (

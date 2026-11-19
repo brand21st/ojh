@@ -1,10 +1,10 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Flame, MoreHorizontal, Plus, SlidersHorizontal, X } from "lucide-react";
+import { Flame, MoreHorizontal, Plus, Search, SlidersHorizontal, X } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
@@ -60,6 +60,40 @@ function stockBadge(product: ProductRecord) {
   if (product.onHand <= threshold) return <Badge variant="warning">Low · {product.onHand}</Badge>;
   return <span className="tabular-nums">{product.onHand}</span>;
 }
+
+const FILTER_LABELS: Record<string, string> = {
+  active: "Status",
+  storeVisible: "Store",
+  stock: "Stock",
+  categoryId: "Category",
+  prepaid: "Prepaid",
+  cod: "COD",
+  bestSeller: "Best seller",
+  priceMin: "Price ≥",
+  priceMax: "Price ≤",
+  stockMin: "Stock ≥",
+  stockMax: "Stock ≤",
+  createdFrom: "Created from",
+  createdTo: "Created to",
+  updatedFrom: "Updated from",
+  updatedTo: "Updated to",
+};
+
+const FILTER_VALUE_LABELS: Record<string, Record<string, string>> = {
+  active: { true: "Active", false: "Inactive" },
+  storeVisible: { true: "Published", false: "Hidden" },
+  stock: { inStock: "Healthy", lowStock: "Low stock", outOfStock: "Out of stock" },
+  bestSeller: { true: "Best sellers", false: "Other products" },
+};
+
+/** Shopify-style saved views over the existing server filters. */
+const VIEWS = [
+  { id: "all", label: "All", active: undefined, stock: undefined },
+  { id: "active", label: "Active", active: "true", stock: undefined },
+  { id: "inactive", label: "Inactive", active: "false", stock: undefined },
+  { id: "low", label: "Low stock", active: undefined, stock: "lowStock" },
+  { id: "out", label: "Out of stock", active: undefined, stock: "outOfStock" },
+] as const;
 
 function FilterSelect({
   label,
@@ -173,6 +207,11 @@ export function InventoryProducts({
   const [photoBusy, setPhotoBusy] = useState<number | null>(null);
   const [searchDraft, setSearchDraft] = useState(q);
   const searchTimer = useRef<number | null>(null);
+
+  // Keep the box in sync when q changes from outside (tab switch, back/forward).
+  useEffect(() => {
+    if (searchTimer.current == null) setSearchDraft(q);
+  }, [q]);
 
   const categoriesQuery = useQuery({
     queryKey: ["product-categories"],
@@ -342,19 +381,33 @@ export function InventoryProducts({
         method: "POST",
         body: JSON.stringify(values),
       });
+      // The product exists from here on: a failed photo must not surface as a failed create,
+      // or a retry would create a duplicate (or hit the SKU conflict).
+      let failedPhotos = 0;
       for (const [slot, file] of createFiles.entries()) {
         if (!file) continue;
-        await uploadProductPhoto(created.id, file, slot);
+        try {
+          await uploadProductPhoto(created.id, file, slot);
+        } catch {
+          failedPhotos += 1;
+        }
       }
-      return created;
+      return { created, failedPhotos };
     },
-    onSuccess: () => {
-      toast.success("Product added.");
+    onSuccess: ({ created, failedPhotos }) => {
+      if (failedPhotos) {
+        toast.warning(
+          `Product added, but ${failedPhotos} photo${failedPhotos === 1 ? "" : "s"} did not upload. Add them from the product editor.`
+        );
+      } else {
+        toast.success("Product added.");
+      }
       setCreateOpen(false);
       resetCreatePhotos();
       createForm.reset();
       queryClient.invalidateQueries({ queryKey: ["products"] });
       queryClient.invalidateQueries({ queryKey: ["inventory-analytics"] });
+      if (failedPhotos) void api<ProductRecord>(`/api/v1/products/${created.id}`).then(openEdit).catch(() => undefined);
     },
     onError: (error: Error) => toast.error(error.message),
   });
@@ -419,16 +472,22 @@ export function InventoryProducts({
 
   async function deleteSelectedProducts() {
     if (!selectedIds.length) return;
-    if (!window.confirm(`Delete ${selectedIds.length} product${selectedIds.length === 1 ? "" : "s"}? They will leave the catalog. Past orders keep their line items.`)) return;
-    try {
-      await Promise.all(selectedIds.map((id) => api(`/api/v1/products/${id}`, { method: "DELETE" })));
-      toast.success(selectedIds.length === 1 ? "Product deleted." : "Products deleted.");
-      setSelectedIds([]);
-      refreshAfterProductDelete();
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not delete products.");
-      refreshAfterProductDelete();
+    const ids = [...selectedIds];
+    if (!window.confirm(`Delete ${ids.length} product${ids.length === 1 ? "" : "s"}? They will leave the catalog. Past orders keep their line items. This cannot be undone.`)) return;
+    const results = await Promise.allSettled(ids.map((id) => api(`/api/v1/products/${id}`, { method: "DELETE" })));
+    const failedIds = ids.filter((_, index) => results[index].status === "rejected");
+    const deleted = ids.length - failedIds.length;
+    if (!failedIds.length) {
+      toast.success(deleted === 1 ? "Product deleted." : `${deleted} products deleted.`);
+    } else {
+      const firstError = results.find((result): result is PromiseRejectedResult => result.status === "rejected")?.reason;
+      toast.error(
+        `${deleted} deleted, ${failedIds.length} could not be deleted${firstError instanceof Error ? `: ${firstError.message}` : "."}`
+      );
     }
+    // Keep only the failures selected so the merchant can retry them.
+    setSelectedIds(failedIds);
+    refreshAfterProductDelete();
   }
 
   function openEdit(product: ProductRecord) {
@@ -458,7 +517,19 @@ export function InventoryProducts({
   const storeUrl = useQuery({
     queryKey: ["inventory-storefront"],
     queryFn: () => api<{ storeUrl: string }>("/api/v1/inventory/storefront"),
+    staleTime: 5 * 60_000,
   });
+  const categoryNames = useMemo(
+    () => new Map((categoriesQuery.data ?? []).map((category) => [category.id, category.name])),
+    [categoriesQuery.data]
+  );
+
+  function productStoreUrl(row: ProductRecord) {
+    const base = storeUrl.data?.storeUrl;
+    if (!base) return null;
+    if (row.publicSlug && row.active && row.storeVisible !== false) return `${base}/products/${row.publicSlug}`;
+    return null;
+  }
 
   const columns = useMemo<DataTableColumn<ProductRow>[]>(
     () => [
@@ -507,6 +578,21 @@ export function InventoryProducts({
       },
       { id: "stock", header: "Stock", hug: true, cell: (row) => stockBadge(row) },
       {
+        id: "category",
+        header: "Category",
+        hug: true,
+        cell: (row) => {
+          const names = (row.categoryIds ?? []).map((id) => categoryNames.get(id)).filter(Boolean) as string[];
+          if (!names.length) return <span className="text-xs text-muted">—</span>;
+          return (
+            <span className="text-xs" title={names.join(", ")}>
+              {names[0]}
+              {names.length > 1 ? <span className="text-muted"> +{names.length - 1}</span> : null}
+            </span>
+          );
+        },
+      },
+      {
         id: "performance",
         header: "Performance",
         hug: true,
@@ -551,14 +637,15 @@ export function InventoryProducts({
                 <MoreHorizontal className="size-4" />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => openEdit(row)}>Edit</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setAdjustProduct(row)}>Adjust stock</DropdownMenuItem>
+            {/* Portal events still bubble through React to the row's click-to-edit handler. */}
+            <DropdownMenuContent align="end" onClick={(event) => event.stopPropagation()}>
+              {canWrite ? <DropdownMenuItem onClick={() => openEdit(row)}>Edit</DropdownMenuItem> : null}
+              {canWrite ? <DropdownMenuItem onClick={() => setAdjustProduct(row)}>Adjust stock</DropdownMenuItem> : null}
               <DropdownMenuItem onClick={() => setHistoryProduct(row)}>Stock history</DropdownMenuItem>
-              {storeUrl.data?.storeUrl ? (
+              {productStoreUrl(row) ? (
                 <DropdownMenuItem asChild>
-                  <a href={storeUrl.data.storeUrl} target="_blank" rel="noreferrer">
-                    View store
+                  <a href={productStoreUrl(row)!} target="_blank" rel="noreferrer">
+                    View on store
                   </a>
                 </DropdownMenuItem>
               ) : null}
@@ -613,8 +700,23 @@ export function InventoryProducts({
       },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [canWrite, queryClient, storeUrl.data?.storeUrl]
+    [canWrite, queryClient, storeUrl.data?.storeUrl, categoryNames]
   );
+
+  const currentView = VIEWS.find(
+    (view) => (view.active ?? "all") === active && (view.stock ?? "all") === stock
+  )?.id;
+
+  function filterChipLabel(key: string, value: string) {
+    const label = FILTER_LABELS[key] ?? key;
+    if (key === "categoryId") return `${label}: ${categoryNames.get(value) ?? "Unknown"}`;
+    if (key.endsWith("From") || key.endsWith("To")) return `${label}: ${formatDate(value)}`;
+    if (key.startsWith("price")) return `${label} ${formatCurrency(Number(value))}`;
+    if (key.startsWith("stock") && key !== "stock") return `${label} ${value}`;
+    const mapped = FILTER_VALUE_LABELS[key]?.[value];
+    if (mapped) return `${label}: ${mapped}`;
+    return `${label}: ${value === "true" ? "Enabled" : value === "false" ? "Disabled" : value}`;
+  }
 
   const after = Number(adjustProduct?.onHand ?? 0) + Number(adjustDelta || 0);
   const filterKeys = [
@@ -658,21 +760,44 @@ export function InventoryProducts({
 
   return (
     <div className="space-y-4">
+      <div role="group" aria-label="Product views" className="-mb-1 flex gap-1 overflow-x-auto">
+        {VIEWS.map((view) => {
+          const selected = currentView === view.id;
+          return (
+            <button
+              key={view.id}
+              type="button"
+              aria-pressed={selected}
+              className={`h-8 shrink-0 rounded-lg px-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand ${
+                selected ? "bg-ink/[0.07] text-ink" : "text-muted hover:bg-surface-soft hover:text-ink"
+              }`}
+              onClick={() => setParams({ active: view.active, stock: view.stock, page: 1 })}
+            >
+              {view.label}
+            </button>
+          );
+        })}
+      </div>
       <div className="flex flex-wrap items-center gap-2">
-        <div className="relative sm:max-w-sm sm:flex-1">
+        <div className="relative w-full sm:max-w-sm sm:flex-1">
+          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted" aria-hidden="true" />
           <Input
-            className="h-9 pr-24 text-sm"
+            className="h-9 pl-9 pr-24 text-sm"
             placeholder="Search products or SKU"
+            aria-label="Search products or SKU"
             value={searchDraft}
             onChange={(event) => {
               const value = event.target.value;
               setSearchDraft(value);
               if (searchTimer.current) window.clearTimeout(searchTimer.current);
-              searchTimer.current = window.setTimeout(() => setParams({ q: value, page: 1 }), 300);
+              searchTimer.current = window.setTimeout(() => {
+                searchTimer.current = null;
+                setParams({ q: value.trim(), page: 1 });
+              }, 300);
             }}
           />
-          {listQuery.isFetching ? (
-            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted">Searching…</span>
+          {listQuery.isFetching && q ? (
+            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted" aria-live="polite">Searching…</span>
           ) : null}
         </div>
         <Button type="button" size="sm" variant="secondary" onClick={() => setFiltersOpen(true)}>
@@ -718,11 +843,12 @@ export function InventoryProducts({
             <button
               key={key}
               type="button"
-              className="inline-flex h-8 items-center gap-1 rounded-full border border-border bg-card px-3 text-xs font-medium"
+              className="inline-flex h-8 items-center gap-1 rounded-full border border-border bg-card px-3 text-xs font-medium hover:bg-surface-soft"
+              aria-label={`Remove filter ${filterChipLabel(key, value)}`}
               onClick={() => setParams({ [key]: undefined, page: 1 })}
             >
-              {key}: {value === "true" ? "Enabled" : value === "false" ? "Disabled" : value}
-              <X className="size-3" />
+              {filterChipLabel(key, value)}
+              <X className="size-3" aria-hidden="true" />
             </button>
           ))}
           <Button type="button" size="sm" variant="ghost" onClick={clearFilters}>Clear all</Button>
@@ -731,49 +857,25 @@ export function InventoryProducts({
 
       {selectedIds.length && canWrite ? (
         <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-border bg-card px-3 py-2">
-          <p className="text-sm font-medium">{selectedIds.length} selected</p>
-          <Button
-            size="sm"
-            variant="secondary"
-            onClick={() => {
-              if (!window.confirm(`Publish ${selectedIds.length} products to the store?`)) return;
-              bulkMutation.mutate({ storeVisible: true });
-            }}
-          >
+          <p className="text-sm font-medium" aria-live="polite">{selectedIds.length} selected</p>
+          {/* Reversible actions run straight away (Shopify-style); only delete asks to confirm. */}
+          <Button size="sm" variant="secondary" disabled={bulkMutation.isPending} onClick={() => bulkMutation.mutate({ storeVisible: true })}>
             Publish
           </Button>
-          <Button
-            size="sm"
-            variant="secondary"
-            onClick={() => {
-              if (!window.confirm(`Hide ${selectedIds.length} products from the store?`)) return;
-              bulkMutation.mutate({ storeVisible: false });
-            }}
-          >
+          <Button size="sm" variant="secondary" disabled={bulkMutation.isPending} onClick={() => bulkMutation.mutate({ storeVisible: false })}>
             Hide
           </Button>
-          <Button
-            size="sm"
-            variant="secondary"
-            onClick={() => {
-              if (!window.confirm(`Activate ${selectedIds.length} products?`)) return;
-              bulkMutation.mutate({ active: true });
-            }}
-          >
+          <Button size="sm" variant="secondary" disabled={bulkMutation.isPending} onClick={() => bulkMutation.mutate({ active: true })}>
             Activate
           </Button>
-          <Button
-            size="sm"
-            variant="secondary"
-            onClick={() => {
-              if (!window.confirm(`Deactivate ${selectedIds.length} products?`)) return;
-              bulkMutation.mutate({ active: false });
-            }}
-          >
+          <Button size="sm" variant="secondary" disabled={bulkMutation.isPending} onClick={() => bulkMutation.mutate({ active: false })}>
             Deactivate
           </Button>
-          <Button size="sm" variant="secondary" className="text-red-600" onClick={() => void deleteSelectedProducts()}>
+          <Button size="sm" variant="secondary" className="text-red-600" disabled={bulkMutation.isPending} onClick={() => void deleteSelectedProducts()}>
             Delete
+          </Button>
+          <Button size="sm" variant="ghost" className="ml-auto" onClick={() => setSelectedIds([])}>
+            Clear selection
           </Button>
         </div>
       ) : null}
@@ -803,6 +905,7 @@ export function InventoryProducts({
         selectedIds={selectedIds}
         onSelectionChange={setSelectedIds}
         getRowId={(row) => row.id}
+        onRowClick={canWrite ? (row) => openEdit(row) : undefined}
         stackBelow="lg"
         mobileView={
           <div className="grid gap-3">
@@ -825,9 +928,10 @@ export function InventoryProducts({
                     </div>
                   </div>
                 </div>
-                <div className="mt-3 flex gap-2">
-                  <Button size="sm" variant="secondary" onClick={() => openEdit(row)}>Edit</Button>
-                  <Button size="sm" variant="secondary" onClick={() => setAdjustProduct(row)}>Adjust</Button>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {canWrite ? <Button size="sm" variant="secondary" onClick={() => openEdit(row)}>Edit</Button> : null}
+                  {canWrite ? <Button size="sm" variant="secondary" onClick={() => setAdjustProduct(row)}>Adjust</Button> : null}
+                  <Button size="sm" variant="secondary" onClick={() => setHistoryProduct(row)}>History</Button>
                   {canWrite ? (
                     <Button size="sm" variant="secondary" className="text-red-600" onClick={() => void deleteProductRow(row)}>
                       Delete
@@ -955,7 +1059,16 @@ export function InventoryProducts({
         }}
         footer={
           <div className="flex justify-end gap-2">
-            <Button type="button" variant="ghost" onClick={() => setCreateOpen(false)}>Cancel</Button>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => {
+                setCreateOpen(false);
+                resetCreatePhotos();
+              }}
+            >
+              Cancel
+            </Button>
             <Button type="button" disabled={createMutation.isPending} onClick={createForm.handleSubmit((values) => createMutation.mutate(values))}>
               {createMutation.isPending ? "Saving…" : "Save product"}
             </Button>
@@ -1047,7 +1160,16 @@ export function InventoryProducts({
         }}
         footer={
           <div className="flex justify-end gap-2">
-            <Button type="button" variant="ghost" onClick={() => setEditProduct(null)}>Cancel</Button>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => {
+                setEditProduct(null);
+                setEditUrls(emptyPhotoSlots());
+              }}
+            >
+              Cancel
+            </Button>
             <Button
               type="button"
               disabled={updateMutation.isPending || photoBusy != null}

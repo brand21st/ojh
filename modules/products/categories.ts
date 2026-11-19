@@ -144,7 +144,12 @@ export async function updateCategory(
   if (input.active != null) patch.active = input.active;
   if (input.sortOrder != null) patch.sort_order = input.sortOrder;
   if (input.imagePath !== undefined) patch.image_path = input.imagePath;
-  if (input.productIds) await replaceCategoryProducts(supabase, ctx, id, input.productIds);
+  if (input.productIds) {
+    // Membership rows carry no FK back to the category's organization, so make sure this
+    // tenant owns the category before linking products to it.
+    await getCategoryImagePath(supabase, ctx, id);
+    await replaceCategoryProducts(supabase, ctx, id, input.productIds);
+  }
   if (!Object.keys(patch).length) {
     const category = (await listCategories(supabase, ctx)).find((item) => item.id === id);
     if (!category) throw new AppError(ERROR_CODES.RESOURCE_NOT_FOUND, "Category not found.");
@@ -157,7 +162,12 @@ export async function updateCategory(
     .eq("id", id)
     .select("id, organization_id, name, slug, description, sort_order, active, image_path, created_at, updated_at")
     .maybeSingle();
-  if (error) throw new AppError(ERROR_CODES.VALIDATION_ERROR, error.message);
+  if (error) {
+    if (error.code === "23505") {
+      throw new AppError(ERROR_CODES.CONFLICT, "A category with this name already exists.");
+    }
+    throw new AppError(ERROR_CODES.VALIDATION_ERROR, error.message);
+  }
   if (!data) throw new AppError(ERROR_CODES.RESOURCE_NOT_FOUND, "Category not found.");
   return (await listCategories(supabase, ctx)).find((category) => category.id === id)
     ?? mapCategory(data as Record<string, unknown>);
