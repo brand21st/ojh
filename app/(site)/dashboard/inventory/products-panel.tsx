@@ -47,6 +47,7 @@ import { formatCurrency, formatDate, formatNumber } from "@/lib/format";
 import { api, toSearchParams } from "@/lib/hooks/use-api";
 import { optimizeImageFile } from "@/lib/images/optimize-client";
 import { createProductSchema, editProductFormSchema } from "@/modules/products/schema";
+import { formatParcelSize } from "@/modules/shopify/dimensions";
 import type { InventoryMovementRecord, Paginated, ProductRecord } from "@/types/api";
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50];
@@ -296,6 +297,9 @@ export function InventoryProducts({
       sku: "",
       price: 0,
       weightGrams: 0,
+      lengthCm: null,
+      widthCm: null,
+      heightCm: null,
       openingStock: 0,
       prepaidEnabled: true,
       codEnabled: true,
@@ -500,6 +504,9 @@ export function InventoryProducts({
       compareAtPrice: product.compareAtPrice ?? null,
       description: product.description ?? "",
       weightGrams: product.weightGrams,
+      lengthCm: product.lengthCm ?? null,
+      widthCm: product.widthCm ?? null,
+      heightCm: product.heightCm ?? null,
       prepaidEnabled: product.prepaidEnabled,
       codEnabled: product.codEnabled,
       codAdvancePercent: product.codAdvancePercent,
@@ -550,6 +557,9 @@ export function InventoryProducts({
                 ) : null}
               </div>
               <p className="text-xs text-muted">{row.sku}</p>
+              {row.lengthCm && row.widthCm && row.heightCm ? (
+                <p className="text-xs text-muted">{formatParcelSize(Number(row.lengthCm), Number(row.widthCm), Number(row.heightCm))}</p>
+              ) : null}
             </div>
           </div>
         ),
@@ -919,6 +929,9 @@ export function InventoryProducts({
                       {row.bestSeller ? <Badge variant="warning">Best seller</Badge> : null}
                     </div>
                     <p className="text-xs text-muted">{row.sku}</p>
+                    {row.lengthCm && row.widthCm && row.heightCm ? (
+                      <p className="text-xs text-muted">{formatParcelSize(Number(row.lengthCm), Number(row.widthCm), Number(row.heightCm))}</p>
+                    ) : null}
                     <p className="mt-1 text-sm font-medium">{formatCurrency(row.price)}</p>
                     <div className="mt-2 flex flex-wrap items-center gap-2">
                       {stockBadge(row)}

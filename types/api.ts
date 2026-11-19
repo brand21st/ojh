@@ -196,6 +196,9 @@ export type ProductRecord = {
   publicSlug?: string | null;
   price: number;
   weightGrams: number;
+  lengthCm?: number | null;
+  widthCm?: number | null;
+  heightCm?: number | null;
   active: boolean;
   prepaidEnabled: boolean;
   codEnabled: boolean;

@@ -162,6 +162,25 @@ export function ProductEditorFields({
             />
           </div>
         </div>
+        <div>
+          <p className="text-sm font-medium text-ink">Box (cm)</p>
+          <p className="text-xs text-muted">Used when this product ships alone. Leave all three empty if the size is unknown.</p>
+          <div className="mt-2 grid grid-cols-3 gap-3">
+            <div>
+              <Label htmlFor="product-length">Length</Label>
+              <Input id="product-length" className="mt-1 h-11" type="number" min={0} step="0.1" {...form.register("lengthCm")} />
+            </div>
+            <div>
+              <Label htmlFor="product-width">Width</Label>
+              <Input id="product-width" className="mt-1 h-11" type="number" min={0} step="0.1" {...form.register("widthCm")} />
+            </div>
+            <div>
+              <Label htmlFor="product-height">Height</Label>
+              <Input id="product-height" className="mt-1 h-11" type="number" min={0} step="0.1" {...form.register("heightCm")} />
+            </div>
+          </div>
+          <FieldError message={form.formState.errors.lengthCm?.message} />
+        </div>
       </section>
 
       <section className="space-y-3">

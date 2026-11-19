@@ -34,6 +34,7 @@ export type DecisionEvidence =
   | { type: "history"; historyId: string; level: EvidenceLevel }
   | { type: "preset" }
   | { type: "shopify" }
+  | { type: "product" }
   | { type: "default" };
 
 export type ReviewReason =
@@ -117,15 +118,18 @@ function fromFallback(fallback: ResolvedShipmentDimensions): PackageDecision {
       reason: "Only saved pack size for a single unmeasured item.",
     };
   }
+  const productBox = fallback.source === "postbus_override";
   return {
     kind: "CUSTOM_DIMENSIONS",
     box,
-    evidence: { type: fallback.source === "shopify" ? "shopify" : "default" },
+    evidence: { type: fallback.source === "shopify" ? "shopify" : productBox ? "product" : "default" },
     autoApplicable: true,
     reason:
       fallback.source === "shopify"
         ? "Single item with Shopify product measurements."
-        : "Workspace default box for a single unmeasured item.",
+        : productBox
+          ? "Single item with the product box."
+          : "Workspace default box for a single unmeasured item.",
   };
 }
 

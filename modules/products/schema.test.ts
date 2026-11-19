@@ -100,6 +100,38 @@ describe("product schemas", () => {
     expect(parsed.active).toBe(true);
   });
 
+  it("accepts a complete product box and rejects a partial one", () => {
+    expect(
+      createProductSchema.parse({
+        name: "Box",
+        sku: "BOX-1",
+        price: 1,
+        weightGrams: 1,
+        prepaidEnabled: true,
+        codEnabled: true,
+        lengthCm: 20,
+        widthCm: 15,
+        heightCm: 10,
+      })
+    ).toMatchObject({ lengthCm: 20, widthCm: 15, heightCm: 10 });
+    expect(() =>
+      createProductSchema.parse({
+        name: "Box",
+        sku: "BOX-1",
+        price: 1,
+        weightGrams: 1,
+        prepaidEnabled: true,
+        codEnabled: true,
+        lengthCm: 20,
+      })
+    ).toThrow(/length, width, and height/i);
+    expect(updateProductSchema.parse({ lengthCm: null, widthCm: null, heightCm: null })).toMatchObject({
+      lengthCm: null,
+      widthCm: null,
+      heightCm: null,
+    });
+  });
+
   it("rejects an edit that turns off both payment modes", () => {
     expect(() =>
       editProductFormSchema.parse({

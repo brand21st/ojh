@@ -112,7 +112,7 @@ export async function loadOrderComposition(
 ): Promise<ShipmentComposition> {
   const { data, error } = await supabase
     .from("order_line_items")
-    .select("shopify_variant_id, shopify_product_id, sku, title, quantity, unfulfilled_quantity, requires_shipping")
+    .select("shopify_variant_id, shopify_product_id, product_id, sku, title, quantity, unfulfilled_quantity, requires_shipping")
     .eq("organization_id", organizationId)
     .eq("order_id", orderId);
   if (error || !Array.isArray(data)) return { ok: false, reason: "MISSING_VARIANT_IDS" };

@@ -11,6 +11,9 @@ export type ResolvedOrderLine = {
   quantity: number;
   unitPrice: number;
   weightGrams: number | null;
+  lengthCm: number | null;
+  widthCm: number | null;
+  heightCm: number | null;
   prepaidEnabled: boolean | null;
   codEnabled: boolean | null;
   codAdvancePercent: number | null;
@@ -23,6 +26,9 @@ type CatalogRow = {
   sku: string;
   price: number | string;
   weight_grams: number;
+  length_cm?: number | string | null;
+  width_cm?: number | string | null;
+  height_cm?: number | string | null;
   active: boolean;
   prepaid_enabled: boolean;
   cod_enabled: boolean;
@@ -38,6 +44,24 @@ type LineInput = {
   unitPrice?: number;
   weightGrams?: number;
 };
+
+function cm(value: number | string | null | undefined) {
+  if (value == null || value === "") return null;
+  const amount = typeof value === "string" ? Number(value) : value;
+  if (!Number.isFinite(amount) || amount <= 0) return null;
+  return amount;
+}
+
+export function lineDimensionInsert(line: Pick<ResolvedOrderLine, "lengthCm" | "widthCm" | "heightCm">) {
+  if (line.lengthCm == null || line.widthCm == null || line.heightCm == null) return {};
+  return {
+    length_cm: line.lengthCm,
+    width_cm: line.widthCm,
+    height_cm: line.heightCm,
+    dimension_source: "postbus_override",
+    dimension_status: "complete",
+  };
+}
 
 function money(value: number | string | null | undefined) {
   const amount = typeof value === "string" ? Number(value) : value;
@@ -123,6 +147,9 @@ export function resolveLineFromCatalog(product: CatalogRow, quantity: number): R
     quantity,
     unitPrice: money(product.price),
     weightGrams: product.weight_grams,
+    lengthCm: cm(product.length_cm),
+    widthCm: cm(product.width_cm),
+    heightCm: cm(product.height_cm),
     prepaidEnabled: product.prepaid_enabled,
     codEnabled: product.cod_enabled,
     codAdvancePercent: money(product.cod_advance_percent),
@@ -142,6 +169,9 @@ export function resolveManualLine(input: LineInput): ResolvedOrderLine {
     quantity: input.quantity,
     unitPrice: money(input.unitPrice),
     weightGrams: input.weightGrams ?? null,
+    lengthCm: null,
+    widthCm: null,
+    heightCm: null,
     prepaidEnabled: null,
     codEnabled: null,
     codAdvancePercent: null,

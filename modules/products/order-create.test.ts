@@ -45,7 +45,10 @@ function chain(result: { data: unknown; error: unknown; count?: number | null })
   return query;
 }
 
-function mockClient(options?: { product?: typeof catalog | null; otherOrg?: boolean }) {
+function mockClient(options?: {
+  product?: (typeof catalog & { length_cm?: number; width_cm?: number; height_cm?: number }) | null;
+  otherOrg?: boolean;
+}) {
   const inserts: Record<string, unknown> = {};
   const product = options?.product === undefined ? catalog : options.product;
   return {
@@ -211,6 +214,31 @@ describe("createManualOrder catalog lines", () => {
     const stored = client.inserts.lineItems as Array<{ unit_price: number; weight_grams: number }>;
     expect(stored[0]?.unit_price).toBe(999);
     expect(stored[0]?.weight_grams).toBe(250);
+  });
+
+  it("copies the product box onto the line and tags it as the product size", async () => {
+    const client = mockClient({
+      product: { ...catalog, length_cm: 20, width_cm: 15, height_cm: 10 },
+    });
+    await createManualOrder(
+      client as never,
+      ctx,
+      createOrderSchema.parse({
+        ...basePayload,
+        paymentStatus: "PAID",
+        lineItems: [{ productId: catalog.id, quantity: 1 }],
+      })
+    );
+    expect(client.inserts.lineItems).toEqual([
+      expect.objectContaining({
+        product_id: catalog.id,
+        length_cm: 20,
+        width_cm: 15,
+        height_cm: 10,
+        dimension_source: "postbus_override",
+        dimension_status: "complete",
+      }),
+    ]);
   });
 
   it("copies the catalog cover photo onto the line item", async () => {

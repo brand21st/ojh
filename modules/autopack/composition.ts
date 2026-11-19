@@ -1,14 +1,17 @@
 import { createHash } from "node:crypto";
 
 /**
- * Exact shipment composition: which Shopify variants, how many of each.
+ * Exact shipment composition: which items, how many of each.
+ * Shopify lines keep their numeric variant id, so existing history keys stay the same.
+ * A catalog line with no Shopify variant uses `catalog:<product uuid>`.
  * The key is order-independent and ignores titles and SKUs, which merchants rename.
- * Any shippable line without a variant id makes the whole composition unmatchable.
+ * Any shippable line with neither id makes the whole composition unmatchable.
  */
 
 export type CompositionLine = {
   variantId?: string | number | null;
   productId?: string | number | null;
+  catalogProductId?: string | null;
   sku?: string | null;
   title?: string | null;
   quantity: number;
@@ -37,6 +40,15 @@ export function normalizeShopifyId(value: unknown): string | null {
   return /^\d+$/.test(tail) && tail !== "0" ? tail : null;
 }
 
+const CATALOG_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/** Identity used only when a line has no Shopify variant. Prefixed so it cannot collide with a variant id. */
+export function catalogCompositionId(value: unknown): string | null {
+  const text = String(value ?? "").trim();
+  if (!CATALOG_ID.test(text)) return null;
+  return `catalog:${text.toLowerCase()}`;
+}
+
 export function compositionKey(items: Array<{ variantId: string; qty: number }>) {
   const body = [...items]
     .sort((left, right) => left.variantId.localeCompare(right.variantId))
@@ -54,15 +66,16 @@ export function buildShipmentComposition(lines: CompositionLine[]): ShipmentComp
     if (qty <= 0) continue;
     shippable += 1;
     const variantId = normalizeShopifyId(line.variantId);
-    if (!variantId) return { ok: false, reason: "MISSING_VARIANT_IDS" };
-    const existing = merged.get(variantId);
+    const identity = variantId ?? catalogCompositionId(line.catalogProductId);
+    if (!identity) return { ok: false, reason: "MISSING_VARIANT_IDS" };
+    const existing = merged.get(identity);
     if (existing) {
       existing.qty += qty;
       continue;
     }
-    merged.set(variantId, {
-      variantId,
-      productId: normalizeShopifyId(line.productId),
+    merged.set(identity, {
+      variantId: identity,
+      productId: variantId ? normalizeShopifyId(line.productId) : identity.slice("catalog:".length),
       sku: line.sku?.trim() || null,
       title: line.title?.trim() || null,
       qty,
@@ -83,6 +96,7 @@ export function compositionFromOrderLines(
   rows: Array<{
     shopify_variant_id?: string | null;
     shopify_product_id?: string | null;
+    product_id?: string | null;
     sku?: string | null;
     title?: string | null;
     quantity?: number | null;
@@ -94,6 +108,7 @@ export function compositionFromOrderLines(
     rows.map((row) => ({
       variantId: row.shopify_variant_id ?? null,
       productId: row.shopify_product_id ?? null,
+      catalogProductId: row.product_id ?? null,
       sku: row.sku ?? null,
       title: row.title ?? null,
       quantity: Number(row.unfulfilled_quantity ?? row.quantity ?? 0),

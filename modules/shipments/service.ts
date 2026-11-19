@@ -33,6 +33,7 @@ import {
 import { parcelBoxIssue } from "@/modules/india-post/article-validator";
 import { sameBox } from "@/modules/autopack/decide";
 import { recordMerchantBox } from "@/modules/autopack/history";
+import { lookupOrderShipmentBox, shipmentBoxColumns, type OrderBoxLine } from "@/modules/shipments/order-box";
 import { DEFAULT_INDIA_POST_SERVICE, INDIA_POST_SERVICES } from "@/types/domain";
 import { commerceAddressReviewRequired } from "@/modules/orders/prebooking-validation";
 import { shippingAddressBookingBlock } from "@/modules/shopify/shipping-contact";
@@ -204,7 +205,9 @@ export async function createShipmentsForOrders(
 
   const { data: orders, error } = await supabase
     .from("orders")
-    .select("*, order_line_items(quantity, unfulfilled_quantity, weight_grams, unit_price)")
+    .select(
+      "*, order_line_items(quantity, unfulfilled_quantity, weight_grams, unit_price, length_cm, width_cm, height_cm, dimension_source, requires_shipping, shopify_variant_id, shopify_product_id, product_id, sku, title)"
+    )
     .eq("organization_id", ctx.organizationId)
     .in("id", orderIds);
 
@@ -356,6 +359,31 @@ export async function createShipmentsForOrders(
       })),
       explicitGrams: extras?.weightGrams,
     });
+    const callerPassedBox = extras?.lengthCm != null && extras?.widthCm != null && extras?.heightCm != null;
+    const resolveAutomaticBox = (
+      shipment: { metadata?: unknown; status?: string | null; booked_at?: string | null; barcode?: string | null } | null
+    ) => {
+      if (callerPassedBox) return Promise.resolve(null);
+      if (shipment && manualDimensionLock(readParcelDimensionSource(shipment.metadata), shipment.metadata)) {
+        return Promise.resolve(null);
+      }
+      return lookupOrderShipmentBox(supabase, {
+        organizationId: ctx.organizationId,
+        orderId: String(order.id),
+        lines: items as OrderBoxLine[],
+        shopifyOrder,
+        serviceCode: serviceFor(order),
+        weightGrams: weight,
+        shipment: shipment
+          ? {
+              status: shipment.status,
+              bookedAt: shipment.booked_at,
+              barcode: shipment.barcode,
+              metadata: shipment.metadata,
+            }
+          : null,
+      });
+    };
 
     if (action === "processing" && current) {
       if (!alreadyBooked) {
@@ -451,6 +479,7 @@ export async function createShipmentsForOrders(
       const keepMerchantDims =
         manualDimensionLock(readParcelDimensionSource(current.metadata), current.metadata) ||
         extras?.dimensionSource === "autopack_history";
+      const automaticBox = keepMerchantDims ? null : await resolveAutomaticBox(current);
       // A barcode PostBus recorded as never sent may be reused; its "never submitted" code stays
       // on the row so the booking run accepts it.
       const keptBarcode = shipmentBarcode(current.barcode);
@@ -464,6 +493,7 @@ export async function createShipmentsForOrders(
           cod_amount: collect.cod_amount,
           service_code: serviceFor(order),
           weight_grams: weight,
+          ...(automaticBox ? shipmentBoxColumns(automaticBox, current.metadata) : {}),
           ...(!keepMerchantDims && extras?.lengthCm != null ? { length_cm: extras.lengthCm } : {}),
           ...(!keepMerchantDims && extras?.widthCm != null ? { width_cm: extras.widthCm } : {}),
           ...(!keepMerchantDims && extras?.heightCm != null ? { height_cm: extras.heightCm } : {}),
@@ -529,6 +559,21 @@ export async function createShipmentsForOrders(
     }
 
     const collect = shipmentCollectFromOrder(order);
+    const automaticBox = await resolveAutomaticBox(null);
+    const callerMetadata =
+      extras?.dimensionSource && extras.lengthCm != null && extras.widthCm != null && extras.heightCm != null
+        ? {
+            parcelDimensions: parcelDimensionsMetadata({
+              lengthCm: extras.lengthCm,
+              widthCm: extras.widthCm,
+              heightCm: extras.heightCm,
+              source: extras.dimensionSource,
+              packageId: extras.dimensionPackageId,
+              packageName: extras.dimensionPackageName,
+              evidenceId: extras.dimensionEvidenceId,
+            }),
+          }
+        : null;
     const { data: shipment, error: shipError } = await supabase
       .from("shipments")
       .insert({
@@ -540,24 +585,14 @@ export async function createShipmentsForOrders(
         payment_mode: collect.payment_mode,
         cod_amount: collect.cod_amount,
         weight_grams: weight,
-        length_cm: extras?.lengthCm ?? null,
-        width_cm: extras?.widthCm ?? null,
-        height_cm: extras?.heightCm ?? null,
-        ...(extras?.dimensionSource && extras.lengthCm != null && extras.widthCm != null && extras.heightCm != null
-          ? {
-              metadata: {
-                parcelDimensions: parcelDimensionsMetadata({
-                  lengthCm: extras.lengthCm,
-                  widthCm: extras.widthCm,
-                  heightCm: extras.heightCm,
-                  source: extras.dimensionSource,
-                  packageId: extras.dimensionPackageId,
-                  packageName: extras.dimensionPackageName,
-                  evidenceId: extras.dimensionEvidenceId,
-                }),
-              },
-            }
-          : {}),
+        length_cm: extras?.lengthCm ?? automaticBox?.lengthCm ?? null,
+        width_cm: extras?.widthCm ?? automaticBox?.widthCm ?? null,
+        height_cm: extras?.heightCm ?? automaticBox?.heightCm ?? null,
+        ...(callerMetadata
+          ? { metadata: callerMetadata }
+          : automaticBox
+            ? { metadata: shipmentBoxColumns(automaticBox).metadata }
+            : {}),
         status: enqueueBooking ? "QUEUED" : "DRAFT",
       })
       .select()

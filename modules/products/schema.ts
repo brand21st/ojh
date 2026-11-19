@@ -17,6 +17,31 @@ export const productPaymentFields = z
     }
   });
 
+const optionalCm = z.preprocess(
+  (value) => (value === "" || value == null ? null : value),
+  z.union([z.null(), z.coerce.number().gt(0, "Enter a size greater than 0.").max(150, "Size cannot exceed 150 cm.")])
+);
+
+export const productBoxFields = {
+  lengthCm: optionalCm.optional(),
+  widthCm: optionalCm.optional(),
+  heightCm: optionalCm.optional(),
+};
+
+export function requireCompleteBox(
+  value: { lengthCm?: number | null; widthCm?: number | null; heightCm?: number | null },
+  ctx: z.RefinementCtx
+) {
+  const filled = [value.lengthCm, value.widthCm, value.heightCm].filter((side) => side != null).length;
+  if (filled !== 0 && filled !== 3) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["lengthCm"],
+      message: "Enter length, width, and height, or leave all three empty.",
+    });
+  }
+}
+
 const createProductObject = z.object({
   name: z.string().trim().min(1, "Enter a product name.").max(200),
   sku: z.string().trim().min(1, "Enter a SKU.").max(64),
@@ -24,6 +49,7 @@ const createProductObject = z.object({
   compareAtPrice: z.coerce.number().min(0).optional().nullable(),
   description: z.string().trim().max(4000).optional().nullable(),
   weightGrams: z.coerce.number().int().min(0, "Weight cannot be negative."),
+  ...productBoxFields,
   openingStock: z.coerce.number().int().min(0).default(0),
   prepaidEnabled: z.boolean().default(true),
   codEnabled: z.boolean().default(true),
@@ -38,7 +64,13 @@ const createProductObject = z.object({
 });
 
 function requireAPaymentMode(
-  value: { prepaidEnabled: boolean; codEnabled: boolean },
+  value: {
+    prepaidEnabled: boolean;
+    codEnabled: boolean;
+    lengthCm?: number | null;
+    widthCm?: number | null;
+    heightCm?: number | null;
+  },
   ctx: z.RefinementCtx,
 ) {
   if (!value.prepaidEnabled && !value.codEnabled) {
@@ -48,6 +80,7 @@ function requireAPaymentMode(
       message: "Enable prepaid, COD, or both.",
     });
   }
+  requireCompleteBox(value, ctx);
 }
 
 export const createProductSchema = createProductObject.superRefine(requireAPaymentMode);
@@ -78,6 +111,7 @@ export const updateProductSchema = z
     categoryIds: z.array(z.string().uuid()).max(20).optional(),
     upsellProductIds: z.array(z.string().uuid()).max(8).optional(),
     crossSellProductIds: z.array(z.string().uuid()).max(8).optional(),
+    ...productBoxFields,
   })
   .superRefine((value, ctx) => {
     if (value.prepaidEnabled === false && value.codEnabled === false) {
@@ -87,6 +121,7 @@ export const updateProductSchema = z
         message: "Enable prepaid, COD, or both.",
       });
     }
+    requireCompleteBox(value, ctx);
   });
 
 export const adjustInventorySchema = z.object({

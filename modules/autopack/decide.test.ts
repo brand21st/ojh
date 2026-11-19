@@ -69,6 +69,24 @@ describe("composition", () => {
     expect(comp([["1", 1], [null, 1]])).toEqual({ ok: false, reason: "MISSING_VARIANT_IDS" });
   });
 
+  it("matches catalog products without changing Shopify keys", () => {
+    const catalogId = "11111111-1111-4111-8111-111111111111";
+    const shopifyOnly = buildShipmentComposition([{ variantId: "9", quantity: 1 }]);
+    const withCatalogId = buildShipmentComposition([
+      { variantId: "9", catalogProductId: catalogId, quantity: 1 },
+    ]);
+    expect(shopifyOnly.ok && withCatalogId.ok && shopifyOnly.key === withCatalogId.key).toBe(true);
+
+    const catalog = buildShipmentComposition([{ catalogProductId: catalogId, quantity: 2 }]);
+    const again = buildShipmentComposition([{ catalogProductId: catalogId.toUpperCase(), quantity: 2 }]);
+    expect(catalog.ok && again.ok && catalog.key === again.key).toBe(true);
+    expect(catalog.ok && shopifyOnly.ok && catalog.key !== shopifyOnly.key).toBe(true);
+    expect(buildShipmentComposition([{ catalogProductId: "not-a-product", quantity: 1 }])).toEqual({
+      ok: false,
+      reason: "MISSING_VARIANT_IDS",
+    });
+  });
+
   it("skips non-shipping and fully fulfilled lines", () => {
     const composition = buildShipmentComposition([
       { variantId: 1, quantity: 1 },
@@ -83,6 +101,22 @@ describe("composition", () => {
 describe("decidePackage", () => {
   const twoMugs = comp([["11", 2]]);
   const twoMugsKey = keyOf([["11", 2]]);
+
+  it("labels a single product box as the product measurement", () => {
+    const decision = decidePackage({
+      composition: comp([["11", 1]]),
+      history: [],
+      presets: [],
+      serviceCode: SERVICE,
+      fallback: { lengthCm: 20, widthCm: 15, heightCm: 10, source: "postbus_override" },
+    });
+    expect(decision).toMatchObject({
+      kind: "CUSTOM_DIMENSIONS",
+      evidence: { type: "product" },
+      autoApplicable: true,
+      reason: "Single item with the product box.",
+    });
+  });
 
   it("existing preset package: the single-preset rule still returns SAVED_PACKAGE", () => {
     const decision = decidePackage({
