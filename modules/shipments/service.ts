@@ -14,6 +14,7 @@ import { readCeptSubmitIntentAt } from "@/modules/india-post/booking-intent";
 import { scheduleForceRetryBooking } from "@/modules/india-post/booking-force-retry";
 import { directBookJobToRun, evaluateBookingRetryEligibility, NEVER_SUBMITTED_CODES } from "@/modules/india-post/booking-retry-eligibility";
 import { resolveOrderBookingService, shipmentServiceLocked } from "@/modules/india-post/booking-service";
+import { isUuid } from "@/modules/orders/order-number";
 import {
   indiaPostDisplayShipmentStatus,
   indiaPostVisibleShipmentError,
@@ -654,7 +655,7 @@ export async function createShipmentsForOrders(
 
   await supabase.from("audit_logs").insert({
     organization_id: ctx.organizationId,
-    actor_id: ctx.userId,
+    actor_id: isUuid(ctx.userId ?? "") ? ctx.userId : null,
     action:
       action === "processing"
         ? "shipment.processing"
@@ -1062,7 +1063,7 @@ export async function updateShipmentDimensions(
 
   await supabase.from("audit_logs").insert({
     organization_id: ctx.organizationId,
-    actor_id: ctx.userId,
+    actor_id: isUuid(ctx.userId ?? "") ? ctx.userId : null,
     action: "shipment.dimensions_updated",
     entity_type: "shipment",
     entity_id: shipmentId,
@@ -1202,7 +1203,7 @@ export async function setOrderShipmentDimensions(
 
   await supabase.from("audit_logs").insert({
     organization_id: ctx.organizationId,
-    actor_id: ctx.userId,
+    actor_id: isUuid(ctx.userId ?? "") ? ctx.userId : null,
     action: "shipment.dimensions_created",
     entity_type: "shipment",
     entity_id: shipment.id,
@@ -1450,7 +1451,7 @@ async function markWatiShipmentStage(
 
   await supabase.from("audit_logs").insert({
     organization_id: ctx.organizationId,
-    actor_id: ctx.userId,
+    actor_id: isUuid(ctx.userId ?? "") ? ctx.userId : null,
     action: action === "delivered" ? "shipment.delivered" : "shipment.in_transit",
     entity_type: "shipment",
     after: { count: updated.length, orderIds, skipped, action },

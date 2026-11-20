@@ -9,6 +9,7 @@ import { merchantBookOrderSchema, merchantShipmentListQuery } from "@/modules/me
 import { loadLabelPdfBytes } from "@/modules/labels/load";
 import { enqueueOrgTrackingSyncIfIdle } from "@/modules/india-post/tracking-sync";
 import { createShipmentsForOrders, getShipment } from "@/modules/shipments/service";
+import { orderLookup } from "@/modules/orders/order-number";
 
 const TRACKING_STALE_MS = 15 * 60 * 1000;
 const TERMINAL = new Set(["DELIVERED", "CANCELLED", "RTO_DELIVERED"]);
@@ -22,15 +23,20 @@ export async function bookMerchantOrder(
   const body = merchantBookOrderSchema.parse(raw ?? {});
   const tenant = merchantActor(ctx);
 
-  const { data: order } = await supabase
+  const lookup = orderLookup(orderId);
+  if (!lookup) {
+    throw new MerchantApiError(MERCHANT_ERROR_CODES.RESOURCE_NOT_FOUND, "Order not found.");
+  }
+  const { data: order, error: orderError } = await supabase
     .from("orders")
     .select("id")
     .eq("organization_id", ctx.organizationId)
-    .eq("id", orderId)
+    .eq(lookup.column, lookup.value)
     .maybeSingle();
-  if (!order) {
+  if (orderError || !order?.id) {
     throw new MerchantApiError(MERCHANT_ERROR_CODES.RESOURCE_NOT_FOUND, "Order not found.");
   }
+  orderId = String(order.id);
 
   try {
     const result = await createShipmentsForOrders(supabase, tenant, [orderId], {

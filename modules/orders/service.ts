@@ -203,6 +203,22 @@ export async function listOrders(
   };
 }
 
+/** Turn PB-10058 or a blank key into the orders.id uuid before any id filter. */
+async function canonicalOrderId(supabase: SupabaseClient, ctx: TenantContext, idOrNumber: string) {
+  const lookup = orderLookup(idOrNumber);
+  if (!lookup) throw new AppError(ERROR_CODES.RESOURCE_NOT_FOUND, "Order not found.");
+  if (lookup.column === "id") return lookup.value;
+  const { data, error } = await supabase
+    .from("orders")
+    .select("id")
+    .eq("organization_id", ctx.organizationId)
+    .eq("order_number", lookup.value)
+    .maybeSingle();
+  if (error) throw new AppError(ERROR_CODES.VALIDATION_ERROR, error.message);
+  if (!data?.id) throw new AppError(ERROR_CODES.RESOURCE_NOT_FOUND, "Order not found.");
+  return String(data.id);
+}
+
 export async function getOrder(supabase: SupabaseClient, ctx: TenantContext, id: string) {
   const lookup = orderLookup(id);
   if (!lookup) throw new AppError(ERROR_CODES.RESOURCE_NOT_FOUND, "Order not found.");
@@ -435,6 +451,7 @@ export async function setOrderBookingService(
   if (!service) {
     throw new AppError(ERROR_CODES.VALIDATION_ERROR, "Choose Speed Post parcel or Business Parcel.");
   }
+  orderId = await canonicalOrderId(supabase, ctx, orderId);
   const { data, error } = await supabase
     .from("orders")
     .update({ india_post_service: service })
@@ -467,6 +484,7 @@ export async function updateOrderWeights(
   orderId: string,
   input: z.infer<typeof updateOrderWeightsSchema>
 ) {
+  orderId = await canonicalOrderId(supabase, ctx, orderId);
   const { data: order, error: orderError } = await supabase
     .from("orders")
     .select("id")
@@ -551,6 +569,7 @@ export async function updateOrderCodAmount(
   orderId: string,
   input: z.infer<typeof updateOrderCodSchema>
 ) {
+  orderId = await canonicalOrderId(supabase, ctx, orderId);
   const { data: order, error: orderError } = await supabase
     .from("orders")
     .select("id, source, payment_status, total_amount, amount_paid, cod_amount, metadata")
@@ -622,6 +641,7 @@ export async function updateOrderShippingAddress(
   orderId: string,
   input: z.infer<typeof updateOrderAddressSchema>
 ) {
+  orderId = await canonicalOrderId(supabase, ctx, orderId);
   const { data: order, error: orderError } = await supabase
     .from("orders")
     .select("id, customer_id, shipping_address_id")
@@ -761,6 +781,7 @@ async function editableShippingAddress(supabase: SupabaseClient, ctx: TenantCont
 }
 
 export async function restoreOrderShippingAddress(supabase: SupabaseClient, ctx: TenantContext, orderId: string) {
+  orderId = await canonicalOrderId(supabase, ctx, orderId);
   const { address } = await editableShippingAddress(supabase, ctx, orderId);
   const original = address.original_shipping;
   if (!original || typeof original !== "object") {
@@ -795,6 +816,7 @@ export async function restoreOrderShippingAddress(supabase: SupabaseClient, ctx:
 }
 
 export async function acceptOrderShippingAddress(supabase: SupabaseClient, ctx: TenantContext, orderId: string) {
+  orderId = await canonicalOrderId(supabase, ctx, orderId);
   const { address } = await editableShippingAddress(supabase, ctx, orderId);
   const classified = classifyStoredShippingAddress(address);
   if (classified.status !== "READY") {
@@ -823,6 +845,7 @@ export async function acceptOrderShippingAddress(supabase: SupabaseClient, ctx: 
 }
 
 export async function revalidateOrderShippingAddress(supabase: SupabaseClient, ctx: TenantContext, orderId: string) {
+  orderId = await canonicalOrderId(supabase, ctx, orderId);
   const { order, address } = await editableShippingAddress(supabase, ctx, orderId);
   const override = address.address_manual_override === true;
   const unknownProvenance = address.address_manual_override == null;
@@ -1033,6 +1056,7 @@ export async function confirmWhatsAppOrder(
     lineItems?: Array<{ title: string; sku?: string; quantity: number; unitPrice: number; weightGrams?: number }>;
   }
 ) {
+  orderId = await canonicalOrderId(supabase, ctx, orderId);
   const { data: order, error } = await supabase
     .from("orders")
     .select("id, source, status, payment_status, customer_id, shipping_address_id, metadata, total_amount")
@@ -1165,6 +1189,7 @@ export async function confirmShopifyPayment(
   orderId: string,
   paymentType: "PREPAID" | "COD"
 ) {
+  orderId = await canonicalOrderId(supabase, ctx, orderId);
   const { data: order, error } = await supabase
     .from("orders")
     .select("id, source, payment_status, total_amount, metadata")
