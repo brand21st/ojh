@@ -18,7 +18,16 @@ const nextConfig: NextConfig = {
   allowedDevOrigins: ["127.0.0.1"],
   poweredByHeader: false,
   compress: true,
-  serverExternalPackages: ["bullmq", "ioredis", "@napi-rs/canvas", "sharp"],
+  serverExternalPackages: [
+    "bullmq",
+    "ioredis",
+    "@napi-rs/canvas",
+    "sharp",
+    "@opentelemetry/api",
+    "@opentelemetry/sdk-logs",
+    "@opentelemetry/exporter-logs-otlp-http",
+    "@opentelemetry/resources",
+  ],
   turbopack: {
     resolveAlias: {
       "@napi-rs/canvas": { browser: canvasStub },
