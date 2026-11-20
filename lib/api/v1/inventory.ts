@@ -368,6 +368,32 @@ export async function handleInventoryRoutes(
     throw new AppError(ERROR_CODES.RESOURCE_NOT_FOUND, "Unknown cover route.");
   }
 
+  if (slugs[0] === "inventory" && slugs[1] === "storefront" && (slugs[2] === "builder" || slugs[2] === "versions" || slugs[2] === "analytics")) {
+    const builder = await import("@/modules/storefront/builder");
+    if (key === "GET inventory/storefront/builder") return builder.getStoreBuilderState(supabase, ctx);
+    if (key === "GET inventory/storefront/builder/product-summaries") {
+      const ids = z.array(z.string().uuid()).max(100).parse((request.nextUrl.searchParams.get("ids") ?? "").split(",").filter(Boolean));
+      const { loadFeaturedProductSummaries } = await import("@/modules/storefront/service");
+      return loadFeaturedProductSummaries(supabase, ctx.organizationId, ids);
+    }
+    if (key === "PUT inventory/storefront/builder/draft") return builder.saveStoreDraft(supabase, ctx, builder.storeDraftSchema.parse(await request.json()));
+    if (key === "DELETE inventory/storefront/builder/draft") return builder.discardStoreDraft(supabase, ctx);
+    if (key === "POST inventory/storefront/builder/publish") return builder.publishStoreDraft(supabase, ctx, builder.publishSchema.parse(await request.json().catch(() => ({}))));
+    if (key === "POST inventory/storefront/builder/revert-classic") {
+      if (ctx.role !== "OWNER" && ctx.role !== "ADMIN") throw new AppError(ERROR_CODES.FORBIDDEN, "Only owners and admins can switch the store layout.");
+      return builder.revertToClassicLayout(supabase, ctx);
+    }
+    if (key === "PATCH inventory/storefront/builder/category") return builder.setBusinessCategory(supabase, ctx, builder.businessCategorySchema.parse(await request.json()));
+    if (key === "GET inventory/storefront/versions") return builder.listStoreLayoutVersions(supabase, ctx);
+    if (method === "POST" && slugs[2] === "versions" && slugs[3] && slugs[4] === "restore" && slugs.length === 5) {
+      return builder.restoreStoreLayoutVersion(supabase, ctx, slugs[3]);
+    }
+    if (key === "GET inventory/storefront/analytics") {
+      return builder.storefrontAnalytics(supabase, ctx, builder.storefrontAnalyticsRangeSchema.parse(request.nextUrl.searchParams.get("range") ?? undefined));
+    }
+    throw new AppError(ERROR_CODES.RESOURCE_NOT_FOUND, "Unknown store builder route.");
+  }
+
   if (key === "GET inventory/storefront") {
     return getStorefrontSettings(supabase, ctx);
   }

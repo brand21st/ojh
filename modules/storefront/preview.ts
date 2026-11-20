@@ -4,6 +4,7 @@ import { DEFAULT_STORE_THEME, DEFAULT_STORE_TRACKING, type StoreTheme, type Stor
 import { eligibleCovers, type CoverRecord } from "@/modules/storefront/cover-model";
 import { assembleStoreFooter, DEFAULT_FOOTER_CONFIG, type StoreFooterSources, type StorefrontFooterConfig } from "@/modules/storefront/footer";
 import type { ProductRecord } from "@/types/api";
+import { layoutCategoryRowIds, type LayoutSection, type StoreLayout } from "@/modules/storefront/layout/schema";
 
 /** Message types exchanged between the dashboard Storefront tab and the framed /store-preview page. */
 export const STORE_PREVIEW_MESSAGE = "postbus:store-preview";
@@ -24,6 +25,7 @@ export type StorefrontPreviewSettings = {
   slides: CoverRecord[];
   workspace: string;
   footer: StorefrontFooterConfig;
+  whatsappPhone?: string | null;
   footerSources?: {
     organization: StoreFooterSources["organization"];
     email: string | null;
@@ -35,6 +37,9 @@ export type StorefrontPreviewSettings = {
 export type PreviewCategory = StoreCategory & { active: boolean };
 export type PreviewBundle = BundleInput & { id: string };
 export type StorefrontPreviewDrafts = {
+  /** Store Builder draft layout; renders the section-based marketplace home. */
+  layout?: StoreLayout | null;
+  featuredProductIds?: string[] | null;
   storeName?: string | null;
   accentColor?: string | null;
   theme?: StoreTheme | null;
@@ -108,6 +113,26 @@ function previewBundles(rows: PreviewBundle[], items: StoreProduct[]): StoreBund
   });
 }
 
+/** Collection and video products from the loaded preview catalog, keyed by section id. */
+function previewSectionProducts(layout: StoreLayout, items: StoreProduct[], categoryIds: string[]) {
+  const byId = new Map(items.map((item) => [item.id, item]));
+  const result: Record<string, StoreProduct[]> = {};
+  for (const [sectionId, ids] of Object.entries(layoutCategoryRowIds(layout, categoryIds))) {
+    for (const categoryId of ids) result[`${sectionId}:${categoryId}`] = items.filter((item) => item.categoryIds?.includes(categoryId)).slice(0, 8);
+  }
+  for (const section of layout.sections) {
+    if (!section.visible) continue;
+    if (section.type === "collection") {
+      const { categoryId, limit } = (section as LayoutSection<"collection">).settings;
+      result[section.id] = categoryId ? items.filter((item) => item.categoryIds?.includes(categoryId)).slice(0, limit) : [];
+    } else if (section.type === "video_shopping") {
+      const ids = (section as LayoutSection<"video_shopping">).settings.videos.flatMap((video) => video.productIds);
+      result[section.id] = [...new Set(ids)].flatMap((id) => byId.get(id) ?? []);
+    }
+  }
+  return result;
+}
+
 /**
  * Builds the payload the framed preview renders: saved settings plus unsaved drafts,
  * shaped like the public /api/v1/public/store response.
@@ -123,17 +148,21 @@ export function buildStorefrontPreview(input: {
 }): StorePayload {
   const { settings, drafts = {} } = input;
   const items = input.products.map(previewProduct);
-  const featuredIds = settings.featuredProductIds ?? [];
+  const featuredIds = drafts.featuredProductIds ?? settings.featuredProductIds ?? [];
   const featuredSet = new Set(featuredIds);
   const byId = new Map(items.map((item) => [item.id, item]));
   const categories = input.categories
     .filter((category) => category.active)
     .map(({ id, name, slug, imageUrl, description }) => ({ id, name, slug, imageUrl, description }));
   const storeName = drafts.storeName?.trim() || settings.storeName;
-  const accentColor = drafts.accentColor || settings.accentColor;
+  const layout = drafts.layout ?? null;
+  const accentColor = layout?.tokens.accent || drafts.accentColor || settings.accentColor;
   const footerSources = settings.footerSources;
   return {
-    marketplace: settings.marketplace !== false,
+    marketplace: Boolean(layout) || settings.marketplace !== false,
+    layout,
+    sectionProducts: layout ? previewSectionProducts(layout, items, categories.map((c) => c.id)) : undefined,
+    whatsappPhone: layout?.whatsappButton.enabled ? settings.whatsappPhone ?? null : null,
     published: true,
     theme: drafts.theme ?? settings.theme ?? DEFAULT_STORE_THEME,
     tracking: settings.tracking ?? DEFAULT_STORE_TRACKING,

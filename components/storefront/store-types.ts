@@ -1,5 +1,6 @@
 import type { StoreFooter } from "@/modules/storefront/footer";
 import type { StoreTheme, StoreTrackingConfig } from "@/modules/storefront/config";
+import type { StoreLayout } from "@/modules/storefront/layout/schema";
 
 export type { StoreFooter };
 export type StoreProduct = {
@@ -54,6 +55,12 @@ export type StoreSlide = {
 
 export type StorePayload = {
   marketplace?: boolean;
+  /** Store Builder layout (published, or the draft inside the dashboard preview). Null = classic home order. */
+  layout?: StoreLayout | null;
+  /** Products for collection / video sections, keyed by section id. */
+  sectionProducts?: Record<string, StoreProduct[]>;
+  /** Merchant WhatsApp (10 digits) when the floating chat button is on. */
+  whatsappPhone?: string | null;
   theme?: StoreTheme;
   tracking?: StoreTrackingConfig;
   bundles?: StoreBundle[];

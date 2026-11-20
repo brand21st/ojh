@@ -62,6 +62,33 @@ type StoreAppProps = StoreRef & {
   basePath?: string;
 };
 
+/** Store Builder tokens as data attributes (variants) and CSS variables; classic stores keep accent/secondary/font only. */
+function storeThemeAttributes(store: StorePayload) {
+  const tokens = store.layout?.tokens;
+  if (!tokens) return { "data-font": store.theme?.font ?? "geist" };
+  return {
+    "data-font": tokens.font,
+    "data-heading-font": tokens.headingFont,
+    "data-radius": tokens.radius,
+    "data-card": tokens.card,
+    "data-header": tokens.header,
+    "data-density": tokens.density,
+    "data-theme": store.layout?.themeId,
+    "data-mobile-nav": tokens.mobileNav ? "true" : undefined,
+  };
+}
+
+function storeThemeVars(store: StorePayload) {
+  const tokens = store.layout?.tokens;
+  const accent = tokens?.accent ?? store.accentColor;
+  return {
+    "--accent": accent,
+    "--accent-text": contrastText(accent),
+    "--secondary": tokens?.secondary ?? store.theme?.secondaryColor,
+    ...(tokens ? { "--page": tokens.background, "--ink": tokens.ink } : {}),
+  };
+}
+
 export function StoreApp({ basePath, ...props }: StoreAppProps) {
   return (
     <StoreBaseProvider workspace={props.workspace ?? ""} basePath={props.preview ? undefined : basePath}>
@@ -468,7 +495,7 @@ function StoreAppInner({
       : null;
 
   return (
-    <div className={store.marketplace ? marketStyles.store : undefined} data-font={store.theme?.font ?? "geist"} style={store.marketplace ? { "--accent": store.accentColor, "--accent-text": contrastText(store.accentColor), "--secondary": store.theme?.secondaryColor, paddingBottom: product ? 0 : count ? 80 : 0 } as CSSProperties : undefined}>
+    <div className={store.marketplace ? marketStyles.store : undefined} {...storeThemeAttributes(store)} style={store.marketplace ? { ...storeThemeVars(store), paddingBottom: product ? 0 : count ? 80 : 0 } as CSSProperties : undefined}>
       {storeCoupon.notice?.tone === "error" ? (
         <div role="alert" className="flex items-center justify-center gap-2 bg-zinc-900 px-4 py-2 text-center text-xs text-white sm:text-sm">
           <span>{storeCoupon.notice.text}</span>

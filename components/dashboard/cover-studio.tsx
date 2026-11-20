@@ -323,7 +323,7 @@ export function CoverStudio({
       });
       setCover(next);
       toast.success(status === "PUBLISHED" ? "Cover published." : "Draft saved.");
-      if (status === "PUBLISHED") router.push("/dashboard/inventory?tab=covers");
+      if (status === "PUBLISHED") router.push("/dashboard/store-builder/marketing?tab=covers");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not save.");
     } finally {
@@ -374,7 +374,7 @@ export function CoverStudio({
           <span className="rounded-full border border-emerald-100 bg-emerald-50 px-2 py-1 text-[11px] font-semibold text-emerald-800">
             {remaining} credits
           </span>
-          <Button size="icon-xs" variant="ghost" aria-label="Close" onClick={() => router.push("/dashboard/inventory?tab=covers")}>
+          <Button size="icon-xs" variant="ghost" aria-label="Close" onClick={() => router.push("/dashboard/store-builder/marketing?tab=covers")}>
             <X className="size-4" />
           </Button>
         </div>

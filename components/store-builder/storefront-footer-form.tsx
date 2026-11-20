@@ -1,8 +1,11 @@
 "use client";
 
+import { ArrowDown, ArrowUp } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import { toast } from "sonner";
 import {
   DEFAULT_FOOTER_CONFIG,
   FOOTER_SECTION_KEYS,
@@ -22,6 +25,8 @@ const SECTION_LABELS: Record<FooterSectionKey, string> = {
   poweredBy: "Powered by Postbus",
 };
 
+const HEX = /^#[0-9A-Fa-f]{6}$/;
+
 const SOCIAL_LABELS: Record<FooterSocialNetwork, string> = {
   instagram: "Instagram",
   facebook: "Facebook",
@@ -37,6 +42,7 @@ function ColorField({
   fallback,
   disabled,
   onChange,
+  onCommit,
 }: {
   id: string;
   label: string;
@@ -44,8 +50,10 @@ function ColorField({
   fallback: string;
   disabled: boolean;
   onChange: (value: string | null) => void;
+  onCommit: (value: string | null) => void;
 }) {
-  const hex = value || fallback;
+  const hex = value && HEX.test(value) ? value : fallback;
+  const invalid = Boolean(value) && !HEX.test(value ?? "");
   return (
     <div className="min-w-0">
       <Label htmlFor={id}>{label}</Label>
@@ -55,17 +63,30 @@ function ColorField({
           type="color"
           disabled={disabled}
           value={hex}
+          aria-label={`${label} color picker`}
           className="h-11 w-11 shrink-0 cursor-pointer rounded-lg border border-border bg-card"
           onChange={(event) => onChange(event.target.value)}
+          onBlur={(event) => onCommit(event.target.value)}
         />
         <Input
-          className="h-11 min-w-0"
+          id={`${id}-hex`}
+          aria-label={`${label} hex`}
+          aria-invalid={invalid || undefined}
+          className={`h-11 min-w-0 font-mono uppercase ${invalid ? "border-red-500" : ""}`}
           disabled={disabled}
+          maxLength={7}
           value={value ?? ""}
           placeholder={fallback}
           onChange={(event) => onChange(event.target.value.trim() || null)}
+          onBlur={(event) => {
+            const next = event.target.value.trim();
+            // Empty resets to the default; anything else must be a full hex before it is saved.
+            if (!next) onCommit(null);
+            else if (HEX.test(next)) onCommit(next);
+          }}
         />
       </div>
+      {invalid ? <p className="mt-1 text-xs text-red-600">Use a hex color like #18181B.</p> : null}
     </div>
   );
 }
@@ -109,6 +130,7 @@ export function StorefrontFooterForm({
           </p>
         </div>
         <Switch
+          aria-label="Show footer"
           checked={footer.enabled}
           disabled={disabled}
           onCheckedChange={(enabled) => {
@@ -140,20 +162,28 @@ export function StorefrontFooterForm({
       </div>
 
       <div className="mt-4 grid gap-3 sm:grid-cols-2">
-        <ColorField id="footer-bg" label="Background" value={footer.backgroundColor} fallback="#18181b" disabled={disabled} onChange={(backgroundColor) => patch({ ...footer, backgroundColor })} />
-        <ColorField id="footer-text" label="Text" value={footer.textColor} fallback="#d4d4d8" disabled={disabled} onChange={(textColor) => patch({ ...footer, textColor })} />
-        <ColorField id="footer-heading" label="Headings" value={footer.headingColor} fallback="#fafafa" disabled={disabled} onChange={(headingColor) => patch({ ...footer, headingColor })} />
-        <ColorField id="footer-accent" label="Accent" value={footer.accentColor} fallback="#E11D48" disabled={disabled} onChange={(accentColor) => patch({ ...footer, accentColor })} />
-        <ColorField id="footer-border" label="Border" value={footer.borderColor} fallback="#3f3f46" disabled={disabled} onChange={(borderColor) => patch({ ...footer, borderColor })} />
+        <ColorField id="footer-bg" label="Background" value={footer.backgroundColor} fallback="#18181b" disabled={disabled} onChange={(backgroundColor) => patch({ ...footer, backgroundColor })} onCommit={(backgroundColor) => onCommit({ ...footer, backgroundColor })} />
+        <ColorField id="footer-text" label="Text" value={footer.textColor} fallback="#d4d4d8" disabled={disabled} onChange={(textColor) => patch({ ...footer, textColor })} onCommit={(textColor) => onCommit({ ...footer, textColor })} />
+        <ColorField id="footer-heading" label="Headings" value={footer.headingColor} fallback="#fafafa" disabled={disabled} onChange={(headingColor) => patch({ ...footer, headingColor })} onCommit={(headingColor) => onCommit({ ...footer, headingColor })} />
+        <ColorField id="footer-accent" label="Accent" value={footer.accentColor} fallback="#E11D48" disabled={disabled} onChange={(accentColor) => patch({ ...footer, accentColor })} onCommit={(accentColor) => onCommit({ ...footer, accentColor })} />
+        <ColorField id="footer-border" label="Border" value={footer.borderColor} fallback="#3f3f46" disabled={disabled} onChange={(borderColor) => patch({ ...footer, borderColor })} onCommit={(borderColor) => onCommit({ ...footer, borderColor })} />
       </div>
-      <button
-        type="button"
-        className="mt-3 h-11 rounded-xl border border-border px-4 text-sm font-medium"
-        disabled={disabled}
-        onClick={() => onCommit(footer)}
-      >
-        Save footer colors
-      </button>
+      <div className="mt-3 flex items-center justify-between gap-2">
+        <p className="text-xs text-muted">Colors save when you leave the field.</p>
+        <Button
+          type="button"
+          size="xs"
+          variant="ghost"
+          disabled={disabled}
+          onClick={() => {
+            const next = { ...footer, backgroundColor: null, textColor: null, headingColor: null, accentColor: null, borderColor: null };
+            patch(next);
+            onCommit(next);
+          }}
+        >
+          Reset colors
+        </Button>
+      </div>
 
       <div className="mt-5 space-y-2">
         <p className="text-sm font-semibold">Sections</p>
@@ -161,6 +191,7 @@ export function StorefrontFooterForm({
           <label key={key} className="flex min-h-11 items-center justify-between gap-3 rounded-xl px-1 text-sm">
             <span className="min-w-0 truncate">{SECTION_LABELS[key]}</span>
             <Switch
+              aria-label={`Show ${SECTION_LABELS[key]}`}
               checked={footer.sections[key]}
               disabled={disabled}
               onCheckedChange={(checked) => {
@@ -181,19 +212,23 @@ export function StorefrontFooterForm({
             <div key={id} className="rounded-xl border border-border p-3">
               <div className="flex min-h-11 items-center justify-between gap-2">
                 <p className="text-sm font-medium">{SOCIAL_LABELS[id]}</p>
-                <div className="flex items-center gap-2">
-                  <button type="button" className="h-9 rounded-lg px-2 text-xs" disabled={disabled || index === 0} onClick={() => moveSocial(id, -1)}>
-                    Up
-                  </button>
-                  <button
+                <div className="flex items-center gap-1">
+                  <Button type="button" size="icon-xs" variant="ghost" aria-label={`Move ${SOCIAL_LABELS[id]} up`} title="Move up" disabled={disabled || index === 0} onClick={() => moveSocial(id, -1)}>
+                    <ArrowUp />
+                  </Button>
+                  <Button
                     type="button"
-                    className="h-9 rounded-lg px-2 text-xs"
+                    size="icon-xs"
+                    variant="ghost"
+                    aria-label={`Move ${SOCIAL_LABELS[id]} down`}
+                    title="Move down"
                     disabled={disabled || index === footer.social.order.length - 1}
                     onClick={() => moveSocial(id, 1)}
                   >
-                    Down
-                  </button>
+                    <ArrowDown />
+                  </Button>
                   <Switch
+                    aria-label={`Show ${SOCIAL_LABELS[id]}`}
                     checked={item.enabled}
                     disabled={disabled}
                     onCheckedChange={(enabled) => {
@@ -209,6 +244,9 @@ export function StorefrontFooterForm({
               </div>
               <Input
                 className="mt-2 h-11 min-w-0"
+                aria-label={`${SOCIAL_LABELS[id]} URL`}
+                type="url"
+                inputMode="url"
                 disabled={disabled}
                 placeholder={`https://${id}.com/...`}
                 value={item.url}
@@ -220,6 +258,11 @@ export function StorefrontFooterForm({
                   patch(next);
                 }}
                 onBlur={(event) => {
+                  const url = event.target.value.trim();
+                  if (url && !/^https?:\/\//i.test(url)) {
+                    toast.error(`${SOCIAL_LABELS[id]} link must start with https://`);
+                    return;
+                  }
                   const next = {
                     ...footer,
                     social: { ...footer.social, items: { ...footer.social.items, [id]: { ...item, url: event.target.value } } },

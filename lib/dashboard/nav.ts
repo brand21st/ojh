@@ -17,6 +17,7 @@ import {
   Settings,
   LifeBuoy,
   Calculator,
+  Store,
 } from "lucide-react";
 import { YoutubeIcon } from "@/components/icons/youtube-icon";
 
@@ -44,6 +45,7 @@ export const sidebarNav: NavItem[] = [
     children: [{ label: "Bulk Excel Booking", href: "/dashboard/orders/bulk-excel" }],
   },
   { label: "Inventory", href: "/dashboard/inventory", icon: Package },
+  { label: "Store Builder", href: "/dashboard/store-builder", icon: Store },
   { label: "Shipments", href: "/dashboard/shipments", icon: Truck, tour: "nav-shipments" },
   { label: "NDR & RTO", href: "/dashboard/ndr-rto", icon: PackageX },
   {
@@ -131,6 +133,8 @@ export function breadcrumbs(pathname: string): Breadcrumb[] {
                 ? "Google Sheets"
               : segment === "ai-accountant"
                 ? "AI Accountant"
+              : segment === "store-builder"
+                ? "Store Builder"
               : segment.replace(/-/g, " "),
       href,
     });

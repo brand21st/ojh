@@ -10,16 +10,14 @@ import styles from "./inventory.module.css";
 import { useMe } from "@/lib/hooks/use-me";
 import { hasPermission } from "@/lib/permissions/rbac";
 
-const TABS = ["overview", "products", "categories", "covers", "storefront", "coupons"] as const;
+/** Storefront, Covers and Coupons moved to /dashboard/store-builder (old ?tab= links redirect in next.config). */
+const TABS = ["overview", "products", "categories"] as const;
 type Tab = (typeof TABS)[number];
 
 const loading = () => <div role="status" aria-label="Loading inventory" className="h-64 animate-pulse rounded-lg bg-surface-soft motion-reduce:animate-none" />;
 const InventoryOverview = dynamic(() => import("./overview-cards").then((m) => m.InventoryOverview), { loading });
 const InventoryProducts = dynamic(() => import("./products-panel").then((m) => m.InventoryProducts), { loading });
 const InventoryCategoriesManager = dynamic(() => import("./categories-manager").then((m) => m.InventoryCategoriesManager), { loading });
-const InventoryStorefront = dynamic(() => import("./storefront-panel").then((m) => m.InventoryStorefront), { loading });
-const InventoryCoupons = dynamic(() => import("./coupons-panel").then((m) => m.InventoryCoupons), { loading });
-const InventoryCovers = dynamic(() => import("./covers-panel").then((m) => m.InventoryCovers), { loading });
 
 export default function InventoryPage() {
   const router = useRouter();
@@ -53,9 +51,6 @@ export default function InventoryPage() {
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="products">Products</TabsTrigger>
           <TabsTrigger value="categories">Categories</TabsTrigger>
-          <TabsTrigger value="covers">Covers</TabsTrigger>
-          <TabsTrigger value="storefront">Storefront</TabsTrigger>
-          <TabsTrigger value="coupons">Coupons</TabsTrigger>
         </TabsList>
         <TabsContent value="overview">
           <InventoryOverview
@@ -73,15 +68,6 @@ export default function InventoryPage() {
         </TabsContent>
         <TabsContent value="categories">
           <InventoryCategoriesManager canWrite={canWrite} />
-        </TabsContent>
-        <TabsContent value="covers" className="w-full min-w-0">
-          <InventoryCovers canWrite={canWrite} />
-        </TabsContent>
-        <TabsContent value="storefront" className="w-full min-w-0">
-          <InventoryStorefront canWrite={canWrite} />
-        </TabsContent>
-        <TabsContent value="coupons" className="w-full min-w-0">
-          <InventoryCoupons canWrite={canWrite} />
         </TabsContent>
       </Tabs>
     </div>

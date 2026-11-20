@@ -3,7 +3,7 @@ import { normalizeStoreTheme, normalizeStoreTracking } from "./config";
 import type { TenantContext } from "@/lib/api/context";
 import { AppError, ERROR_CODES } from "@/lib/api/errors";
 import { env } from "@/lib/env";
-import { productImagePublicUrl } from "@/modules/products/images";
+import { mapProductImageUrls, productImagePublicUrl } from "@/modules/products/images";
 import { getMerchantCollectionLink } from "@/modules/customer-order-links/service";
 import { customerOrderLinkPath, customerOrderWorkspaceSlug } from "@/modules/customer-order-links/schema";
 import type { z } from "zod";
@@ -14,6 +14,8 @@ import { storeAddressSchema, type storefrontSettingsSchema, type storefrontSlide
 import { storeSubdomainSuffix, storeSubdomainUrl, storeSubdomainsEnabled } from "@/modules/storefront/host";
 import { forgetStoreHost } from "@/modules/storefront/host-resolver";
 import { createAdminClient, hasAdminClient } from "@/lib/supabase/admin";
+import { normalizeStoreLayout } from "@/modules/storefront/layout/schema";
+import { extractIndiaMobileDigits } from "@/lib/phone/india-whatsapp";
 
 type SettingsInput = z.infer<typeof storefrontSettingsSchema>;
 type SlideInput = z.infer<typeof storefrontSlideSchema>;
@@ -72,18 +74,24 @@ export async function storefrontPublicPath(
 }
 
 export async function getStorefrontSettings(supabase: SupabaseClient, ctx: TenantContext) {
-  const [{ data: settings }, { data: slides }, link] = await Promise.all([
+  const [{ data: settings, error: settingsError }, { data: slides }, link, { data: org }] = await Promise.all([
     supabase.from("storefront_settings").select("*").eq("organization_id", ctx.organizationId).maybeSingle(),
     selectOrgCovers(supabase, ctx.organizationId),
     storefrontPublicPath(supabase, ctx.organizationId, ctx),
+    supabase.from("organizations").select("name").eq("id", ctx.organizationId).maybeSingle(),
   ]);
-  const { data: org } = await supabase.from("organizations").select("name").eq("id", ctx.organizationId).maybeSingle();
+  // Showing defaults on a read error would let the next save overwrite real settings with them.
+  if (settingsError) throw new AppError(ERROR_CODES.VALIDATION_ERROR, settingsError.message);
+  const featuredProductIds = Array.isArray(settings?.featured_product_ids)
+    ? (settings?.featured_product_ids as string[])
+    : [];
   const storeName = (settings?.store_name as string | null) || (org?.name as string | null) || "Store";
   const logoUrl = productImagePublicUrl(settings?.logo_path as string | null);
   const accentColor = (settings?.accent_color as string | null) || "#E11D48";
   const seoDescription = (settings?.seo_description as string | null) ?? null;
   const footerConfig = normalizeStorefrontFooterConfig(settings?.footer);
-  const [{ data: categories }, footerContext] = await Promise.all([
+  const publishedLayout = normalizeStoreLayout(settings?.published_layout);
+  const [{ data: categories }, footerContext, featuredProducts] = await Promise.all([
     supabase
       .from("product_categories")
       .select("name, slug, active")
@@ -91,6 +99,7 @@ export async function getStorefrontSettings(supabase: SupabaseClient, ctx: Tenan
       .eq("active", true)
       .order("sort_order", { ascending: true }),
     loadStoreFooterContext(supabase, ctx.organizationId),
+    loadFeaturedProductSummaries(supabase, ctx.organizationId, featuredProductIds),
   ]);
   const mappedCategories = (categories ?? []).map((row) => ({ name: String(row.name), slug: String(row.slug) }));
   const footerSources = {
@@ -132,16 +141,21 @@ export async function getStorefrontSettings(supabase: SupabaseClient, ctx: Tenan
     published: settings?.published !== false,
     seoTitle: (settings?.seo_title as string | null) ?? null,
     seoDescription,
-    featuredProductIds: Array.isArray(settings?.featured_product_ids)
-      ? (settings?.featured_product_ids as string[])
-      : [],
+    featuredProductIds,
+    featuredProducts,
     slides: (Array.isArray(slides) ? slides : []).map((row) => mapSlide(row as Record<string, unknown>)),
     footer: footerConfig,
     footerPreview,
     footerSources,
     coverAutoplay: settings?.cover_autoplay === true,
     // Lets the dashboard preview render the same layout the public store uses.
-    marketplace: env.storefrontMarketplaceEnabled,
+    // A store published from the Store Builder always uses the marketplace renderer.
+    marketplace: env.storefrontMarketplaceEnabled || Boolean(publishedLayout),
+    /** Store Builder layout customers see. Null = the classic layout. Drafts are never exposed here. */
+    publishedLayout,
+    businessCategory: (settings?.business_category as string | null) ?? null,
+    /** 10-digit WhatsApp number for the floating chat button, from the business profile. */
+    whatsappPhone: footerContext.organization?.phone ? extractIndiaMobileDigits(footerContext.organization.phone) : null,
     brandKit: (settings?.brand_kit && typeof settings.brand_kit === "object" ? settings.brand_kit : {}) as Record<string, unknown>,
     upiId: (settings?.upi_id as string | null) ?? null,
     gpayNumber: (settings?.gpay_number as string | null) ?? null,
@@ -149,6 +163,54 @@ export async function getStorefrontSettings(supabase: SupabaseClient, ctx: Tenan
     qrImagePath: (settings?.qr_image_path as string | null) ?? null,
     ...link,
   };
+}
+
+export type FeaturedProductSummary = {
+  id: string;
+  name: string;
+  sku: string | null;
+  imageUrl: string | null;
+  /** False when the product is inactive, hidden from the store, or deleted: customers won't see it. */
+  visible: boolean;
+  missing: boolean;
+};
+
+/** Featured picks in the merchant's order, with enough detail to manage them without paging the catalog. */
+export async function loadFeaturedProductSummaries(
+  supabase: SupabaseClient,
+  organizationId: string,
+  ids: string[]
+): Promise<FeaturedProductSummary[]> {
+  if (!ids.length) return [];
+  const { data, error } = await supabase
+    .from("products")
+    .select("id, name, sku, active, store_visible, image_urls")
+    .eq("organization_id", organizationId)
+    .in("id", ids);
+  if (error) throw new AppError(ERROR_CODES.VALIDATION_ERROR, error.message);
+  const byId = new Map((data ?? []).map((row) => [String(row.id), row as Record<string, unknown>]));
+  return ids.map((id) => {
+    const row = byId.get(id);
+    if (!row) return { id, name: "Deleted product", sku: null, imageUrl: null, visible: false, missing: true };
+    return {
+      id,
+      name: String(row.name ?? ""),
+      sku: (row.sku as string | null) ?? null,
+      imageUrl: mapProductImageUrls(row.image_urls).imageUrls[0] ?? null,
+      visible: row.active !== false && row.store_visible !== false,
+      missing: false,
+    };
+  });
+}
+
+/** Best effort: a leftover file only costs storage, so never fail the request over it. */
+async function removeStorefrontObject(supabase: SupabaseClient, organizationId: string, path: string | null | undefined) {
+  if (!path || !path.startsWith(`${organizationId}/storefront/`)) return;
+  try {
+    await supabase.storage.from("product-images").remove([path]);
+  } catch {
+    /* ignore */
+  }
 }
 
 export async function updateStorefrontSettings(
@@ -174,6 +236,20 @@ export async function updateStorefrontSettings(
   if (input.gpayNumber !== undefined) patch.gpay_number = input.gpayNumber?.trim() || null;
   if (input.coverAutoplay !== undefined) patch.cover_autoplay = input.coverAutoplay;
   if (input.brandKit !== undefined) patch.brand_kit = input.brandKit;
+  const clearing = [
+    input.logoPath === null ? "logo_path" : null,
+    input.qrImagePath === null ? "qr_image_path" : null,
+  ].filter((column): column is string => Boolean(column));
+  let previousPaths: Array<string | null> = [];
+  if (clearing.length) {
+    const { data: current } = await supabase
+      .from("storefront_settings")
+      .select(clearing.join(", "))
+      .eq("organization_id", ctx.organizationId)
+      .maybeSingle();
+    previousPaths = clearing.map((column) => ((current as Record<string, unknown> | null)?.[column] as string | null) ?? null);
+    for (const column of clearing) patch[column] = null;
+  }
   if (input.featuredProductIds) {
     const unique = [...new Set(input.featuredProductIds)];
     if (unique.length) {
@@ -191,6 +267,7 @@ export async function updateStorefrontSettings(
   }
   const { error } = await supabase.from("storefront_settings").upsert(patch, { onConflict: "organization_id" });
   if (error) throw new AppError(ERROR_CODES.VALIDATION_ERROR, error.message);
+  await Promise.all(previousPaths.map((path) => removeStorefrontObject(supabase, ctx.organizationId, path)));
   return getStorefrontSettings(supabase, ctx);
 }
 
@@ -281,11 +358,21 @@ export async function uploadStorefrontAsset(
 
   if (kind === "logo" || kind === "qr") {
     const column = kind === "logo" ? "logo_path" : "qr_image_path";
+    const { data: current } = await supabase
+      .from("storefront_settings")
+      .select(column)
+      .eq("organization_id", ctx.organizationId)
+      .maybeSingle();
     const { error: upsertError } = await supabase.from("storefront_settings").upsert(
       { organization_id: ctx.organizationId, [column]: path },
       { onConflict: "organization_id" }
     );
-    if (upsertError) throw new AppError(ERROR_CODES.VALIDATION_ERROR, upsertError.message);
+    if (upsertError) {
+      await removeStorefrontObject(supabase, ctx.organizationId, path);
+      throw new AppError(ERROR_CODES.VALIDATION_ERROR, upsertError.message);
+    }
+    const previous = (current as Record<string, unknown> | null)?.[column] as string | null | undefined;
+    if (previous && previous !== path) await removeStorefrontObject(supabase, ctx.organizationId, previous);
     return getStorefrontSettings(supabase, ctx);
   }
 

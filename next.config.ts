@@ -2,6 +2,7 @@ import { withSentryConfig } from "@sentry/nextjs/config";
 import path from "node:path";
 import type { NextConfig } from "next";
 import { securityHeaderEntries } from "./lib/security/headers";
+import { storeBuilderLegacyRedirects } from "./lib/dashboard/legacy-redirects";
 
 const rasterClient = "./modules/labels/unicode/raster-client.ts";
 const canvasStub = "./modules/labels/unicode/canvas-browser-stub.ts";
@@ -75,6 +76,9 @@ const nextConfig: NextConfig = {
       "@radix-ui/react-checkbox",
       "@radix-ui/react-switch",
     ],
+  },
+  async redirects() {
+    return storeBuilderLegacyRedirects();
   },
   async headers() {
     const embedEnabled = process.env.SHOPIFY_EMBEDDED_APP_ENABLED?.toLowerCase() === "true";

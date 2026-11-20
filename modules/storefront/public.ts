@@ -16,6 +16,7 @@ import { env } from "@/lib/env";
 import { listStoreBundles } from "./bundles";
 import { allocateBundlePrices } from "./bundle-pricing";
 import { storefrontOnlinePaymentProvider } from "@/modules/merchant-payments/checkout";
+import { layoutCategoryRowIds, layoutCollectionCategoryIds, layoutProductIds, type LayoutSection, type StoreLayout } from "./layout/schema";
 
 export function publicStoreClient() {
   if (!hasAdminClient()) {
@@ -138,7 +139,11 @@ export async function loadPublicStorefront(supabase: SupabaseClient, ref: Public
   const featured = settings.published
     ? await loadPublicProductsByIds(supabase, organizationId, settings.featuredProductIds)
     : [];
-  const marketplace = env.storefrontMarketplaceEnabled;
+  const layout = settings.published ? settings.publishedLayout : null;
+  const marketplace = env.storefrontMarketplaceEnabled || Boolean(layout);
+  const sectionProducts = layout
+    ? await loadLayoutSectionProducts(supabase, organizationId, layout, (categories ?? []).map((row) => String(row.id)))
+    : {};
   const autoCoupon = settings.published ? await findAutoApplyCoupon(supabase, organizationId) : null;
   const bundleRows = settings.published && marketplace ? await listStoreBundles(supabase, organizationId, true) : [];
   const bundleProducts = await loadPublicProductsByIds(supabase, organizationId, bundleRows.flatMap((bundle) => bundle.items.map((item) => item.productId)), 800);
@@ -152,6 +157,9 @@ export async function loadPublicStorefront(supabase: SupabaseClient, ref: Public
   });
   return {
     marketplace,
+    layout,
+    sectionProducts,
+    whatsappPhone: layout?.whatsappButton.enabled ? settings.whatsappPhone : null,
     theme: settings.theme,
     tracking: settings.published && marketplace ? settings.tracking : undefined,
     bundles,
@@ -180,6 +188,57 @@ export async function loadPublicStorefront(supabase: SupabaseClient, ref: Public
       return { onlinePayment: Boolean(provider), onlinePaymentProvider: provider };
     })()),
   };
+}
+
+/** Products for collection and video sections, keyed by section id, in one round trip per kind. */
+export async function loadLayoutSectionProducts(supabase: SupabaseClient, organizationId: string, layout: StoreLayout, activeCategoryIds: string[] = []) {
+  const result: Record<string, ReturnType<typeof mapPublicProduct>[]> = {};
+  const collections = layout.sections
+    .filter((section): section is LayoutSection<"collection"> => section.visible && section.type === "collection")
+    .filter((section) => Boolean(section.settings.categoryId));
+  const videoIds = layoutProductIds(layout);
+  const rowCategories = layoutCategoryRowIds(layout, activeCategoryIds);
+  const categoryIds = [...new Set([...layoutCollectionCategoryIds(layout), ...Object.values(rowCategories).flat()])];
+  const { data: members } = categoryIds.length
+    ? await supabase
+        .from("product_category_members")
+        .select("product_id, category_id")
+        .eq("organization_id", organizationId)
+        .in("category_id", categoryIds)
+        .limit(600)
+    : { data: [] as Array<{ product_id: string; category_id: string }> };
+  const byCategory = new Map<string, string[]>();
+  for (const row of members ?? []) {
+    const list = byCategory.get(String(row.category_id)) ?? [];
+    list.push(String(row.product_id));
+    byCategory.set(String(row.category_id), list);
+  }
+  const wanted = [...new Set([
+    ...videoIds,
+    ...collections.flatMap((section) => (byCategory.get(section.settings.categoryId!) ?? []).slice(0, 40)),
+    ...Object.values(rowCategories).flat().flatMap((id) => (byCategory.get(id) ?? []).slice(0, 24)),
+  ])];
+  const products = await loadPublicProductsByIds(supabase, organizationId, wanted, 300);
+  const byId = new Map(products.map((product) => [product.id, product]));
+  for (const section of collections) {
+    result[section.id] = (byCategory.get(section.settings.categoryId!) ?? [])
+      .map((id) => byId.get(id))
+      .filter((product): product is ReturnType<typeof mapPublicProduct> => Boolean(product))
+      .slice(0, section.settings.limit);
+  }
+  // Category rows: keyed "<sectionId>:<categoryId>", up to 8 in-stock-first products each.
+  for (const [sectionId, ids] of Object.entries(rowCategories)) {
+    for (const categoryId of ids) {
+      const items = (byCategory.get(categoryId) ?? []).map((id) => byId.get(id)).filter((product): product is ReturnType<typeof mapPublicProduct> => Boolean(product));
+      result[`${sectionId}:${categoryId}`] = [...items].sort((a, b) => Number(b.inStock) - Number(a.inStock)).slice(0, 8);
+    }
+  }
+  for (const section of layout.sections) {
+    if (!section.visible || section.type !== "video_shopping") continue;
+    const ids = (section as LayoutSection<"video_shopping">).settings.videos.flatMap((video) => video.productIds);
+    result[section.id] = [...new Set(ids)].map((id) => byId.get(id)).filter((product): product is ReturnType<typeof mapPublicProduct> => Boolean(product));
+  }
+  return result;
 }
 
 export async function listPublicProducts(
