@@ -47,3 +47,16 @@ describe("admin search sanitising", () => {
         expect(searchTerm(null)).toBe("");
     });
 });
+describe("automatic payout API helpers", () => {
+    it("schedules the next payout on the configured IST day", async () => {
+        const { nextPayoutDate } = await import("./api");
+        expect(nextPayoutDate(new Date("2026-11-21T06:00:00Z"), 5)).toBe("2026-12-05");
+        expect(nextPayoutDate(new Date("2026-12-03T06:00:00Z"), 5)).toBe("2026-12-05");
+        expect(nextPayoutDate(new Date("2026-12-20T06:00:00Z"), 5)).toBe("2027-01-05");
+    });
+    it("validates admin automatic payout settings", async () => {
+        const { autoSettingsSchema } = await import("./api");
+        expect(autoSettingsSchema.safeParse({ autoPayoutEnabled: true, autoPayoutDay: 5, autoPayoutMaxPaise: 1000000, autoPayoutDailyCapPaise: 5000000, newAccountHoldHours: 72, reason: "Go live" }).success).toBe(true);
+        expect(autoSettingsSchema.safeParse({ autoPayoutEnabled: true, autoPayoutDay: 31, autoPayoutMaxPaise: 1, autoPayoutDailyCapPaise: 1, newAccountHoldHours: 72, reason: "Go live" }).success).toBe(false);
+    });
+});

@@ -1,6 +1,7 @@
 import { AffiliateAdminDashboard } from "@/components/affiliates/admin-dashboard";
 import { PageHeader } from "@/components/dashboard/page-header";
 import { accrualEnabled, affiliateEnabled, payoutsEnabled } from "@/modules/affiliates/policy";
+import { razorpayxConfigured } from "@/modules/affiliates/razorpayx";
 
 export const dynamic = "force-dynamic";
 
@@ -15,5 +16,5 @@ export default function Page() {
       </div>
     );
   }
-  return <AffiliateAdminDashboard payoutsEnabled={payoutsEnabled()} accrualEnabled={accrualEnabled()} />;
+  return <AffiliateAdminDashboard payoutsEnabled={payoutsEnabled()} accrualEnabled={accrualEnabled()} razorpayxReady={razorpayxConfigured()} />;
 }

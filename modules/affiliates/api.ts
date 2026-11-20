@@ -9,6 +9,8 @@ import { encryptSecret, decryptSecret } from "@/lib/security/crypto";
 import { rateLimit } from "@/lib/security/rate-limit";
 import { assertAdminActionPin } from "@/lib/admin/action-pin";
 import { applicationSchema, campaignLinkSchema, paise, payoutsEnabled } from "./policy";
+import { razorpayxConfigured } from "./razorpayx";
+import { istDate } from "./payout-engine";
 import { originsMatch } from "@/lib/security/origin";
 import { checked, partnerProfile, partnerSummary, requireAffiliates } from "./service";
 const uuid = z.uuid();
@@ -103,6 +105,9 @@ export async function handlePartnerApi(request: NextRequest, path: string) {
             throw new AppError(ERROR_CODES.AUTH_UNAVAILABLE, "Payout account storage is not configured.");
         return checked(await db.from("affiliate_payout_accounts").insert({ affiliate_id: profile.id, encrypted_details: encryptSecret(JSON.stringify(body)), masked_details: `UPI •••${body.upi.slice(-4)}` }).select("id,masked_details,created_at").single());
     }
+    if (path === "payouts/overview" && request.method === "GET") {
+        return payoutOverview(db, profile.id);
+    }
     if (path === "payouts" && request.method === "POST") {
         if (!payoutsEnabled())
             throw new AppError(ERROR_CODES.FORBIDDEN, "Payout requests are currently unavailable.");
@@ -116,7 +121,7 @@ export async function handlePartnerApi(request: NextRequest, path: string) {
         links: ["affiliate_links", "id,code,campaign,enabled,created_at"], referrals: ["affiliate_attributions", "id,created_at"],
         commissions: ["affiliate_commissions", "id,amount_paise,net_paise,available_at,created_at"],
         ledger: ["affiliate_ledger_entries", "id,commission_id,kind,amount_paise,created_at"],
-        payouts: ["affiliate_payout_requests", "id,amount_paise,status,created_at,settled_at"],
+        payouts: ["affiliate_payout_requests", "id,amount_paise,status,origin,send_via,hold_reason,failure_reason,utr,settlement_reference,sent_at,created_at,settled_at"],
         accounts: ["affiliate_payout_accounts", "id,masked_details,created_at"], notifications: ["affiliate_notifications", "id,message,created_at"],
     };
     if (request.method === "GET" && (path === "links" || path === "campaigns")) {
@@ -143,7 +148,42 @@ export async function handlePartnerApi(request: NextRequest, path: string) {
     throw new AppError(ERROR_CODES.RESOURCE_NOT_FOUND, "Not found.");
 }
 type Row = Record<string, unknown>;
-const adminStatusFilter = z.union([z.literal(""), z.enum(["PENDING", "APPROVED", "REJECTED", "SUSPENDED", "REQUESTED", "PAID", "REVIEW", "RETURNED"])]);
+export const autoSettingsSchema = z.object({
+    autoPayoutEnabled: z.boolean(),
+    autoPayoutDay: z.number().int().min(1).max(28),
+    autoPayoutMaxPaise: paise.positive(),
+    autoPayoutDailyCapPaise: paise.positive(),
+    newAccountHoldHours: z.number().int().min(0).max(720),
+    reason: z.string().min(3).max(500),
+});
+/** Next scheduled payout date (IST) for a given payout day. */
+export function nextPayoutDate(now: Date, day: number) {
+    const t = istDate(now);
+    const [y, m] = t.day < day ? [t.year, t.month] : t.month === 12 ? [t.year + 1, 1] : [t.year, t.month + 1];
+    return `${y}-${String(m).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+async function payoutOverview(db: SupabaseClient, affiliateId: string) {
+    const [settings, balance, account, open] = await Promise.all([
+        db.from("affiliate_settings").select("minimum_payout_paise,auto_payout_enabled,auto_payout_day,auto_payout_max_paise,new_account_hold_hours").single(),
+        db.rpc("affiliate_balance", { p_affiliate: affiliateId }),
+        db.from("affiliate_payout_accounts").select("id,masked_details,created_at").eq("affiliate_id", affiliateId).order("created_at", { ascending: false }).limit(1).maybeSingle(),
+        db.from("affiliate_payout_requests").select("id,amount_paise,status,hold_reason,created_at").eq("affiliate_id", affiliateId).in("status", ["REQUESTED", "APPROVED", "PROCESSING", "REVIEW"]).order("created_at", { ascending: false }).limit(1).maybeSingle(),
+    ]);
+    const s = checked(settings) as { minimum_payout_paise: number; auto_payout_enabled: boolean; auto_payout_day: number; auto_payout_max_paise: number; new_account_hold_hours: number };
+    const acct = checked(account) as { id: string; masked_details: string; created_at: string } | null;
+    const automatic = Boolean(s.auto_payout_enabled) && payoutsEnabled() && razorpayxConfigured();
+    return {
+        automatic,
+        balance: checked(balance),
+        minimumPaise: String(s.minimum_payout_paise),
+        nextPayoutDate: automatic ? nextPayoutDate(new Date(), s.auto_payout_day) : null,
+        payoutDay: s.auto_payout_day,
+        account: acct ? { masked: acct.masked_details, addedAt: acct.created_at, heldUntil: new Date(Date.parse(acct.created_at) + s.new_account_hold_hours * 3600000).toISOString() } : null,
+        openPayout: checked(open),
+        rules: { maxPaise: String(s.auto_payout_max_paise), holdHours: s.new_account_hold_hours },
+    };
+}
+const adminStatusFilter = z.union([z.literal(""), z.enum(["PENDING", "APPROVED", "REJECTED", "SUSPENDED", "REQUESTED", "PROCESSING", "PAID", "FAILED", "REVIEW", "RETURNED"])]);
 /** PostgREST `or()` filter values cannot carry its own delimiters or wildcards. */
 export function searchTerm(raw: string | null) {
     return (raw || "").replace(/[^\p{L}\p{N} .@+\-]/gu, "").trim().slice(0, 60);
@@ -166,7 +206,7 @@ async function adminPartnerDetail(db: SupabaseClient, id: string) {
         db.rpc("affiliate_summary", { p_affiliate: id, p_from: from, p_to: to }),
         db.rpc("affiliate_partner_link_stats", { p_affiliate: id }),
         db.from("affiliate_policies").select("id,link_id,basis_points,fixed_paise,version,created_at").eq("affiliate_id", id).order("version", { ascending: false }).limit(20),
-        db.from("affiliate_payout_requests").select("id,account_id,amount_paise,status,settlement_reference,settled_at,created_at").eq("affiliate_id", id).order("created_at", { ascending: false }).limit(20),
+        db.from("affiliate_payout_requests").select("id,account_id,amount_paise,status,send_via,origin,hold_reason,failure_reason,utr,settlement_reference,settled_at,created_at").eq("affiliate_id", id).order("created_at", { ascending: false }).limit(20),
         db.from("affiliate_payout_accounts").select("id,masked_details,created_at").eq("affiliate_id", id).order("created_at", { ascending: false }),
         db.from("affiliate_audit_logs").select("id,action,details,actor_id,created_at").eq("affiliate_id", id).order("created_at", { ascending: false }).limit(30),
         db.auth.admin.getUserById(String(profile.user_id)),
@@ -195,7 +235,7 @@ export async function handleAffiliateAdmin(request: NextRequest, actorId: string
             return checked(await db.rpc("affiliate_reconciliation_report", { p_limit: 50 }));
         if (section === "partners" && path[1])
             return adminPartnerDetail(db, uuid.parse(path[1]));
-        const tables: Record<string, string> = { partners: "affiliate_profiles", applications: "affiliate_profiles", links: "affiliate_links", campaigns: "affiliate_links", referrals: "affiliate_attributions", commissions: "affiliate_commissions", conversions: "affiliate_commissions", payouts: "affiliate_payout_requests", policies: "affiliate_policies", settings: "affiliate_settings", audit: "affiliate_audit_logs", reconciliation: "affiliate_processing", evidence: "affiliate_payment_evidence" };
+        const tables: Record<string, string> = { partners: "affiliate_profiles", applications: "affiliate_profiles", links: "affiliate_links", campaigns: "affiliate_links", referrals: "affiliate_attributions", commissions: "affiliate_commissions", conversions: "affiliate_commissions", payouts: "affiliate_payout_requests", policies: "affiliate_policies", settings: "affiliate_settings", audit: "affiliate_audit_logs", reconciliation: "affiliate_processing", evidence: "affiliate_payment_evidence", emails: "affiliate_email_outbox" };
         if (!tables[section])
             throw new AppError(ERROR_CODES.RESOURCE_NOT_FOUND, "Not found.");
         const { start, end } = pagination(request);
@@ -225,6 +265,10 @@ export async function handleAffiliateAdmin(request: NextRequest, actorId: string
             throw new AppError(ERROR_CODES.FORBIDDEN, "Payout actions are currently disabled.");
         const data = z.object({ action: z.enum(["APPROVED", "REJECTED", "REVIEW", "PAID", "RETURNED"]), reference: z.string().max(150).default(""), reason: z.string().min(3).max(500) }).strict().parse(raw.data);
         checked(await db.rpc("affiliate_settle_payout", { p_id: id, p_action: data.action, p_reference: data.reference, p_actor: actorId, p_reason: data.reason }));
+    }
+    else if (section === "auto-settings") {
+        const data = autoSettingsSchema.parse(raw.data);
+        checked(await db.rpc("affiliate_admin_auto_settings", { p_actor: actorId, p_data: data }));
     }
     else if (section === "destination" && id) {
         const account = checked(await db.from("affiliate_payout_accounts").select("affiliate_id,encrypted_details").eq("id", id).single());

@@ -77,7 +77,9 @@ export type PayoutDecision = "APPROVED" | "PAID" | "REVIEW" | "REJECTED" | "RETU
 export function payoutAction(payout: Row, decision: PayoutDecision): PendingAction {
   const amount = inr(payout.amount_paise);
   const copy: Record<PayoutDecision, [string, string, string]> = {
-    APPROVED: [`Approve ${amount} payout`, "Approve payout", "Confirms the amount is owed. Mark it paid once the transfer is done."],
+    APPROVED: payout.send_via === "RAZORPAYX"
+      ? [`Approve & send ${amount}`, "Approve & send", "RazorpayX transfers it to the partner's UPI on the next payout run (within the hour). Paid status and UTR come back from Razorpay automatically."]
+      : [`Approve ${amount} payout`, "Approve payout", "Confirms the amount is owed. Mark it paid once the transfer is done."],
     PAID: [`Mark ${amount} as paid`, "Mark as paid", "Only after you've confirmed the transfer independently. Keep uncertain transfers in review."],
     REVIEW: [`Hold ${amount} for review`, "Move to review", "Keeps the amount reserved while you check something."],
     REJECTED: [`Reject ${amount} payout`, "Reject payout", "Releases the reserved amount back to the partner's balance."],

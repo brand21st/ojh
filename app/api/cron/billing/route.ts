@@ -22,6 +22,15 @@ export async function POST(request: NextRequest) {
     // Affiliate work is independent: failure never changes the billing sweep outcome.
     try { await runAffiliateSweep(createAdminClient()); }
     catch { logError("affiliate.sweep_failed", { category: "retry_required" }); }
+    // Partner payouts and emails are independent too; each failure stays isolated.
+    try {
+      const { runPayoutEngine } = await import("@/modules/affiliates/payout-engine");
+      await runPayoutEngine(createAdminClient());
+    } catch { logError("affiliate.payout_engine_failed", { category: "retry_required" }); }
+    try {
+      const { runPartnerEmails } = await import("@/modules/affiliates/emails");
+      await runPartnerEmails(createAdminClient());
+    } catch { logError("affiliate.emails_failed", { category: "retry_required" }); }
     try {
       const { sweepSheetsCrmAbandonment } = await import("@/modules/sheets-crm/abandonment-sweep");
       await sweepSheetsCrmAbandonment(createAdminClient());

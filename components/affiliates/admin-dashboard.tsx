@@ -13,6 +13,7 @@ import {
   Settings2,
   UserPlus,
   Users,
+  Zap,
   Wallet,
 } from "lucide-react";
 import { PageHeader } from "@/components/dashboard/page-header";
@@ -43,7 +44,7 @@ function useSection(section: string, params: Record<string, string | number>, en
   });
 }
 
-export function AffiliateAdminDashboard({ payoutsEnabled, accrualEnabled }: { payoutsEnabled: boolean; accrualEnabled: boolean }) {
+export function AffiliateAdminDashboard({ payoutsEnabled, accrualEnabled, razorpayxReady = false }: { payoutsEnabled: boolean; accrualEnabled: boolean; razorpayxReady?: boolean }) {
   const [tab, setTab] = useState<Section>("applications");
   const [action, setAction] = useState<PendingAction | null>(null);
   const [partnerId, setPartnerId] = useState<string | null>(null);
@@ -72,9 +73,14 @@ export function AffiliateAdminDashboard({ payoutsEnabled, accrualEnabled }: { pa
         description="Approve affiliates, track referred merchants and settle commission payouts."
         icon={<span className="flex size-10 items-center justify-center rounded-xl bg-rose-100 text-brand-dark"><Handshake className="size-5" /></span>}
         actions={
-          <Button variant="secondary" size="sm" disabled={!program} onClick={() => program && setAction(settingsAction(program, defaultBp))}>
-            <Settings2 /> Program settings
-          </Button>
+          <>
+            <Button variant="secondary" size="sm" disabled={!program} onClick={() => program && setAction(autoPayoutAction(program))}>
+              <Zap /> Automatic payouts
+            </Button>
+            <Button variant="secondary" size="sm" disabled={!program} onClick={() => program && setAction(settingsAction(program, defaultBp))}>
+              <Settings2 /> Program settings
+            </Button>
+          </>
         }
       />
 
@@ -82,6 +88,7 @@ export function AffiliateAdminDashboard({ payoutsEnabled, accrualEnabled }: { pa
         <Flag on={program ? Boolean(program.registration_open) : null} label="Registration" />
         <Flag on={accrualEnabled} label="Commission accrual" />
         <Flag on={payoutsEnabled} label="Payouts" />
+        <Flag on={program ? Boolean(program.auto_payout_enabled) && payoutsEnabled && razorpayxReady : null} label={program?.auto_payout_enabled && !razorpayxReady ? "Auto payouts (RazorpayX not set up)" : "Auto payouts"} />
         <span className="rounded-full border border-border px-2.5 py-1 text-muted">
           Default rate {defaultBp != null ? pct(defaultBp) : "—"} · {str(program?.attribution_days, "–")}-day attribution · {str(program?.hold_days, "–")}-day hold · min payout {program ? inr(program.minimum_payout_paise) : "—"}
         </span>
@@ -154,6 +161,35 @@ export function AffiliateAdminDashboard({ payoutsEnabled, accrualEnabled }: { pa
       <ActionDialog action={action} onClose={() => setAction(null)} />
     </div>
   );
+}
+
+function autoPayoutAction(program: Row): PendingAction {
+  const rupees = (v: unknown, d: number) => String(Number(v ?? d) / 100);
+  return {
+    title: "Automatic payouts",
+    description: "Pays cleared balances to partner UPI IDs through RazorpayX on the payout day. Payouts over a limit, to a new UPI ID, from a flagged partner, or a partner's first payout wait for your approval.",
+    confirmLabel: "Save",
+    path: "auto-settings",
+    successMessage: "Automatic payout settings saved.",
+    fields: [
+      { name: "enabled", label: "Automatic payouts", type: "select", defaultValue: String(Boolean(program.auto_payout_enabled)), options: [{ value: "false", label: "Off — payouts are manual" }, { value: "true", label: "On — pay through RazorpayX" }] },
+      { name: "day", label: "Payout day of the month (1–28, IST)", inputMode: "numeric", defaultValue: str(program.auto_payout_day, "5") },
+      { name: "max", label: "Per-partner auto limit (₹)", inputMode: "decimal", defaultValue: rupees(program.auto_payout_max_paise, 1000000), help: "Larger payouts are held for approval." },
+      { name: "daily", label: "Daily total limit (₹)", inputMode: "decimal", defaultValue: rupees(program.auto_payout_daily_cap_paise, 5000000), help: "Across all partners, per IST day." },
+      { name: "hold", label: "Hold new UPI IDs for (hours)", inputMode: "numeric", defaultValue: str(program.new_account_hold_hours, "72") },
+    ],
+    build: (v) => {
+      const day = Number(v.day);
+      const hold = Number(v.hold);
+      const max = rupeesToPaise(v.max);
+      const daily = rupeesToPaise(v.daily);
+      if (!Number.isInteger(day) || day < 1 || day > 28) return "Payout day must be 1–28.";
+      if (!Number.isInteger(hold) || hold < 0 || hold > 720) return "Hold must be 0–720 hours.";
+      if (!max || !daily) return "Enter both limits in rupees.";
+      if (daily < max) return "The daily limit should be at least the per-partner limit.";
+      return { autoPayoutEnabled: v.enabled === "true", autoPayoutDay: day, autoPayoutMaxPaise: max, autoPayoutDailyCapPaise: daily, newAccountHoldHours: hold };
+    },
+  };
 }
 
 function settingsAction(program: Row, defaultBp: number | null): PendingAction {
@@ -287,7 +323,7 @@ function Partners({ onOpen }: { onOpen: (id: string) => void }) {
 
 /* ---------- Payouts ---------- */
 
-const PAYOUT_STATUSES = ["", "REQUESTED", "REVIEW", "APPROVED", "PAID", "REJECTED", "RETURNED"];
+const PAYOUT_STATUSES = ["", "REVIEW", "REQUESTED", "APPROVED", "PROCESSING", "PAID", "FAILED", "REJECTED", "RETURNED"];
 const NEXT_STEPS: Record<string, PayoutDecision[]> = {
   REQUESTED: ["APPROVED", "REVIEW", "REJECTED"],
   REVIEW: ["APPROVED", "REJECTED"],
@@ -295,10 +331,18 @@ const NEXT_STEPS: Record<string, PayoutDecision[]> = {
   PAID: ["RETURNED"],
 };
 const DECISION_LABEL: Record<PayoutDecision, string> = { APPROVED: "Approve", PAID: "Mark paid", REVIEW: "Review", REJECTED: "Reject", RETURNED: "Returned" };
+const HOLD_LABEL: Record<string, string> = {
+  FIRST_PAYOUT: "Held: partner's first payout",
+  NEW_ACCOUNT: "Held: UPI ID added recently",
+  OVER_PARTNER_CAP: "Held: over per-partner limit",
+  OVER_DAILY_CAP: "Held: daily limit reached",
+  RISK_FLAG: "Held: partner flagged for review",
+  NOT_ELIGIBLE: "Held: partner not eligible",
+};
 
 function Payouts({ payoutsEnabled, onAction, onOpen }: { payoutsEnabled: boolean; onAction: (a: PendingAction) => void; onOpen: (id: string) => void }) {
   const [page, setPage] = useState(0);
-  const [status, setStatus] = useState("REQUESTED");
+  const [status, setStatus] = useState("REVIEW");
   const [revealed, setRevealed] = useState<Row | null>(null);
   const query = useSection("payouts", { page, status });
   const rows = query.data ?? [];
@@ -318,9 +362,22 @@ function Payouts({ payoutsEnabled, onAction, onOpen }: { payoutsEnabled: boolean
         columns={[
           { h: "Partner", c: (r) => <button type="button" className="font-medium text-ink hover:underline" onClick={() => onOpen(String(r.affiliate_id))}>{str(r.partner_name)}</button> },
           { h: "Amount", c: (r) => <span className="font-semibold tabular-nums">{inr(r.amount_paise)}</span> },
-          { h: "Status", c: (r) => <StatusPill status={r.status} /> },
+          {
+            h: "Status",
+            c: (r) => (
+              <div className="space-y-1">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <StatusPill status={r.status} />
+                  {r.send_via === "RAZORPAYX" ? <span className="rounded-full border border-border px-2 py-0.5 text-[11px] text-muted">RazorpayX</span> : null}
+                  {r.origin === "AUTO" ? <span className="rounded-full border border-border px-2 py-0.5 text-[11px] text-muted">Auto</span> : null}
+                </div>
+                {r.hold_reason ? <p className="text-xs text-amber-700 dark:text-amber-300">{HOLD_LABEL[String(r.hold_reason)] ?? String(r.hold_reason)}</p> : null}
+                {r.failure_reason ? <p className="text-xs text-red-700 dark:text-red-300">{String(r.failure_reason)}</p> : null}
+              </div>
+            ),
+          },
           { h: "Requested", c: (r) => formatDate(String(r.created_at)) },
-          { h: "Reference", c: (r) => str(r.settlement_reference) },
+          { h: "UTR / reference", c: (r) => <span className="font-mono text-xs">{str(r.utr ?? r.settlement_reference)}</span> },
           {
             h: "",
             c: (r) => (
@@ -328,9 +385,13 @@ function Payouts({ payoutsEnabled, onAction, onOpen }: { payoutsEnabled: boolean
                 {["REQUESTED", "REVIEW", "APPROVED"].includes(String(r.status)) ? (
                   <Button size="xs" variant="ghost" onClick={() => onAction(destinationAction(String(r.account_id), setRevealed))}>UPI</Button>
                 ) : null}
-                {(NEXT_STEPS[String(r.status)] ?? []).map((d, i) => (
-                  <Button key={d} size="xs" variant={i === 0 ? "primary" : "secondary"} onClick={() => onAction(payoutAction(r, d))}>{DECISION_LABEL[d]}</Button>
-                ))}
+                {(NEXT_STEPS[String(r.status)] ?? [])
+                  .filter((d) => !(r.send_via === "RAZORPAYX" && (d === "PAID" || d === "RETURNED")))
+                  .map((d, i) => (
+                    <Button key={d} size="xs" variant={i === 0 ? "primary" : "secondary"} onClick={() => onAction(payoutAction(r, d))}>
+                      {d === "APPROVED" && r.send_via === "RAZORPAYX" ? "Approve & send" : DECISION_LABEL[d]}
+                    </Button>
+                  ))}
               </div>
             ),
           },
@@ -433,6 +494,7 @@ function Activity({ onOpen }: { onOpen: (id: string) => void }) {
 
 function Health() {
   const queue = useSection("reconciliation", { page: 0 });
+  const mail = useSection("emails", { page: 0 });
   const report = useQuery({ queryKey: ["admin-affiliates", "report"], queryFn: () => api<unknown>("/api/admin/affiliates/report"), retry: false });
   const reportRows = Array.isArray(report.data) ? (report.data as Row[]) : report.data && typeof report.data === "object" ? [report.data as Row] : [];
   return (
@@ -451,6 +513,24 @@ function Health() {
             { h: "Attempts", c: (r) => str(r.attempts, "0") },
             { h: "Next attempt", c: (r) => formatDate(String(r.next_attempt_at), true) },
             { h: "Updated", c: (r) => formatDate(String(r.updated_at), true) },
+          ]}
+        />
+      </section>
+      <section className="space-y-2">
+        <h2 className="font-semibold text-ink">Partner emails</h2>
+        <p className="text-sm text-muted">Latest lifecycle emails. Failed ones retry with backoff up to 5 times.</p>
+        <Table
+          loading={mail.isLoading}
+          error={mail.error}
+          rows={mail.data ?? []}
+          empty="No partner emails yet."
+          columns={[
+            { h: "Partner", c: (r) => str(r.partner_name) },
+            { h: "Email", c: (r) => String(r.kind).replaceAll("_", " ") },
+            { h: "Status", c: (r) => <StatusPill status={r.status} /> },
+            { h: "Attempts", c: (r) => str(r.attempts, "0") },
+            { h: "Error", c: (r) => <span className="text-xs text-muted">{str(r.last_error)}</span> },
+            { h: "Queued", c: (r) => formatDate(String(r.created_at), true) },
           ]}
         />
       </section>
