@@ -3,9 +3,11 @@
 // https://docs.sentry.io/platforms/javascript/guides/nextjs/
 
 import * as Sentry from "@sentry/nextjs";
+import { CLIENT_ABORTED_RSC_STREAM_MESSAGE } from "@/lib/analytics/posthog-shared";
 
 Sentry.init({
   dsn: "https://477292c3c3bac25e635eba09818cdb2d@o4512222663737344.ingest.us.sentry.io/4512222669897728",
+  ignoreErrors: [CLIENT_ABORTED_RSC_STREAM_MESSAGE],
 
   // Define how likely traces are sampled. Adjust this value in production, or use tracesSampler for greater control.
   tracesSampleRate: 1,

@@ -100,6 +100,11 @@ describe("captureClientException", () => {
     expect(captureClientException(new Error("boom"))).toBe(false);
     expect(ph.captureException).not.toHaveBeenCalled();
   });
+
+  it("does not report Next.js client-aborted RSC streams", () => {
+    expect(captureClientException(new Error("The destination stream closed early."))).toBe(false);
+    expect(ph.captureException).not.toHaveBeenCalled();
+  });
 });
 
 const me = {
@@ -223,6 +228,8 @@ describe("wiring", () => {
     expect(src).toContain("serverErrorTrackingDecision");
     expect(src).toContain("Sentry.captureRequestError");
     expect(src).toContain("getPostHogServer");
+    expect(src.indexOf("isClientAbortedRscStream(args[0])")).toBeGreaterThan(-1);
+    expect(src.indexOf("isClientAbortedRscStream(args[0])")).toBeLessThan(src.indexOf("await Sentry.captureRequestError"));
   });
 
   it("proxy errors are wrapped for PostHog", () => {

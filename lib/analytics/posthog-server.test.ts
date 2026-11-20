@@ -6,7 +6,7 @@ const PostHog = vi.fn(function PostHogMock() {
 });
 vi.mock("posthog-node", () => ({ PostHog }));
 
-import { requestPathname, serverErrorTrackingDecision } from "./posthog-shared";
+import { isClientAbortedRscStream, requestPathname, serverErrorTrackingDecision } from "./posthog-shared";
 
 const prod = {
   token: "phc_test",
@@ -37,6 +37,14 @@ describe("serverErrorTrackingDecision", () => {
 describe("requestPathname", () => {
   it("strips the query string", () => {
     expect(requestPathname("/api/v1/orders?id=1")).toBe("/api/v1/orders");
+  });
+});
+
+describe("isClientAbortedRscStream", () => {
+  it("matches Next.js client-disconnect RSC noise", () => {
+    expect(isClientAbortedRscStream(new Error("The destination stream closed early."))).toBe(true);
+    expect(isClientAbortedRscStream(new Error("Something went wrong."))).toBe(false);
+    expect(isClientAbortedRscStream("The destination stream closed early.")).toBe(false);
   });
 });
 

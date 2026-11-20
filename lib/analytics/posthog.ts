@@ -1,5 +1,5 @@
 import posthog from "posthog-js";
-import { isShopifyEmbeddedPath, POSTHOG_DEFAULT_HOST } from "@/lib/analytics/posthog-shared";
+import { isClientAbortedRscStream, isShopifyEmbeddedPath, POSTHOG_DEFAULT_HOST } from "@/lib/analytics/posthog-shared";
 
 /**
  * PostHog product analytics: one place for init rules and every custom event.
@@ -115,7 +115,7 @@ export function resetAnalyticsUser(): void {
  * No-ops when PostHog is off (local dev, Shopify Admin, missing token).
  */
 export function captureClientException(error: unknown, extra?: Record<string, unknown>): boolean {
-  if (!posthogReady()) return false;
+  if (!posthogReady() || isClientAbortedRscStream(error)) return false;
   posthog.captureException(error, extra);
   return true;
 }

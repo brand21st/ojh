@@ -4,6 +4,7 @@
 
 import * as Sentry from "@sentry/nextjs";
 import { initAnalytics, isShopifyEmbeddedPath } from "@/lib/analytics/posthog";
+import { CLIENT_ABORTED_RSC_STREAM_MESSAGE } from "@/lib/analytics/posthog-shared";
 
 // Inside Shopify Admin (the embedded app) never record sessions or send product analytics:
 // pages show customer names and addresses, and the App Store requires that data stays put.
@@ -11,6 +12,7 @@ const isShopifyEmbedded = typeof window !== "undefined" && isShopifyEmbeddedPath
 
 Sentry.init({
   dsn: "https://477292c3c3bac25e635eba09818cdb2d@o4512222663737344.ingest.us.sentry.io/4512222669897728",
+  ignoreErrors: [CLIENT_ABORTED_RSC_STREAM_MESSAGE],
 
   // Add optional integrations for additional features
   integrations: isShopifyEmbedded ? [] : [Sentry.replayIntegration()],

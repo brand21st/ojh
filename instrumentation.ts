@@ -1,6 +1,6 @@
 import * as Sentry from "@sentry/nextjs";
 import { createOnRequestError } from "@posthog/next";
-import { requestPathname, serverErrorTrackingDecision } from "@/lib/analytics/posthog-shared";
+import { isClientAbortedRscStream, requestPathname, serverErrorTrackingDecision } from "@/lib/analytics/posthog-shared";
 
 export async function register() {
   if (process.env.NEXT_RUNTIME === "nodejs") {
@@ -24,6 +24,7 @@ const posthogOnRequestError = createOnRequestError({
 export async function onRequestError(
   ...args: Parameters<typeof Sentry.captureRequestError>
 ) {
+  if (isClientAbortedRscStream(args[0])) return;
   await Sentry.captureRequestError(...args);
   const [, request] = args;
   const path = typeof request?.path === "string" ? request.path : "/";

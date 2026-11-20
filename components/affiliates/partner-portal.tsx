@@ -4,9 +4,11 @@ import { useState, type FormEvent, type ReactNode } from "react";
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { Link2, Wallet } from "lucide-react";
+import { ChevronDown, Link2, Wallet } from "lucide-react";
 import { api } from "@/lib/hooks/use-api";
+import { INDIAN_STATE_LIST, INDIAN_STATES, INDIAN_UNION_TERRITORIES } from "@/lib/indian-states";
 import { formatBasisPoints, formatPaiseInr, publicReferralPath } from "@/modules/affiliates/policy";
+import { cn } from "@/lib/utils";
 import { PartnerShell } from "@/components/affiliates/partner-shell";
 import { PageHeader } from "@/components/dashboard/page-header";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -57,6 +59,46 @@ function Field({ name, label, type = "text", defaultValue = "", required = true 
 }
 
 export { Field };
+
+function StateField({ defaultValue = "" }: { defaultValue?: string }) {
+  const listed = (INDIAN_STATES as readonly string[]).includes(defaultValue);
+  return (
+    <label className="grid gap-1 text-sm">
+      State
+      <span className="relative">
+        <select
+          name="state"
+          required
+          defaultValue={defaultValue || ""}
+          className={cn(
+            "flex h-11 w-full appearance-none rounded-[var(--radius-input)] border border-border bg-card px-3.5 pr-10 text-sm text-foreground shadow-sm transition-colors",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30 focus-visible:border-brand"
+          )}
+        >
+          <option value="" disabled>
+            Select state
+          </option>
+          {!listed && defaultValue ? <option value={defaultValue}>{defaultValue}</option> : null}
+          <optgroup label="States">
+            {INDIAN_STATE_LIST.map((state) => (
+              <option key={state} value={state}>
+                {state}
+              </option>
+            ))}
+          </optgroup>
+          <optgroup label="Union territories">
+            {INDIAN_UNION_TERRITORIES.map((state) => (
+              <option key={state} value={state}>
+                {state}
+              </option>
+            ))}
+          </optgroup>
+        </select>
+        <ChevronDown className="pointer-events-none absolute right-3.5 top-1/2 size-4 -translate-y-1/2 text-muted" aria-hidden />
+      </span>
+    </label>
+  );
+}
 
 function rangeParams(days: number, custom: { from: string; to: string }) {
   const to = custom.to ? new Date(custom.to + "T23:59:59.999Z").toISOString() : new Date().toISOString();
@@ -119,9 +161,13 @@ function ApplicationCard({ email, profile }: { email?: string; profile?: Profile
       <CardContent>
         <form className="grid gap-4 sm:grid-cols-2" onSubmit={submit}>
           {email ? <p className="text-sm sm:col-span-2">Account email: {email}</p> : null}
-          {fields.map(([name, label, required]) => (
-            <Field key={name} name={name} label={label} defaultValue={profile?.application[name]} required={required} />
-          ))}
+          {fields.map(([name, label, required]) =>
+            name === "state" ? (
+              <StateField key={name} defaultValue={profile?.application[name]} />
+            ) : (
+              <Field key={name} name={name} label={label} defaultValue={profile?.application[name]} required={required} />
+            )
+          )}
           <p className="text-sm text-muted">Country: India. Settlement currency: INR.</p>
           <label className="flex items-center gap-2 text-sm">
             <input name="notify" type="checkbox" defaultChecked={String(profile?.application.notify ?? "true") !== "false"} />

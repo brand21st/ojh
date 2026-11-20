@@ -8,6 +8,16 @@ export function requestPathname(path: string): string {
   return path.split("?")[0] || "/";
 }
 
+/**
+ * Next.js reports a client disconnect mid-RSC as this generic Error (vercel/next.js#96704).
+ * That is expected request cancellation, not an application render failure.
+ */
+export const CLIENT_ABORTED_RSC_STREAM_MESSAGE = "The destination stream closed early.";
+
+export function isClientAbortedRscStream(error: unknown): boolean {
+  return error instanceof Error && error.message === CLIENT_ABORTED_RSC_STREAM_MESSAGE;
+}
+
 export type ServerErrorTrackingEnv = {
   token: string | undefined;
   host: string | undefined;
