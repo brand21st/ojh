@@ -14,7 +14,8 @@ export type DimensionSource =
   | "postbus"
   | "postbus_preset"
   | "postbus_custom"
-  | "autopack_history";
+  | "autopack_history"
+  | "postbus_override";
 
 export type CmBox = {
   lengthCm: number;
@@ -32,6 +33,7 @@ export type ShipmentUnit = {
   lengthCm?: number | null;
   widthCm?: number | null;
   heightCm?: number | null;
+  dimensionSource?: DimensionSource;
 };
 
 export type ResolvedShipmentDimensions = CmBox & {
