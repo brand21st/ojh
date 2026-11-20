@@ -5,6 +5,8 @@ import type { StorePayload } from "@/components/storefront/store-types";
 import { getPublicStorePolicy, isStorePolicySlug, publicStoreClient } from "@/modules/storefront/public";
 import { STORE_POLICY_TITLES } from "@/modules/storefront/footer";
 
+import { storeCanonicalUrl, storeRequestBasePath } from "@/modules/storefront/host-server";
+
 export const dynamic = "force-dynamic";
 
 export async function generateMetadata({
@@ -20,12 +22,12 @@ export async function generateMetadata({
     return {
       title: `${page.title} · ${page.store.storeName}`,
       description,
-      alternates: { canonical: `/store/${workspace}/${policy}` },
+      alternates: { canonical: storeCanonicalUrl(workspace, `/${policy}`) },
       openGraph: {
         title: `${page.title} · ${page.store.storeName}`,
         description,
         type: "article",
-        url: `/store/${workspace}/${policy}`,
+        url: storeCanonicalUrl(workspace, `/${policy}`),
       },
     };
   } catch {
@@ -50,11 +52,11 @@ export default async function StorePolicyPage({
     "@context": "https://schema.org",
     "@type": "WebPage",
     name: page.title,
-    url: `/store/${workspace}/${policy}`,
+    url: storeCanonicalUrl(workspace, `/${policy}`),
     isPartOf: {
       "@type": "OnlineStore",
       name: page.store.storeName,
-      url: `/store/${workspace}`,
+      url: storeCanonicalUrl(workspace),
     },
   };
   return (
@@ -63,7 +65,7 @@ export default async function StorePolicyPage({
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData).replace(/</g, "\\u003c") }}
       />
-      <StorePolicyScreen store={page.store as StorePayload} title={page.title} body={page.body} />
+      <StorePolicyScreen store={page.store as StorePayload} title={page.title} body={page.body} basePath={await storeRequestBasePath(workspace)} />
     </>
   );
 }

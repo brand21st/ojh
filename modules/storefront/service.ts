@@ -11,6 +11,9 @@ import { assembleStoreFooter, normalizeStorefrontFooterConfig } from "@/modules/
 import { loadStoreFooterContext } from "@/modules/storefront/footer-context";
 import { mapCover, selectOrgCovers } from "@/modules/storefront/covers";
 import { storeAddressSchema, type storefrontSettingsSchema, type storefrontSlideSchema } from "@/modules/storefront/schema";
+import { storeSubdomainSuffix, storeSubdomainUrl, storeSubdomainsEnabled } from "@/modules/storefront/host";
+import { forgetStoreHost } from "@/modules/storefront/host-resolver";
+import { createAdminClient, hasAdminClient } from "@/lib/supabase/admin";
 
 type SettingsInput = z.infer<typeof storefrontSettingsSchema>;
 type SlideInput = z.infer<typeof storefrontSlideSchema>;
@@ -25,12 +28,18 @@ function storefrontUrls(workspace: string, publicId: string | null) {
   const storePath = `/store/${workspace}`;
   const legacyPath = publicId ? customerOrderLinkPath(workspace, publicId) : storePath;
   const origin = env.appUrl.replace(/\/$/, "");
+  const subdomainsEnabled = storeSubdomainsEnabled();
   return {
     workspace,
     publicId,
     storePath,
     legacyPath,
-    storeUrl: `${origin}${storePath}`,
+    /** The address customers use: `https://{slug}.postbus.in` once subdomains are live. */
+    storeUrl: subdomainsEnabled ? storeSubdomainUrl(workspace) : `${origin}${storePath}`,
+    /** Always the subdomain form, so the dashboard can show it before the switch. */
+    storeSubdomainUrl: storeSubdomainUrl(workspace),
+    storeHostSuffix: storeSubdomainSuffix(),
+    subdomainsEnabled,
     legacyUrl: `${origin}${legacyPath}`,
   };
 }
@@ -198,15 +207,22 @@ export async function checkStoreAddress(supabase: SupabaseClient, ctx: TenantCon
     return { slug: String(raw ?? "").trim().toLowerCase(), available: false, reason: parsed.error.issues[0].message };
   }
   const slug = parsed.data.slug;
-  const { data, error } = await supabase
-    .from("customer_order_links")
-    .select("organization_id")
-    .eq("status", "ACTIVE")
-    .eq("public_workspace", slug)
-    .limit(1)
-    .maybeSingle();
+  // RLS hides other merchants' rows, so uniqueness must be read platform-wide.
+  const reader = hasAdminClient() ? createAdminClient() : supabase;
+  const [{ data, error }, { data: page, error: pageError }] = await Promise.all([
+    reader
+      .from("customer_order_links")
+      .select("organization_id")
+      .eq("status", "ACTIVE")
+      .eq("public_workspace", slug)
+      .limit(1)
+      .maybeSingle(),
+    // Tracking pages live on the same {slug}.postbus.in hosts.
+    reader.from("tracking_pages").select("organization_id").eq("subdomain", slug).maybeSingle(),
+  ]);
   if (error) throw new AppError(ERROR_CODES.VALIDATION_ERROR, error.message);
-  if (data && data.organization_id !== ctx.organizationId) {
+  if (pageError) throw new AppError(ERROR_CODES.VALIDATION_ERROR, pageError.message);
+  if ((data && data.organization_id !== ctx.organizationId) || (page && page.organization_id !== ctx.organizationId)) {
     return { slug, available: false, reason: "That address is already taken." };
   }
   return { slug, available: true, reason: null };
@@ -229,6 +245,7 @@ export async function updateStoreAddress(supabase: SupabaseClient, ctx: TenantCo
     if (error.code === "23505") throw new AppError(ERROR_CODES.CONFLICT, "That address is already taken.");
     throw new AppError(ERROR_CODES.VALIDATION_ERROR, error.message);
   }
+  forgetStoreHost(link.slug, slug);
   await supabase.from("audit_logs").insert({
     organization_id: ctx.organizationId,
     actor_id: ctx.userId,

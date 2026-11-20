@@ -14,7 +14,8 @@ export const GET = apiRoute(async (request: NextRequest) => {
   }
 
   const subdomain = resolveRequestSubdomain(
-    request.headers.get("host"),
+    // On a merchant store host the label belongs to the store; only the proxy's header names a tracking page.
+    request.headers.get("x-store-host") ? null : request.headers.get("host"),
     request.headers.get("x-tracking-subdomain"),
     request.nextUrl.searchParams.get("subdomain")
   );

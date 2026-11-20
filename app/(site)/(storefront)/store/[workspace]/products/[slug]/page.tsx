@@ -11,6 +11,8 @@ import {
   publicStoreClient,
 } from "@/modules/storefront/public";
 
+import { storeCanonicalUrl, storeRequestBasePath } from "@/modules/storefront/host-server";
+
 export const dynamic = "force-dynamic";
 
 async function loadProductPage(workspace: string, slug: string) {
@@ -46,11 +48,12 @@ export async function generateMetadata({
     return {
       title: `${product.name} · ${store.storeName}`,
       description,
-      alternates: { canonical: `/store/${workspace}/products/${slug}` },
+      alternates: { canonical: storeCanonicalUrl(workspace, `/products/${slug}`) },
       openGraph: {
         title: product.name,
         description,
         type: "website",
+        url: storeCanonicalUrl(workspace, `/products/${slug}`),
         images: product.imageUrls[0] ? [{ url: product.imageUrls[0] }] : undefined,
       },
     };
@@ -88,7 +91,7 @@ export default async function StoreProductPage({
       priceCurrency: "INR",
       price: product.price,
       availability: product.inStock ? "https://schema.org/InStock" : "https://schema.org/OutOfStock",
-      url: `/store/${workspace}/products/${slug}`,
+      url: storeCanonicalUrl(workspace, `/products/${slug}`),
     },
   };
   return (
@@ -97,7 +100,7 @@ export default async function StoreProductPage({
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData).replace(/</g, "\\u003c") }}
       />
-      <StoreApp workspace={workspace} initialStore={store} initialProduct={product} />
+      <StoreApp workspace={workspace} basePath={await storeRequestBasePath(workspace)} initialStore={store} initialProduct={product} />
     </>
   );
 }

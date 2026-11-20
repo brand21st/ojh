@@ -9,6 +9,7 @@ import { contrastText, onAccent, readableAccent } from "@/modules/storefront/con
 import { bundleCartLine, cartRequest, ungroupBundle } from "@/modules/storefront/cart";
 import { commerceEvent, emitStoreEvent } from "@/modules/storefront/tracking-events";
 import { StoreTracking } from "./store-tracking";
+import { StoreBaseProvider, useStoreHref } from "./store-base";
 import { CouponBanner, CouponField, type QuoteCoupon } from "./coupon-field";
 import { useStoreCoupon } from "./coupon-storage";
 import { FastCheckoutDetails, checkoutSchema, rememberBuyerPhone, rememberedBuyerPhone, useFastCheckout, type CheckoutValues } from "./fast-checkout";
@@ -52,7 +53,24 @@ function catalogParams(ref: StoreRef, page: number, pageSize: number, query: str
   return params;
 }
 
-export function StoreApp({
+type StoreAppProps = StoreRef & {
+  initialStore?: StorePayload | null;
+  initialProduct?: StoreProduct | null;
+  initialCategoryId?: string;
+  preview?: StorePayload | null;
+  /** `""` on the merchant's own subdomain, `/store/{slug}` on the PostBus host. Unset in previews. */
+  basePath?: string;
+};
+
+export function StoreApp({ basePath, ...props }: StoreAppProps) {
+  return (
+    <StoreBaseProvider workspace={props.workspace ?? ""} basePath={props.preview ? undefined : basePath}>
+      <StoreAppInner {...props} />
+    </StoreBaseProvider>
+  );
+}
+
+function StoreAppInner({
   workspace,
   publicId,
   token,
@@ -60,12 +78,8 @@ export function StoreApp({
   initialProduct,
   initialCategoryId = "all",
   preview,
-}: StoreRef & {
-  initialStore?: StorePayload | null;
-  initialProduct?: StoreProduct | null;
-  initialCategoryId?: string;
-  preview?: StorePayload | null;
-}) {
+}: Omit<StoreAppProps, "basePath">) {
+  const storeHref = useStoreHref();
   const isPreview = Boolean(preview);
   const [loadedStore, setLoadedStore] = useState<StorePayload | null>(initialStore ?? null);
   const [loadError, setLoadError] = useState(false);
@@ -277,7 +291,7 @@ export function StoreApp({
       window.history.back();
     } else if (window.location.pathname.includes("/products/")) {
       onProductPath.current = false;
-      window.history.replaceState(window.history.state, "", browseUrl.current ?? `/store/${workspaceKey}`);
+      window.history.replaceState(window.history.state, "", browseUrl.current ?? storeHref(`/store/${workspaceKey}`));
     }
     requestAnimationFrame(() => window.scrollTo(0, y));
   }
@@ -290,7 +304,7 @@ export function StoreApp({
     }
     if (!isPreview && store) document.title = `${next.name} · ${store.storeName} · PostBus`;
     if (!isPreview && next.slug && !window.location.pathname.endsWith(`/products/${next.slug}`)) {
-      const url = `/store/${workspaceKey}/products/${next.slug}`;
+      const url = storeHref(`/store/${workspaceKey}/products/${next.slug}`);
       if (product || window.location.pathname.includes("/products/")) window.history.replaceState({ storefrontProduct: next.slug }, "", url);
       else {
         window.history.pushState({ storefrontProduct: next.slug }, "", url);

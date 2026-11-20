@@ -10,6 +10,7 @@ import { StorefrontFooter } from "./storefront-footer";
 import type { CartLine, StorePayload, StoreProduct, StoreBundle } from "./store-types";
 import { formatStorePrice } from "@/modules/storefront/pricing";
 import s from "./marketplace.module.css";
+import { useStoreHref } from "./store-base";
 
 export type CatalogFilters = { sort: string; priceMin: string; priceMax: string; inStock: boolean };
 export const EMPTY_FILTERS: CatalogFilters = { sort: "newest", priceMin: "", priceMax: "", inStock: false };
@@ -69,7 +70,8 @@ export function MarketplaceHome({ store, cart, query, categoryId, searching, fil
   const filtered = filters.priceMin !== "" || filters.priceMax !== "" || filters.inStock;
   const home = !query && categoryId === "all" && !filtered;
   const promises = useMemo(() => storePromises([...store.products.items, ...featured, ...best]), [store.products.items, featured, best]);
-  const productHref = (product: StoreProduct) => (product.slug ? `/store/${store.workspace}/products/${product.slug}` : undefined);
+  const storeHref = useStoreHref();
+  const productHref = (product: StoreProduct) => (product.slug ? storeHref(`/store/${store.workspace}/products/${product.slug}`) : undefined);
   const card = (product: StoreProduct) => (
     <ProductTile key={product.id} product={product} href={productHref(product)} quantity={quantities.get(product.id) ?? 0} onOpen={() => onOpenProduct(product)} onAdd={() => onAdd(product)} onDecrease={() => onDecrease(product.id)} />
   );
@@ -93,7 +95,7 @@ export function MarketplaceHome({ store, cart, query, categoryId, searching, fil
 
   return <>
     <header className={s.header}><div className={`${s.inner} ${s.topbar}`}>
-      <a className={s.brand} href={`/store/${store.workspace}`} onClick={(event) => { if (!detail) return; event.preventDefault(); onHome?.(); }}>
+      <a className={s.brand} href={storeHref(`/store/${store.workspace}`)} onClick={(event) => { if (!detail) return; event.preventDefault(); onHome?.(); }}>
         <span className={s.logo}>{store.logoUrl ? <StoreImage src={store.logoUrl} alt="" sizes="36px" /> : <span className={s.monogram}>{store.storeName.trim().charAt(0).toUpperCase()}</span>}</span>
         <span>{store.storeName}</span>
       </a>

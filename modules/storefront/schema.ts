@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { RESERVED_STORE_SUBDOMAINS, STORE_SUBDOMAIN_PATTERN, isReservedStoreSubdomain } from "./host";
 import { storeThemeSchema, storeTrackingSchema } from "./config";
 import { bundleSelectionSchema } from "./bundle-pricing";
 import type { PublicLinkRef } from "@/modules/customer-order-links/public";
@@ -87,10 +88,8 @@ export const publicStoreQuoteSchema = z
   });
 
 /** Path segments and words that would collide with app routes or read as PostBus-owned stores. */
-export const RESERVED_STORE_ADDRESSES = [
-  "admin", "api", "app", "dashboard", "help", "login", "new", "postbus", "preview", "register", "settings", "shop",
-  "shopify", "store", "support", "track", "www",
-] as const;
+/** Store slugs are `{slug}.postbus.in` hosts, so they also avoid every system and future PostBus name. */
+export const RESERVED_STORE_ADDRESSES = RESERVED_STORE_SUBDOMAINS;
 
 export const storeAddressSchema = z.object({
   slug: z
@@ -99,8 +98,8 @@ export const storeAddressSchema = z.object({
     .toLowerCase()
     .min(3, "Use at least 3 characters.")
     .max(48, "Use 48 characters or fewer.")
-    .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, "Use lowercase letters, numbers and single hyphens, like my-shop.")
-    .refine((slug) => !(RESERVED_STORE_ADDRESSES as readonly string[]).includes(slug), "That address is reserved. Try another."),
+    .regex(STORE_SUBDOMAIN_PATTERN, "Use lowercase letters, numbers and single hyphens, like my-shop.")
+    .refine((slug) => !isReservedStoreSubdomain(slug), "That address is reserved. Try another."),
 });
 
 export const storefrontSettingsSchema = z.object({
