@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import type { NextRequest } from "next/server";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { getRequestAuthUser } from "@/lib/supabase/request-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { AppError, ERROR_CODES } from "@/lib/api/errors";
@@ -141,6 +142,45 @@ export async function handlePartnerApi(request: NextRequest, path: string) {
     }
     throw new AppError(ERROR_CODES.RESOURCE_NOT_FOUND, "Not found.");
 }
+type Row = Record<string, unknown>;
+const adminStatusFilter = z.union([z.literal(""), z.enum(["PENDING", "APPROVED", "REJECTED", "SUSPENDED", "REQUESTED", "PAID", "REVIEW", "RETURNED"])]);
+/** PostgREST `or()` filter values cannot carry its own delimiters or wildcards. */
+export function searchTerm(raw: string | null) {
+    return (raw || "").replace(/[^\p{L}\p{N} .@+\-]/gu, "").trim().slice(0, 60);
+}
+/** Adds `partner_name` so admin tables never need to show raw partner UUIDs. */
+async function withPartnerNames(db: SupabaseClient, rows: Row[]) {
+    const ids = [...new Set(rows.map(r => r.affiliate_id).filter((v): v is string => typeof v === "string"))];
+    if (!ids.length) return rows;
+    const profiles = checked(await db.from("affiliate_profiles").select("id,application").in("id", ids)) as { id: string; application: Row }[];
+    const names = new Map(profiles.map(p => [p.id, String(p.application?.fullName || "Partner")]));
+    return rows.map(r => ({ ...r, partner_name: names.get(String(r.affiliate_id)) ?? null }));
+}
+async function adminPartnerDetail(db: SupabaseClient, id: string) {
+    const profile = checked(await db.from("affiliate_profiles").select("id,user_id,status,application,rejection_reason,terms_version,created_at").eq("id", id).maybeSingle()) as Row | null;
+    if (!profile)
+        throw new AppError(ERROR_CODES.RESOURCE_NOT_FOUND, "Partner not found.");
+    const to = new Date().toISOString();
+    const from = new Date(Date.now() - 90 * 86400000).toISOString();
+    const [summary, links, policies, payouts, accounts, audit, user] = await Promise.all([
+        db.rpc("affiliate_summary", { p_affiliate: id, p_from: from, p_to: to }),
+        db.rpc("affiliate_partner_link_stats", { p_affiliate: id }),
+        db.from("affiliate_policies").select("id,link_id,basis_points,fixed_paise,version,created_at").eq("affiliate_id", id).order("version", { ascending: false }).limit(20),
+        db.from("affiliate_payout_requests").select("id,account_id,amount_paise,status,settlement_reference,settled_at,created_at").eq("affiliate_id", id).order("created_at", { ascending: false }).limit(20),
+        db.from("affiliate_payout_accounts").select("id,masked_details,created_at").eq("affiliate_id", id).order("created_at", { ascending: false }),
+        db.from("affiliate_audit_logs").select("id,action,details,actor_id,created_at").eq("affiliate_id", id).order("created_at", { ascending: false }).limit(30),
+        db.auth.admin.getUserById(String(profile.user_id)),
+    ]);
+    return {
+        profile: { ...profile, email: user.data?.user?.email ?? null },
+        summary: checked(summary),
+        links: checked(links),
+        policies: checked(policies),
+        payouts: checked(payouts),
+        accounts: checked(accounts),
+        audit: checked(audit),
+    };
+}
 export async function handleAffiliateAdmin(request: NextRequest, actorId: string, path: string[]) {
     requireAffiliates();
     sameOrigin(request);
@@ -153,17 +193,27 @@ export async function handleAffiliateAdmin(request: NextRequest, actorId: string
             return checked(await db.rpc("affiliate_admin_overview"));
         if (section === "report")
             return checked(await db.rpc("affiliate_reconciliation_report", { p_limit: 50 }));
+        if (section === "partners" && path[1])
+            return adminPartnerDetail(db, uuid.parse(path[1]));
         const tables: Record<string, string> = { partners: "affiliate_profiles", applications: "affiliate_profiles", links: "affiliate_links", campaigns: "affiliate_links", referrals: "affiliate_attributions", commissions: "affiliate_commissions", conversions: "affiliate_commissions", payouts: "affiliate_payout_requests", policies: "affiliate_policies", settings: "affiliate_settings", audit: "affiliate_audit_logs", reconciliation: "affiliate_processing", evidence: "affiliate_payment_evidence" };
         if (!tables[section])
             throw new AppError(ERROR_CODES.RESOURCE_NOT_FOUND, "Not found.");
         const { start, end } = pagination(request);
         let query = db.from(tables[section]).select("*").order("created_at", { ascending: false }).range(start, end);
+        const params = request.nextUrl.searchParams;
         if (section === "applications")
             query = query.eq("status", "PENDING");
-        const partner = request.nextUrl.searchParams.get("partner");
+        const status = adminStatusFilter.parse(params.get("status") || "");
+        if (status && (section === "partners" || section === "payouts"))
+            query = query.eq("status", status);
+        const search = searchTerm(params.get("q"));
+        if (search && (section === "partners" || section === "applications"))
+            query = query.or(["fullName", "mobile", "business", "channel", "city"].map(key => `application->>${key}.ilike."*${search}*"`).join(","));
+        const partner = params.get("partner");
         if (partner && !["partners", "applications", "settings", "reconciliation", "evidence"].includes(section))
             query = query.eq("affiliate_id", uuid.parse(partner));
-        return checked(await query);
+        const rows = checked(await query) as Row[];
+        return withPartnerNames(db, rows);
     }
     const raw = z.object({ pin: z.string(), data: z.record(z.string(), z.unknown()) }).strict().parse(await request.json());
     if (!process.env.ADMIN_ACCOUNT_ACTION_PIN)

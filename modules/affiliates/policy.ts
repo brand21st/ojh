@@ -15,7 +15,22 @@ export function formatBasisPoints(basisPoints: number) {
     const fraction = Math.abs(basisPoints % 100);
     return fraction ? `${whole}.${String(fraction).padStart(2, "0")}%` : `${whole}%`;
 }
-export const accrualEnabled = () => affiliateEnabled() && process.env.POSTBUS_AFFILIATE_ACCRUAL_ENABLED === "true";
+/** "1,234.5" rupees → 123450 paise, parsed as text so no float rounding. Null when invalid. */
+export function rupeesToPaise(input: string, { allowNegative = false } = {}) {
+    const m = /^\s*(-)?\s*₹?\s*([0-9][0-9,]*)(?:\.([0-9]{1,2}))?\s*$/.exec(input);
+    if (!m || (m[1] && !allowNegative)) return null;
+    const value = Number(m[2].replaceAll(",", "")) * 100 + Number((m[3] || "").padEnd(2, "0"));
+    if (!Number.isSafeInteger(value)) return null;
+    return m[1] ? -value : value;
+}
+/** "12.5" percent → 1250 basis points. Null outside 0–100% or beyond two decimals. */
+export function percentToBasisPoints(input: string) {
+    const m = /^\s*([0-9]{1,3})(?:\.([0-9]{1,2}))?\s*%?\s*$/.exec(input);
+    if (!m) return null;
+    const bp = Number(m[1]) * 100 + Number((m[2] || "").padEnd(2, "0"));
+    return bp <= 10000 ? bp : null;
+}
+export const accrualEnabled =() => affiliateEnabled() && process.env.POSTBUS_AFFILIATE_ACCRUAL_ENABLED === "true";
 export const payoutsEnabled = () => affiliateEnabled() && process.env.POSTBUS_AFFILIATE_PAYOUTS_ENABLED === "true";
 export const paise = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 export const PARTNER_LANDING_PATHS = ["/", "/pricing", "/partner"] as const;
