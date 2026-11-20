@@ -158,6 +158,18 @@ export async function checkSubdomainAvailability(
   if (data && data.organization_id !== organizationId) {
     return { available: false, reason: "taken" as const };
   }
+  // Store slugs share the *.postbus.in namespace: another merchant's store already owns this host.
+  const { data: store, error: storeError } = await reader
+    .from("customer_order_links")
+    .select("organization_id")
+    .eq("status", "ACTIVE")
+    .eq("public_workspace", classified.subdomain)
+    .limit(1)
+    .maybeSingle();
+  if (storeError) throw new AppError(ERROR_CODES.VALIDATION_ERROR, storeError.message);
+  if (store && store.organization_id !== organizationId) {
+    return { available: false, reason: "taken" as const };
+  }
   return { available: true, reason: "available" as const };
 }
 
@@ -344,6 +356,12 @@ export async function setTrackingPageStatus(
 ) {
   const page = await getTrackingPage(supabase, ctx.organizationId);
   if (!page) throw new AppError(ERROR_CODES.RESOURCE_NOT_FOUND, "Create a tracking page first.");
+  if (status === "PUBLISHED") {
+    const availability = await checkSubdomainAvailability(supabase, page.subdomain, ctx.organizationId);
+    if (!availability.available) {
+      throw new AppError(ERROR_CODES.CONFLICT, "Another store uses this address. Choose a new subdomain before publishing.");
+    }
+  }
 
   const { data, error } = await supabase
     .from("tracking_pages")

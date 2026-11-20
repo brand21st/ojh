@@ -5,6 +5,7 @@ import { StoreImage } from "@/components/storefront/store-image";
 import type { StoreSlide } from "@/components/storefront/store-types";
 import { parseSafeCoverHref } from "@/modules/storefront/schema";
 import { cn } from "@/lib/utils";
+import { useStoreHref } from "./store-base";
 
 export function safeCtaHref(value?: string | null) {
   return parseSafeCoverHref(value ?? null) || null;
@@ -28,7 +29,9 @@ export function CoverHero({
   onVisible?: () => void;
 }) {
   const ref = useRef<HTMLElement>(null);
-  const ctaHref = safeCtaHref(slide.ctaHref);
+  const storeHref = useStoreHref();
+  const rawCta = safeCtaHref(slide.ctaHref);
+  const ctaHref = rawCta ? storeHref(rawCta) : rawCta;
   const position = slide.textPosition ?? "left";
   const overlay = Math.min(80, Math.max(0, slide.overlayStrength ?? 40));
   const color = slide.textColor ?? "#ffffff";

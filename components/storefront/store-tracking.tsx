@@ -4,6 +4,11 @@ import { useEffect, useRef, useState } from "react";
 import type { StoreTrackingConfig } from "@/modules/storefront/config";
 import { DEFAULT_STORE_TRACKING } from "@/modules/storefront/config";
 import { commerceEvent, type CommerceEvent } from "@/modules/storefront/tracking-events";
+import { useOnStoreHost } from "./store-base";
+
+function onStorePath(base: string, pathname: string) {
+  return base ? pathname === base || pathname.startsWith(`${base}/`) : !pathname.startsWith("/track");
+}
 
 type Consent = { analytics: boolean; marketing: boolean; decided: boolean };
 const DENIED: Consent = { analytics: false, marketing: false, decided: false };
@@ -22,6 +27,8 @@ export function StoreTracking({ workspace, config = DEFAULT_STORE_TRACKING, prev
   const seen = useRef(new Set<string>());
   const active = [config.meta, config.ga4, config.clarity, config.gtm].some((p) => p.enabled && p.id);
   const consentKey = `postbus-consent:${workspace}:v1`;
+  // On {slug}.postbus.in the whole origin is this store; on the PostBus host only /store/{slug}.
+  const base = useOnStoreHost() ? "" : `/store/${workspace}`;
   const storedConsent = !preview && typeof window !== "undefined"
     ? (() => {
         try {
@@ -49,7 +56,7 @@ export function StoreTracking({ workspace, config = DEFAULT_STORE_TRACKING, prev
     try { localStorage.setItem(consentKey, JSON.stringify(next)); } catch { /* Storage is optional. */ }
   }
   useEffect(() => {
-    if (preview || !consent.decided || !location.pathname.startsWith(`/store/${workspace}`)) return;
+    if (preview || !consent.decided || !onStorePath(base, location.pathname)) return;
     const w = window as TrackingWindow;
     const scripts: HTMLScriptElement[] = [];
     const load = (src: string) => { const script = document.createElement("script"); script.src = src; script.async = true; script.referrerPolicy = "no-referrer"; document.head.append(script); scripts.push(script); };
@@ -77,7 +84,7 @@ export function StoreTracking({ workspace, config = DEFAULT_STORE_TRACKING, prev
       const anchor = (event.target as Element)?.closest?.("a[href]") as HTMLAnchorElement | null;
       if (!anchor || event.defaultPrevented || event.metaKey || event.ctrlKey || event.shiftKey || anchor.target === "_blank") return;
       const url = new URL(anchor.href);
-      if (url.origin === location.origin && !url.pathname.startsWith(`/store/${workspace}/`) && url.pathname !== `/store/${workspace}`) { event.preventDefault(); location.assign(url.href); }
+      if (url.origin === location.origin && !onStorePath(base, url.pathname)) { event.preventDefault(); location.assign(url.href); }
     };
     document.addEventListener("click", boundary, true);
     return () => {
@@ -86,11 +93,11 @@ export function StoreTracking({ workspace, config = DEFAULT_STORE_TRACKING, prev
       scripts.forEach((script) => script.remove()); document.removeEventListener("click", boundary, true);
       if (scripts.length) setTimeout(() => { if (!document.querySelector(`[data-store-tracking="${workspace}"]`)) location.reload(); }, 0);
     };
-  }, [config, consent, preview, workspace]);
+  }, [base, config, consent, preview, workspace]);
   useEffect(() => {
     function deliver(event: CommerceEvent) {
       if (preview) { setEvents((current) => [event, ...current].slice(0, 12)); return; }
-      if (!consent.decided || (!consent.analytics && !consent.marketing) || !location.pathname.startsWith(`/store/${workspace}`)) return;
+      if (!consent.decided || (!consent.analytics && !consent.marketing) || !onStorePath(base, location.pathname)) return;
       const identity = event.name === "purchase" ? `purchase:${event.transactionId}` : event.eventId;
       if (seen.current.has(identity)) return;
       if (event.name === "purchase") {
@@ -99,7 +106,7 @@ export function StoreTracking({ workspace, config = DEFAULT_STORE_TRACKING, prev
       }
       seen.current.add(identity);
       const w = window as TrackingWindow;
-      const payload = { event: event.name, event_id: event.eventId, currency: "INR", value: event.value, transaction_id: event.transactionId, items: event.items, page_location: `${location.origin}/store/${workspace}`, payment_status: event.name === "purchase" ? "pending" : undefined };
+      const payload = { event: event.name, event_id: event.eventId, currency: "INR", value: event.value, transaction_id: event.transactionId, items: event.items, page_location: `${location.origin}${base || "/"}`, payment_status: event.name === "purchase" ? "pending" : undefined };
       if (consent.analytics && config.ga4.enabled && config.ga4.delivery === "direct") w.gtag?.("event", event.name, { ...payload, send_to: config.ga4.id });
       if (consent.marketing && config.meta.enabled && config.meta.delivery === "direct") {
         const names: Record<string, string> = { page_view: "PageView", view_item: "ViewContent", add_to_cart: "AddToCart", begin_checkout: "InitiateCheckout", purchase: "Purchase" };
@@ -112,7 +119,7 @@ export function StoreTracking({ workspace, config = DEFAULT_STORE_TRACKING, prev
     window.addEventListener("postbus:commerce", listen);
     deliver(commerceEvent("page_view", { eventId: `page:${workspace}` }));
     return () => window.removeEventListener("postbus:commerce", listen);
-  }, [channel, config, consent, preview, workspace]);
+  }, [base, channel, config, consent, preview, workspace]);
   return <div data-store-tracking={workspace}>
     {!preview && config.gtm.enabled && config.gtm.id && consent.analytics && consent.marketing ? <iframe ref={frame} title="Store event tracking" sandbox="allow-scripts" srcDoc={gtmDocument(config.gtm.id, channel)} className="hidden" referrerPolicy="no-referrer" /> : null}
     {preview ? <details className="m-3 border-t border-zinc-200 py-2 text-xs text-zinc-500"><summary>Preview event inspector</summary><ul className="mt-2 space-y-1">{events.map((event, i) => <li key={`${event.eventId}:${i}`}>{event.name}{event.value !== undefined ? ` / INR ${event.value}` : ""}</li>)}</ul></details> : active ? <button className="mx-4 my-3 text-xs text-zinc-500 underline" onClick={() => { setDraft(consent); setPreferences(true); }}>Cookie preferences</button> : null}

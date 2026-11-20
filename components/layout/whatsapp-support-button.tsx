@@ -78,7 +78,8 @@ export function WhatsappSupportButton() {
   if (hidden) return null;
 
   return (
-    <>
+    // Store layouts hide this on merchant hosts, where usePathname() shows the host path, not /store/….
+    <div data-postbus-support className="contents">
       {open ? (
         <button
           type="button"
@@ -191,7 +192,7 @@ export function WhatsappSupportButton() {
           {open ? <CloseIcon className="size-6" /> : <WhatsappIcon />}
         </button>
       </div>
-    </>
+    </div>
   );
 }
 

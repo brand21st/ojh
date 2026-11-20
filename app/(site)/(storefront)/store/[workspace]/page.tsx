@@ -4,6 +4,8 @@ import { StoreApp } from "@/components/storefront/store-app";
 import type { StorePayload } from "@/components/storefront/store-types";
 import { loadPublicStorefront, publicStoreClient } from "@/modules/storefront/public";
 
+import { storeCanonicalUrl, storeRequestBasePath } from "@/modules/storefront/host-server";
+
 export const dynamic = "force-dynamic";
 
 const loadStore = cache(async (workspace: string) =>
@@ -23,12 +25,12 @@ export async function generateMetadata({
     return {
       title: store.seoTitle || `${store.storeName} · Shop`,
       description,
-      alternates: { canonical: `/store/${workspace}` },
+      alternates: { canonical: storeCanonicalUrl(workspace) },
       openGraph: {
         title: store.seoTitle || store.storeName,
         description,
         type: "website",
-        url: `/store/${workspace}`,
+        url: storeCanonicalUrl(workspace),
         images: image ? [{ url: image }] : undefined,
       },
       twitter: {
@@ -63,7 +65,7 @@ export default async function PublicStorePage({
         "@context": "https://schema.org",
         "@type": "OnlineStore",
         name: initialStore.storeName,
-        url: `/store/${workspace}`,
+        url: storeCanonicalUrl(workspace),
         logo: initialStore.logoUrl || undefined,
         description: initialStore.seoDescription || undefined,
       }
@@ -76,7 +78,7 @@ export default async function PublicStorePage({
           dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData).replace(/</g, "\\u003c") }}
         />
       ) : null}
-      <StoreApp workspace={workspace} initialStore={initialStore} />
+      <StoreApp workspace={workspace} basePath={await storeRequestBasePath(workspace)} initialStore={initialStore} />
     </>
   );
 }

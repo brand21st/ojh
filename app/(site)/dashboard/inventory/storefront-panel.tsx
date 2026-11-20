@@ -36,6 +36,9 @@ import type { Paginated, ProductRecord } from "@/types/api";
 type Storefront = StorefrontPreviewSettings & {
   published: boolean;
   storeUrl: string;
+  storeSubdomainUrl?: string;
+  storeHostSuffix?: string;
+  subdomainsEnabled?: boolean;
   footerPreview: StorePayload["footer"];
   upiId?: string | null;
   gpayNumber?: string | null;
@@ -255,6 +258,9 @@ export function InventoryStorefront({ canWrite }: { canWrite: boolean }) {
             <StoreAddressField<Storefront>
               workspace={settings.workspace}
               storeUrl={settings.storeUrl}
+              subdomainUrl={settings.storeSubdomainUrl}
+              hostSuffix={settings.storeHostSuffix}
+              subdomainsEnabled={settings.subdomainsEnabled}
               canChange={canWrite && (me.data?.role === "OWNER" || me.data?.role === "ADMIN")}
               onSaved={(next) => queryClient.setQueryData(["inventory-storefront"], next)}
             />

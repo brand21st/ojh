@@ -6,6 +6,8 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 import { StoreImage } from "@/components/storefront/store-image";
 import type { FooterSocialNetwork, StoreFooter, StoreFooterLink } from "@/modules/storefront/footer";
 import { cn } from "@/lib/utils";
+import { siteConfig } from "@/lib/site-config";
+import { useStoreHref } from "./store-base";
 
 function SvgIcon({ path, className }: { path: string; className?: string }) {
   return (
@@ -43,13 +45,14 @@ function FooterLink({
   item: StoreFooterLink;
   className?: string;
 }) {
+  const storeHref = useStoreHref();
   if (!item.href) {
     return <span className={className}>{item.label}</span>;
   }
   const external = item.external || /^https?:/i.test(item.href);
   return (
     <Link
-      href={item.href}
+      href={external ? item.href : storeHref(item.href)}
       className={cn(
         "inline-flex min-h-8 min-w-0 items-center rounded-md py-1 text-sm leading-5 transition-colors duration-150 hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70 motion-reduce:transition-none",
         className
@@ -249,7 +252,7 @@ export function StorefrontFooter({ footer, clearance = false }: { footer: StoreF
           {footer.poweredBy ? (
             <p className="min-w-0">
               Powered by{" "}
-              <Link href="/" className="font-semibold underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70">
+              <Link href={siteConfig.url} className="font-semibold underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70">
                 Postbus
               </Link>
             </p>

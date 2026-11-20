@@ -10,6 +10,8 @@ import {
   publicStoreClient,
 } from "@/modules/storefront/public";
 
+import { storeCanonicalUrl, storeRequestBasePath } from "@/modules/storefront/host-server";
+
 export const dynamic = "force-dynamic";
 
 async function loadCategoryPage(workspace: string, slug: string) {
@@ -40,7 +42,7 @@ export async function generateMetadata({
   return {
     title: `${data.category.name} · ${data.store.storeName}`,
     description,
-    alternates: { canonical: `/store/${workspace}/category/${slug}` },
+    alternates: { canonical: storeCanonicalUrl(workspace, `/category/${slug}`) },
     openGraph: {
       title: `${data.category.name} · ${data.store.storeName}`,
       description,
@@ -61,8 +63,8 @@ export default async function StoreCategoryPage({
     "@context": "https://schema.org",
     "@type": "BreadcrumbList",
     itemListElement: [
-      { "@type": "ListItem", position: 1, name: data.store.storeName, item: `/store/${workspace}` },
-      { "@type": "ListItem", position: 2, name: data.category.name, item: `/store/${workspace}/category/${slug}` },
+      { "@type": "ListItem", position: 1, name: data.store.storeName, item: storeCanonicalUrl(workspace) },
+      { "@type": "ListItem", position: 2, name: data.category.name, item: storeCanonicalUrl(workspace, `/category/${slug}`) },
     ],
   };
   return (
@@ -73,6 +75,7 @@ export default async function StoreCategoryPage({
       />
       <StoreApp
         workspace={workspace}
+        basePath={await storeRequestBasePath(workspace)}
         initialStore={data.store}
         initialCategoryId={data.category.id}
       />

@@ -9,6 +9,7 @@ import { formatStorePrice } from "@/modules/storefront/pricing";
 import { formatOrderWindow, orderWindowRemaining, searchMatches, trendingProducts } from "@/modules/storefront/trending";
 import type { StorePayload, StoreProduct } from "@/components/storefront/store-types";
 import { onAccent } from "@/modules/storefront/config";
+import { useStoreHref } from "./store-base";
 
 export function StoreHeader({
   store,
@@ -31,7 +32,8 @@ export function StoreHeader({
   onOpenCart?: () => void;
   onOpenProduct?: (product: StoreProduct) => void;
 }) {
-  const home = storeHomePath(store.workspace);
+  const storeHref = useStoreHref();
+  const home = storeHref(storeHomePath(store.workspace));
   const listId = useId();
   const [focused, setFocused] = useState(false);
   const [phrase, setPhrase] = useState(0);

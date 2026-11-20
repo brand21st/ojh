@@ -100,6 +100,13 @@ describe("store address", () => {
     await expect(checkStoreAddress(ours.client as never, ctx, "kala-ghar")).resolves.toMatchObject({ available: true });
   });
 
+  it("treats another merchant's tracking subdomain as taken (one *.postbus.in namespace)", async () => {
+    const theirs = fakeSupabase({ tracking_pages: () => ({ data: { organization_id: "org-2" }, error: null }) });
+    await expect(checkStoreAddress(theirs.client as never, ctx, "kala-ghar")).resolves.toMatchObject({ available: false, reason: "That address is already taken." });
+    const ours = fakeSupabase({ tracking_pages: () => ({ data: { organization_id: "org-1" }, error: null }) });
+    await expect(checkStoreAddress(ours.client as never, ctx, "kala-ghar")).resolves.toMatchObject({ available: true });
+  });
+
   it("only lets owners and admins change the address", async () => {
     const { client } = fakeSupabase({});
     await expect(updateStoreAddress(client as never, { ...ctx, role: "OPERATOR" }, "kala-ghar")).rejects.toMatchObject({ code: "FORBIDDEN" });

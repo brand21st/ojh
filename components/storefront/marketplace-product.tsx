@@ -8,6 +8,7 @@ import type { StoreCategory, StoreProduct } from "@/components/storefront/store-
 import { formatStorePrice } from "@/modules/storefront/pricing";
 import { ProductTile, Rail, savingsPercent, stockNote } from "./marketplace-tile";
 import s from "./marketplace.module.css";
+import { useStoreHref } from "./store-base";
 
 type StoreRef = { workspace?: string; publicId?: string; token?: string };
 
@@ -148,7 +149,8 @@ export function MarketplaceProduct({
     product.prepaidEnabled ? "Prepaid" : null,
     product.codEnabled ? (product.codAdvancePercent ? `Cash on delivery (${product.codAdvancePercent}% advance)` : "Cash on delivery") : null,
   ].filter(Boolean).join(" or ");
-  const hrefFor = (item: StoreProduct) => (workspace && item.slug ? `/store/${workspace}/products/${item.slug}` : undefined);
+  const storeHref = useStoreHref();
+  const hrefFor = (item: StoreProduct) => (workspace && item.slug ? storeHref(`/store/${workspace}/products/${item.slug}`) : undefined);
 
   function addSelected() {
     if (product.inStock && quantity === 0) onAdd(product);
@@ -175,8 +177,8 @@ export function MarketplaceProduct({
     <>
       <nav className={s.crumbs} aria-label="Breadcrumb">
         <ol>
-          <li><a href={workspace ? `/store/${workspace}` : "#"} onClick={(e) => { e.preventDefault(); onBack(); }}>Shop</a></li>
-          {category ? <li>{workspace ? <a href={`/store/${workspace}/category/${category.slug}`}>{category.name}</a> : category.name}</li> : null}
+          <li><a href={workspace ? storeHref(`/store/${workspace}`) : "#"} onClick={(e) => { e.preventDefault(); onBack(); }}>Shop</a></li>
+          {category ? <li>{workspace ? <a href={storeHref(`/store/${workspace}/category/${category.slug}`)}>{category.name}</a> : category.name}</li> : null}
           <li aria-current="page">{product.name}</li>
         </ol>
       </nav>

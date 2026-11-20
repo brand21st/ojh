@@ -3,17 +3,21 @@
 import { StoreHeader } from "@/components/storefront/store-header";
 import { StorefrontFooter } from "@/components/storefront/storefront-footer";
 import type { StorePayload } from "@/components/storefront/store-types";
+import { StoreBaseProvider } from "@/components/storefront/store-base";
 
 export function StorePolicyScreen({
   store,
   title,
   body,
+  basePath,
 }: {
   store: StorePayload;
   title: string;
   body: string;
+  basePath?: string;
 }) {
   return (
+    <StoreBaseProvider workspace={store.workspace} basePath={basePath}>
     <div className="flex min-h-dvh w-full min-w-0 flex-col bg-zinc-50 text-zinc-950">
       <StoreHeader store={store} showSearch={false} showCart={false} />
       <article className="mx-auto w-full max-w-3xl min-w-0 flex-1 px-3 py-8 sm:px-5">
@@ -25,5 +29,6 @@ export function StorePolicyScreen({
       </article>
       <StorefrontFooter footer={store.footer} />
     </div>
+    </StoreBaseProvider>
   );
 }

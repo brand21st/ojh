@@ -5,6 +5,7 @@ import { listStoreBundles, saveStoreBundle } from "@/modules/storefront/bundles"
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { TenantContext } from "@/lib/api/context";
 import { AppError, ERROR_CODES } from "@/lib/api/errors";
+import { rateLimit } from "@/lib/security/rate-limit";
 import {
   adjustInventorySchema,
   categoryReorderSchema,
@@ -376,10 +377,17 @@ export async function handleInventoryRoutes(
   }
 
   if (key === "GET inventory/storefront/address") {
+    // Live availability checks fire as the merchant types; cap them so the namespace cannot be enumerated.
+    if (!rateLimit(`store-address-check:${ctx.organizationId}:${ctx.userId}`, 40, 60_000).ok) {
+      throw new AppError(ERROR_CODES.RATE_LIMITED, "Too many checks. Wait a moment and try again.");
+    }
     return checkStoreAddress(supabase, ctx, request.nextUrl.searchParams.get("slug") ?? "");
   }
 
   if (key === "PATCH inventory/storefront/address") {
+    if (!rateLimit(`store-address-change:${ctx.organizationId}`, 5, 10 * 60_000).ok) {
+      throw new AppError(ERROR_CODES.RATE_LIMITED, "Too many address changes. Try again in a few minutes.");
+    }
     const body = (await request.json().catch(() => ({}))) as { slug?: unknown };
     return updateStoreAddress(supabase, ctx, body.slug);
   }

@@ -40,7 +40,7 @@ export default async function TrackPage({
   const query = await searchParams;
   const subdomain =
     headerStore.get("x-tracking-subdomain") ||
-    parseTrackingSubdomain(headerStore.get("host")) ||
+    (headerStore.get("x-store-host") ? null : parseTrackingSubdomain(headerStore.get("host"))) ||
     query.subdomain ||
     null;
 
