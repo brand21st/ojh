@@ -63,6 +63,7 @@ import {
   validateOrdersForBooking,
 } from "@/modules/india-post/bulk-booking";
 import { handleBulkExcelRoutes } from "@/modules/india-post/bulk-excel-routes";
+import { captureServerExceptionImmediate } from "@/lib/analytics/posthog-server";
 import { logError } from "@/lib/logger";
 import { backfillMissingShopifyLineItemImages } from "@/modules/shopify/orders";
 
@@ -73,6 +74,7 @@ function fillShopifyLineItemImages(supabase: SupabaseClient, organizationId: str
         organizationId,
         message: error instanceof Error ? error.message : "unknown",
       });
+      void captureServerExceptionImmediate(error, undefined, { source: "shopify.line-item-images.backfill" });
     });
   try {
     after(run);

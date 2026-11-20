@@ -1,4 +1,5 @@
 import { after } from "next/server";
+import { captureServerExceptionImmediate } from "@/lib/analytics/posthog-server";
 import { env } from "@/lib/env";
 import { logError } from "@/lib/logger";
 import { trackingPagePublicUrl } from "./host";
@@ -100,6 +101,7 @@ function scheduleRestart(config: CoolifyConfig) {
       logError("coolify.tracking-domain.restart", {
         message: error instanceof Error ? error.message : "unknown",
       });
+      void captureServerExceptionImmediate(error, undefined, { source: "coolify.tracking-domain.restart" });
     });
   try {
     after(run);

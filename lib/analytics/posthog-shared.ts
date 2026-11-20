@@ -28,3 +28,13 @@ export function serverErrorTrackingDecision(env: ServerErrorTrackingEnv): Server
   if (isShopifyEmbeddedPath(pathname)) return { enabled: false, reason: "shopify-embedded" };
   return { enabled: true };
 }
+
+export function processServerErrorTrackingEnabled(pathname = "/"): boolean {
+  return serverErrorTrackingDecision({
+    token: process.env.NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN,
+    host: process.env.NEXT_PUBLIC_POSTHOG_HOST,
+    nodeEnv: process.env.NODE_ENV,
+    runtime: process.env.NEXT_RUNTIME,
+    pathname,
+  }).enabled;
+}

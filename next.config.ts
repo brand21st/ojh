@@ -1,3 +1,4 @@
+import { withPostHogConfig } from "@posthog/nextjs-config";
 import { withSentryConfig } from "@sentry/nextjs/config";
 import path from "node:path";
 import type { NextConfig } from "next";
@@ -105,7 +106,20 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default withSentryConfig(nextConfig, {
+const posthogApiKey = process.env.POSTHOG_API_KEY?.trim();
+const posthogProjectId = process.env.POSTHOG_PROJECT_ID?.trim();
+
+export default withSentryConfig(
+  withPostHogConfig(nextConfig, {
+    personalApiKey: posthogApiKey ?? "",
+    projectId: posthogProjectId,
+    host: process.env.NEXT_PUBLIC_POSTHOG_HOST,
+    sourcemaps: {
+      enabled: Boolean(posthogApiKey && posthogProjectId),
+      failOnError: false,
+    },
+  }),
+  {
   // For all available options, see:
   // https://www.npmjs.com/package/@sentry/webpack-plugin#options
 
@@ -141,4 +155,5 @@ export default withSentryConfig(nextConfig, {
       removeDebugLogging: true,
     },
   },
-});
+  },
+);

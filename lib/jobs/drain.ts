@@ -5,6 +5,7 @@ import { indiaPostBookingConcurrency } from "@/modules/india-post/booking-batch"
 import { shouldWaitForQueuedBookings } from "@/modules/india-post/http";
 import { drainLaneName, restDrainConcurrency } from "@/lib/jobs/job-lanes";
 import { queueWaitMs } from "@/lib/jobs/timing";
+import { captureServerExceptionImmediate } from "@/lib/analytics/posthog-server";
 import { logError, logInfo } from "@/lib/logger";
 import type { JobPayload } from "@/lib/queue/queues";
 import { processJob } from "@/workers/processor";
@@ -226,6 +227,7 @@ export async function startQueuedBookingJobs(jobs: ClaimedJob[]): Promise<DrainR
         count: jobs.length,
         message: error instanceof Error ? error.message : "bulk run failed",
       });
+      void captureServerExceptionImmediate(error, undefined, { source: "jobs.bulk_run_failed" });
       return { claimed: 0, succeeded: 0, failed: 0 } satisfies DrainResult;
     });
   try {

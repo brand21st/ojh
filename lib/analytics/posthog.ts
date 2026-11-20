@@ -1,4 +1,5 @@
 import posthog from "posthog-js";
+import { isShopifyEmbeddedPath, POSTHOG_DEFAULT_HOST } from "@/lib/analytics/posthog-shared";
 
 /**
  * PostHog product analytics: one place for init rules and every custom event.
@@ -6,7 +7,7 @@ import posthog from "posthog-js";
  * properties stay consistent and are covered by lib/analytics/posthog.test.ts.
  */
 
-export const POSTHOG_DEFAULT_HOST = "https://us.i.posthog.com";
+export { isShopifyEmbeddedPath, POSTHOG_DEFAULT_HOST } from "@/lib/analytics/posthog-shared";
 
 export type AnalyticsEnv = {
   token: string | undefined;
@@ -18,10 +19,6 @@ export type AnalyticsEnv = {
 export type AnalyticsDecision = { enabled: true } | { enabled: false; reason: "no-token" | "shopify-embedded" | "local-dev" };
 
 const LOCAL_HOSTNAMES = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
-
-export function isShopifyEmbeddedPath(pathname: string): boolean {
-  return pathname === "/shopify" || pathname.startsWith("/shopify/");
-}
 
 export function analyticsDecision(env: AnalyticsEnv): AnalyticsDecision {
   if (!env.token?.trim()) return { enabled: false, reason: "no-token" };
@@ -38,8 +35,9 @@ export function analyticsDecision(env: AnalyticsEnv): AnalyticsDecision {
 export function posthogInitOptions(host: string | undefined) {
   return {
     api_host: host?.trim() || POSTHOG_DEFAULT_HOST,
-    defaults: "2026-05-30",
+    defaults: "2026-08-30",
     person_profiles: "identified_only",
+    capture_exceptions: true,
   } as const;
 }
 
@@ -110,6 +108,16 @@ export function resetAnalyticsUser(): void {
   lastIdentified = "";
   if (!posthogReady()) return;
   posthog.reset();
+}
+
+/**
+ * Report a client error that an error boundary already handled (so autocapture never sees it).
+ * No-ops when PostHog is off (local dev, Shopify Admin, missing token).
+ */
+export function captureClientException(error: unknown, extra?: Record<string, unknown>): boolean {
+  if (!posthogReady()) return false;
+  posthog.captureException(error, extra);
+  return true;
 }
 
 export type PurchaseProduct = "plan" | "ai-credits" | "addon:ai-accountant";

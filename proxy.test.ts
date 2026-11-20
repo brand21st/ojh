@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import { NextRequest, NextResponse } from "next/server";
 
+vi.mock("@posthog/next", () => ({
+  withPostHogProxy: (fn: (request: NextRequest) => Promise<NextResponse>) => fn,
+}));
+
 vi.mock("@/lib/supabase/proxy", () => ({
   updateSession: async () => NextResponse.next(),
 }));

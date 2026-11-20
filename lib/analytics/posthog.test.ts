@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const ph = vi.hoisted(() => ({
   init: vi.fn(),
   capture: vi.fn(),
+  captureException: vi.fn(),
   identify: vi.fn(),
   reset: vi.fn(),
   __loaded: true as boolean,
@@ -18,6 +19,7 @@ import {
   identifyUser,
   personProperties,
   resetAnalyticsUser,
+  captureClientException,
   initAnalytics,
   isShopifyEmbeddedPath,
   POSTHOG_DEFAULT_HOST,
@@ -31,7 +33,7 @@ const prod = { token: "phc_test", host: "https://us.i.posthog.com", pathname: "/
 beforeEach(() => {
   ph.__loaded = true;
   resetAnalyticsUser();
-  for (const fn of [ph.init, ph.capture, ph.identify, ph.reset]) fn.mockReset();
+  for (const fn of [ph.init, ph.capture, ph.captureException, ph.identify, ph.reset]) fn.mockReset();
 });
 
 describe("analyticsDecision", () => {
@@ -67,8 +69,9 @@ describe("initAnalytics", () => {
     expect(init).toHaveBeenCalledOnce();
     expect(init).toHaveBeenCalledWith("phc_test", {
       api_host: "https://us.i.posthog.com",
-      defaults: "2026-05-30",
+      defaults: "2026-08-30",
       person_profiles: "identified_only",
+      capture_exceptions: true,
     });
   });
 
@@ -82,6 +85,20 @@ describe("initAnalytics", () => {
     expect(initAnalytics({ ...prod, hostname: "localhost" })).toBe(false);
     expect(initAnalytics({ ...prod, token: undefined })).toBe(false);
     expect(init).not.toHaveBeenCalled();
+  });
+});
+
+describe("captureClientException", () => {
+  it("sends when PostHog is loaded", () => {
+    const err = new Error("boom");
+    expect(captureClientException(err)).toBe(true);
+    expect(ph.captureException).toHaveBeenCalledWith(err, undefined);
+  });
+
+  it("no-ops before init", () => {
+    ph.__loaded = false;
+    expect(captureClientException(new Error("boom"))).toBe(false);
+    expect(ph.captureException).not.toHaveBeenCalled();
   });
 });
 
@@ -193,6 +210,23 @@ describe("wiring", () => {
     expect(src).toContain("initAnalytics(");
     expect(src).toContain("NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN");
     expect(src).not.toMatch(/posthog\.init\(/);
+  });
+
+  it("error boundaries report handled exceptions to PostHog", () => {
+    expect(read("app/global-error.tsx")).toContain("captureClientException(error)");
+    expect(read("app/error.tsx")).toContain("captureClientException(error)");
+  });
+
+  it("server request errors go to PostHog after the Shopify and local-dev gates", () => {
+    const src = read("instrumentation.ts");
+    expect(src).toContain("createOnRequestError");
+    expect(src).toContain("serverErrorTrackingDecision");
+    expect(src).toContain("Sentry.captureRequestError");
+    expect(src).toContain("getPostHogServer");
+  });
+
+  it("proxy errors are wrapped for PostHog", () => {
+    expect(read("proxy.ts")).toContain("withPostHogProxy");
   });
 
   it.each([

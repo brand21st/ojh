@@ -1,4 +1,6 @@
+import { withPostHogProxy } from "@posthog/next";
 import { NextResponse, type NextRequest } from "next/server";
+import { processServerErrorTrackingEnabled, requestPathname } from "@/lib/analytics/posthog-shared";
 import { applySecurityHeaders } from "@/lib/security/headers";
 import { updateSession } from "@/lib/supabase/proxy";
 import { parseTrackingSubdomain } from "@/modules/tracking-pages/host";
@@ -89,7 +91,7 @@ function storeHostResponse(request: NextRequest, label: string, store: ResolvedS
   return secured(NextResponse.rewrite(rewriteUrl, { request: { headers } }), pathname);
 }
 
-export async function proxy(request: NextRequest) {
+async function handleProxy(request: NextRequest) {
   const hostHeader = request.headers.get("host");
   const canonicalHost = requestHostname(hostHeader) || request.nextUrl.hostname.toLowerCase();
   const subdomain = parseTrackingSubdomain(hostHeader);
@@ -140,6 +142,14 @@ export async function proxy(request: NextRequest) {
     request.nextUrl.searchParams.get("shop")
   );
 }
+
+export const proxy = withPostHogProxy(handleProxy, {
+  apiKey: process.env.NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN,
+  host: process.env.NEXT_PUBLIC_POSTHOG_HOST,
+  beforeCapture: ({ request }) => {
+    if (!processServerErrorTrackingEnabled(requestPathname(request.path ?? "/"))) return false;
+  },
+});
 
 export const config = {
   matcher: [
