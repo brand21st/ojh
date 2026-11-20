@@ -44,3 +44,23 @@ describe("affiliate financial policy", () => {
         expect(assertAffiliateStagingTarget({ projectRef: "", productionRefs: [], approvedStagingRef: "stage" }).ok).toBe(false);
     });
 });
+describe("admin money and rate inputs", () => {
+    it("parses rupees to integer paise without float error", async () => {
+        const { rupeesToPaise } = await import("./policy");
+        expect(rupeesToPaise("1,234.5")).toBe(123450);
+        expect(rupeesToPaise("₹ 0.07")).toBe(7);
+        expect(rupeesToPaise("19.99")).toBe(1999);
+        expect(rupeesToPaise("-250", { allowNegative: true })).toBe(-25000);
+        expect(rupeesToPaise("-250")).toBeNull();
+        expect(rupeesToPaise("1.234")).toBeNull();
+        expect(rupeesToPaise("abc")).toBeNull();
+    });
+    it("parses percent to basis points within 0-100%", async () => {
+        const { percentToBasisPoints } = await import("./policy");
+        expect(percentToBasisPoints("20")).toBe(2000);
+        expect(percentToBasisPoints("12.5%")).toBe(1250);
+        expect(percentToBasisPoints("100")).toBe(10000);
+        expect(percentToBasisPoints("100.01")).toBeNull();
+        expect(percentToBasisPoints("1.234")).toBeNull();
+    });
+});

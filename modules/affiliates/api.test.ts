@@ -39,3 +39,11 @@ describe("partner API security", () => {
     it("admin mutations require configured action PIN", async () => { vi.stubEnv("ADMIN_ACCOUNT_ACTION_PIN", ""); await expect(handleAffiliateAdmin(req("actions", "POST", { pin: "123456", data: {} }), user, ["actions", partner])).rejects.toMatchObject({ status: 503 }); expect(mocks.rpc).not.toHaveBeenCalled(); });
     it("admin audited actions exclude PIN from stored payload", async () => { await handleAffiliateAdmin(req("actions", "POST", { pin: "123456", data: { action: "status", status: "APPROVED", reason: "Verified partner" } }), user, ["actions", partner]); expect(mocks.pin).toHaveBeenCalledWith("123456"); expect(mocks.rpc).toHaveBeenCalledWith("affiliate_admin_action", { p_actor: user, p_action: "status", p_id: partner, p_data: { action: "status", status: "APPROVED", reason: "Verified partner" } }); });
 });
+describe("admin search sanitising", () => {
+    it("strips PostgREST filter delimiters and wildcards", async () => {
+        const { searchTerm } = await import("./api");
+        expect(searchTerm("Ravi, (x)*%")).toBe("Ravi x");
+        expect(searchTerm("+91 98470")).toBe("+91 98470");
+        expect(searchTerm(null)).toBe("");
+    });
+});

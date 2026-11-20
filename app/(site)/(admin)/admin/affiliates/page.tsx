@@ -1,4 +1,19 @@
 import { AffiliateAdminDashboard } from "@/components/affiliates/admin-dashboard";
-import { affiliateEnabled } from "@/modules/affiliates/policy";
-export const dynamic="force-dynamic";
-export default function Page(){return affiliateEnabled()?<AffiliateAdminDashboard/>:<main className="p-8"><h1 className="text-2xl font-semibold">Affiliate management</h1><p>The partner program is disabled.</p></main>;}
+import { PageHeader } from "@/components/dashboard/page-header";
+import { accrualEnabled, affiliateEnabled, payoutsEnabled } from "@/modules/affiliates/policy";
+
+export const dynamic = "force-dynamic";
+
+export default function Page() {
+  if (!affiliateEnabled()) {
+    return (
+      <div className="space-y-4">
+        <PageHeader title="Partner program" description="Affiliates who refer merchants to PostBus." />
+        <p className="rounded-2xl border border-border bg-card px-4 py-6 text-sm text-muted">
+          The partner program is switched off. Set <code>POSTBUS_AFFILIATES_ENABLED=true</code> to manage partners here.
+        </p>
+      </div>
+    );
+  }
+  return <AffiliateAdminDashboard payoutsEnabled={payoutsEnabled()} accrualEnabled={accrualEnabled()} />;
+}
