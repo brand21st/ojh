@@ -19,8 +19,54 @@ export function normalizeEmailAddress(value: unknown) {
   return email;
 }
 
+export function splitEmailField(value: string) {
+  return value
+    .split(/[,;\s]+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+const LOOSE_EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/**
+ * Turn a draft into saved addresses.
+ * A trailing unfinished token stays in `pending` until flushPending (blur or Enter).
+ */
+export function commitEmailDraft(
+  current: string[],
+  draft: string,
+  options: { max: number; flushPending: boolean }
+) {
+  const parts = splitEmailField(draft);
+  const finished = /[,;\s]$/.test(draft);
+  const held = !options.flushPending && draft.trim() && !finished ? (parts.pop() ?? "") : "";
+  const emails = [...current];
+  const leftovers: string[] = [];
+  let error: string | null = null;
+  for (const part of parts) {
+    const email = part.trim().toLowerCase();
+    if (!LOOSE_EMAIL.test(email)) {
+      leftovers.push(part.trim());
+      error = error ?? "Enter a valid email address.";
+      continue;
+    }
+    if (emails.includes(email)) {
+      error = error ?? "That address is already in the list.";
+      continue;
+    }
+    if (emails.length >= options.max) {
+      leftovers.push(email);
+      error = error ?? `Save at most ${options.max} email addresses.`;
+      continue;
+    }
+    emails.push(email);
+  }
+  const pending = [held, ...leftovers].filter(Boolean).join(", ");
+  return { emails, pending, error };
+}
+
 export function normalizeRecipients(input: unknown, max = manifestEmailMaxRecipients()) {
-  const list = Array.isArray(input) ? input : [];
+  const list = typeof input === "string" ? splitEmailField(input) : Array.isArray(input) ? input : [];
   const seen = new Set<string>();
   const invalid: string[] = [];
   for (const item of list) {
@@ -71,6 +117,96 @@ export function resolveManifestRecipients(
     return { recipients: settings.officeOverrides[key] ?? [], source: "office" };
   }
   return { recipients: settings.recipients, source: "default" };
+}
+
+export function ccForManifestEmail(
+  settings: { recipients: string[]; officeOverrides: Record<string, string[]>; ccRecipients: string[] },
+  officeId: string | null | undefined
+) {
+  const resolved = resolveManifestRecipients(settings, officeId);
+  const seen = new Set([...resolved.recipients, ...settings.ccRecipients].map((email) => email.toLowerCase()));
+  const extra =
+    resolved.source === "office" && resolved.recipients.length
+      ? settings.recipients.filter((email) => {
+          const key = email.toLowerCase();
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        })
+      : [];
+  return [...settings.ccRecipients, ...extra];
+}
+
+export type OfficeNameConnection = {
+  pickup_dropoff_office_id?: string | null;
+  pickup_dropoff_office_name?: string | null;
+  pickup_dropoff_office_pincode?: string | null;
+  pickup_office_id?: string | null;
+  pickup_office_name?: string | null;
+  pickup_office_pincode?: string | null;
+  pickup_office_city?: string | null;
+  pickup_office_state?: string | null;
+};
+
+function text(value: unknown) {
+  const next = typeof value === "string" ? value.trim() : "";
+  return next || null;
+}
+
+export function fillOfficeDisplayName(
+  officeId: string | null | undefined,
+  storedName: string | null | undefined,
+  connection: OfficeNameConnection | null | undefined
+) {
+  const saved = text(storedName);
+  if (saved) return saved;
+  const id = text(officeId);
+  if (!id || !connection) return "";
+  const dropId = text(connection.pickup_dropoff_office_id);
+  const pickupId = text(connection.pickup_office_id);
+  if (id === dropId) {
+    return text(connection.pickup_dropoff_office_name) || (id === pickupId ? text(connection.pickup_office_name) : null) || "";
+  }
+  if (id === pickupId) return text(connection.pickup_office_name) || "";
+  return "";
+}
+
+/** City, state, and PIN when the office is the pickup office; drop-off PIN otherwise. */
+export function fillOfficeAddress(
+  officeId: string | null | undefined,
+  connection: OfficeNameConnection | null | undefined
+) {
+  const id = text(officeId);
+  if (!id || !connection) return "";
+  const pickupId = text(connection.pickup_office_id);
+  const dropId = text(connection.pickup_dropoff_office_id);
+  if (id === pickupId) {
+    const place = [text(connection.pickup_office_city), text(connection.pickup_office_state)].filter(Boolean).join(", ");
+    return [place, text(connection.pickup_office_pincode)].filter(Boolean).join(" ");
+  }
+  if (id === dropId) return text(connection.pickup_dropoff_office_pincode) || "";
+  return "";
+}
+
+/**
+ * Replace one booking office's recipient list without dropping other offices.
+ * An empty list is stored only when that office already had its own entry.
+ */
+export function withBookingOfficeRecipients(
+  overrides: Record<string, string[]>,
+  officeId: string,
+  emails: string[],
+  keepEmpty = false
+): Record<string, string[]> {
+  const key = officeId.trim();
+  const next = { ...overrides };
+  if (!key) return next;
+  if (!emails.length && !keepEmpty) {
+    delete next[key];
+    return next;
+  }
+  next[key] = [...emails];
+  return next;
 }
 
 export function assertAutoSendRecipients(recipients: string[]) {
