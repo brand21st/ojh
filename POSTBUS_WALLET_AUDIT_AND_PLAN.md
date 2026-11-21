@@ -1,0 +1,255 @@
+# PostBus Wallet & Usage-Based Billing: Audit and Implementation Plan
+
+Date: 2026-11-21 · Status: **awaiting approval. No code or migrations written yet.**
+
+---
+
+## Part A: What exists today (audit)
+
+### A1. Tenancy and access
+- The tenant is the **organization** (`organizations`). Members link through `organization_members` with roles `OWNER / ADMIN / …`. There is one workspace per user (`20260921161500_one_workspace_per_user.sql`).
+- RLS helpers already exist: `is_org_member(org)`, `has_org_role(org, roles[])`, and `is_platform_admin()`. Every tenant table uses them.
+- **Super Admin** means a row in `platform_admins` or the configured admin email (`lib/admin/access.ts`). The `(admin)` route group and `/api/admin/*` go through `lib/api/admin/handle.ts`. Destructive admin actions already need a 6-digit step-up PIN (`lib/admin/action-pin.ts`). Admin nav lives in `lib/admin/nav.ts`.
+- Security-definer RPCs follow one convention: `revoke` from `public`/`anon`, grant to `service_role` (and to `authenticated` only where needed). Money RPCs are service-role only.
+
+### A2. Subscription billing (must stay untouched)
+- `modules/billing/*`: plans, subscriptions, trials, quotas, GST tax policy, subscription tax invoices.
+- Platform Razorpay: `modules/razorpay/{client,config,signature}.ts`. Credentials are encrypted in `platform_settings`.
+- `payments` table has `payment_purpose` (`subscription | ai_credits | addon…`) and `billing_cycle`.
+- Webhook `app/api/webhooks/razorpay/route.ts`:
+  1. Verifies the HMAC.
+  2. Stores the event in `razorpay_webhook_events` (unique `event_id`).
+  3. Takes a lease (`claimBillingWebhook`).
+  4. Runs `processRazorpayEvent`, which uses `classifyPlatformRazorpayPayment` to route payments to subscription, add-on or AI-credit fulfilment.
+- This is the right place to add a **`wallet_recharge`** purpose. No second webhook endpoint is needed.
+
+### A3. Existing AI credit wallet (this is the system the new wallet replaces)
+Migrations `20261008120000_ai_credits.sql`, `20261008180000_ai_credit_wallet.sql` and `20261011140000_ai_image_studio.sql` set up:
+- **Balance columns:** `organizations.ai_credits_balance / _purchased / _used`. These are integer *credits*, not INR. New orgs start with 500.
+- **Ledger:** `ai_credit_ledger` is append-only. It has a unique `(org, idempotency_key)` and a unique purchase-per-`payment_id`.
+- **Packs:** `ai_credit_packages` (₹99 for 500 up to ₹1,199 for 10,000), with a custom-amount min/max in `platform_settings`.
+- **RPCs:**
+  - `consume_ai_credit` and `reserve/finalize/release` both lock the org row with `FOR UPDATE`.
+  - `fulfill_ai_credit_purchase` credits exactly once and checks the amount and org.
+- **Consumers** (all in `modules/ai-credits/service.ts`):
+  - WhatsApp paste parser: `openrouter/parse-whatsapp.ts`
+  - Shopify address AI: `shopify/address-ai.ts`
+  - Pre-booking address validation: `orders/prebooking-validation.ts`
+  - Product copy, cover copy, AI image studio and prompt enhance: `ai-image/*`
+- **UI:** `components/billing/ai-credits-section.tsx` on `/dashboard/billing`, and `/admin/ai-credits`.
+- **Gaps:**
+  - Each feature charges flat credits (1 or 10). Model and tokens are not recorded.
+  - Only `ai-accountant/assistant/run.ts` reads `usage.prompt_tokens`.
+  - No pricing versions, no admin adjustment audit, no INR value.
+
+### A4. WhatsApp
+There are three send paths:
+
+| Path | Who pays Meta | Today |
+|---|---|---|
+| **Platform VaChat** (`platform_settings.vachat_enabled`, one PostBus API key for every merchant) | **PostBus** | Order Confirmation / Processing / Booked / In Transit / Delayed / Delivered notices, support replies, manifest WhatsApp |
+| Merchant's own VaChat key (`vachat_connections`) | Merchant | Same notices, on the merchant's own account |
+| Merchant's own WATI (`wati_connections`) | Merchant | Same notices |
+| Platform OTP / signup welcome / abandoned-signup | PostBus (its own acquisition cost) | `lib/auth/otp/send-whatsapp.ts`, `vachat/signup-welcome.ts` |
+
+- Sends run through background jobs (`modules/jobs`, `lib/jobs/drain.ts`, `claim_background_jobs`). Idempotency comes from `external_ref = postbus:{event}:{entity}[:scan]`, unique per org in `vachat_notification_logs`.
+- Delivery status arrives on the `message.status_updated` webhook (`modules/vachat/webhook.ts`) as `sent / delivered / read / failed`. Inbound envelopes are de-duplicated. **The VaChat payload carries no Meta pricing or category fields.** Category comes from the template catalog (`vachat/templates.ts`, `category`); notices use UTILITY templates.
+
+### A5. Jobs, cron, observability
+- `background_jobs` has claim and lease RPCs, plus cron routes under `app/api/cron/*`. The prod billing cron is known **not** to run (see the prod-billing memory note), so wallet reconciliation must not depend on it alone.
+- The repo uses PostHog, Sentry, and `logError`/`logInfo`.
+
+### A6. Risks found during the audit
+1. `.env.local` points at **production** Supabase. Wallet migrations must be applied on staging first, and only applied on prod after explicit approval.
+2. The current branch `fix/auth-session-stability` has about 60 unrelated uncommitted files. The wallet should be built on a **separate branch/worktree off `main`**.
+3. Prod may be missing billing tables (PGRST205 has been seen before). The migration must be self-contained and idempotent.
+
+---
+
+## Part B: Architecture
+
+### B1. Core principle
+**Turn the AI-credit wallet into a generic INR wallet.** Do not build a second, parallel system. The proven patterns carry over unchanged: org-row lock, unique idempotency keys, one purchase credit per payment, and fulfilment from the webhook. Subscription payments stay on their existing purpose and code path.
+
+### B2. Money unit
+- `bigint` **micro-rupees** (`*_micros`): 1 ₹ = 1,000,000 µ₹ and 1 paisa = 10,000 µ₹.
+- This covers fractional-paisa Meta rates such as ₹0.1150 = 115,000 µ₹. The range is ±9.2 × 10¹² ₹.
+- Razorpay amounts stay in paise and convert by ×10,000. The code never uses float. The TS side uses `bigint` or integer-only helpers in `modules/wallet/money.ts` with exhaustive tests.
+
+### B3. Tables (one migration: `2026112112xxxx_tenant_wallet.sql`)
+
+| Table | Purpose / key constraints |
+|---|---|
+| `wallets` | 1 row per org (`organization_id` unique).<br>Columns: `balance_micros`, `reserved_micros` (both `>= 0`, with `balance >= reserved`), `status` (`active / frozen`), `credit_limit_micros` (default 0, the "explicit credit policy"), `low_balance_thresholds_micros[]`, lifetime counters (recharged / whatsapp / ai / promo / refunded), `version`. |
+| `wallet_ledger` | **Immutable**: an UPDATE/DELETE trigger raises.<br>Columns: `org`, `wallet_id`, `entry_type` (`RECHARGE, USAGE_WHATSAPP, USAGE_AI, PROMO_CREDIT, ADMIN_CREDIT, ADMIN_DEBIT, REFUND_TO_WALLET, RECHARGE_REVERSAL, MIGRATION_OPENING`), `amount_micros` (signed, ≠0), `balance_after_micros`, `reference_type/id`, `idempotency_key` (unique per wallet), `pricing_rule_id`, `actor_user_id`, `metadata`, `created_at`. |
+| `wallet_reservations` | Holds funds before a send or AI call.<br>Status runs `HELD → CAPTURED / RELEASED / EXPIRED`. Unique `(wallet, idempotency_key)`, plus `expires_at`. |
+| `wallet_recharge_orders` | One per checkout: `amount_paise`, `razorpay_order_id` (unique), `status` (`CREATED / PAID / FAILED / REFUNDED / PARTIALLY_REFUNDED`), `payment_id → payments`. |
+| `payments` (existing) | Reused with `payment_purpose = 'wallet_recharge'`, so Razorpay audit and Super Admin payments keep a single list. |
+| `wallet_pricing_rules` | **Versioned, never edited in place.** A change inserts a new row and closes the old one's `effective_to`.<br>Columns: `service` (`whatsapp / ai`), `whatsapp_category`, `country_code`, `provider`, `ai_feature`, `ai_model`, `unit` (`per_message / per_operation / per_1k_input_tokens / per_1k_output_tokens`), `base_cost_micros`, `markup_bps`, `discount_bps`, `organization_id` (null = global, set = tenant override), `effective_from/to`, `created_by`. |
+| `wallet_free_allowances` | Optional per-org/category monthly free messages, with `period` and `used`. |
+| `whatsapp_usage_records` | One per billable send.<br>Columns: `org`, `log_id → vachat_notification_logs`, `external_ref` (unique per org), `category`, `country`, `provider`, `pricing_rule_id`, `unit_price_micros`, `status` (`RESERVED / CHARGED / RELEASED / FREE`), `provider_message_id`, `reservation_id`, `ledger_id`. |
+| `ai_usage_records` | Columns: `org`, `feature`, `model`, `input_tokens`, `output_tokens`, `pricing_rule_id`, `charge_micros`, `status`, `idempotency_key` (unique), `reservation_id`, `ledger_id`, `parent_operation_id` (links the AI and WhatsApp halves of a combined feature). |
+| `wallet_adjustments` | Admin-only and immutable.<br>Columns: `admin_user_id`, `admin_email`, `kind` (`promo / refund / manual_credit / manual_debit`), `amount_micros`, `reason` (required, at least 10 chars), `ledger_id`, `created_at`. |
+| `wallet_alerts` | Columns: `org`, `threshold_micros`, `fired_at`, `cleared_at`, `channel`. Unique open alert per (org, threshold), so each threshold fires once per crossing. |
+
+**RLS**
+- Tenants get `SELECT` only on their own rows (`is_org_member`). Pricing rules are readable only for their resolved price, through an RPC.
+- No tenant `INSERT/UPDATE/DELETE` policy on any wallet table.
+- All writes go through security-definer RPCs granted to `service_role` only.
+
+**Indexes:** `(organization_id, created_at desc)` on ledger and usage tables, `status` partial indexes on reservations and recharge orders, and a pricing lookup index on `(service, category/feature, country, organization_id, effective_from)`.
+
+### B4. RPCs (all atomic, all lock `wallets` row `FOR UPDATE`)
+- `wallet_ensure(org)` is idempotent. A trigger on `organizations` insert also creates the wallet.
+- `wallet_reserve(org, amount, key, ttl)` and `wallet_capture(reservation, final_amount, ledger fields)`:
+  - Capture may be **less than or equal to** the held amount. AI token pricing settles to the actual amount.
+  - Both reject if `balance − reserved + credit_limit < amount`.
+- `wallet_release(reservation)`.
+- `wallet_debit_direct(org, amount, key, …)` for immediate verified charges. It does the reserve and capture in one transaction.
+- `wallet_fulfill_recharge(razorpay_order_id, payment_id, amount_paise, expected_org)` mirrors `fulfill_ai_credit_purchase`. It credits exactly once through the `PAID` transition plus the unique ledger key `recharge:{payment_id}`.
+- `wallet_reverse_recharge(payment_id, refund_id, amount)` handles refunds.
+- `wallet_admin_adjust(org, kind, amount, reason, admin_id, key)` writes the adjustment and ledger rows in one transaction.
+- `wallet_expire_reservations()` and `wallet_reconcile(org?)`:
+  - Reconcile asserts `balance = Σ ledger` and `reserved = Σ HELD` per wallet.
+  - Mismatches are recorded, and Super Admin is alerted. Nothing is silently fixed.
+
+### B5. Flows
+
+**Recharge**
+1. The UI calls `POST /api/v1/wallet/recharge` with the amount. The server validates it against the presets (₹100/250/500/1000/2000) and the admin min/max.
+2. The server creates the Razorpay order, the `payments` row and the `wallet_recharge_orders` row.
+3. Razorpay Checkout opens.
+4. The client callback hits `POST /api/v1/wallet/recharge/verify`. The server checks the signature **and** fetches the payment from the Razorpay API before calling `wallet_fulfill_recharge`.
+5. The `payment.captured` / `order.paid` webhook calls the same RPC. Whichever arrives first credits, and the other one no-ops.
+6. `payment.failed` marks the recharge order FAILED. `refund.processed` reverses the credit.
+7. A reconcile job re-fetches stale `CREATED` orders older than 15 minutes from Razorpay, which covers delayed or missed webhooks.
+
+**WhatsApp**: billed only when sent through the **platform VaChat** account.
+1. In `vachat/send.ts`, before the provider call, the code resolves the price:
+   - category from the template catalog (notices are UTILITY);
+   - country from the E.164 recipient.
+   It then calls `wallet_reserve(key = whatsapp:{org}:{external_ref})`.
+2. If the balance is insufficient, the send is **not attempted**:
+   - The log gets `status = 'insufficient_balance'`.
+   - The job is parked as "held for balance", not failed.
+   - A recharge prompt shows.
+   - Held jobs resume automatically after the next successful recharge, up to a configurable age such as 24h, so stale "Booked" notices are not sent days later.
+3. On a provider send error, the reservation is released.
+4. On the `sent`/`delivered` webhook, the reservation is captured (charged once, because the reservation is unique). On `failed`, it is released.
+5. Webhook retries hit the already-captured/released state and no-op.
+6. If no webhook arrives, a reservation older than 24h is captured if the provider accepted the message. The rule is configurable.
+7. Merchant-own WATI/VaChat and PostBus's own OTP/signup messages are **not billed**. They still write a `FREE` usage record for reporting.
+
+**AI**
+- A new `modules/wallet/ai-billing.ts` wraps each AI call in `runBilledAiOperation({feature, model, idempotencyKey}, fn)`:
+  1. Reserve the max estimated charge.
+  2. Call OpenRouter and read `usage.prompt_tokens/completion_tokens`.
+  3. Price from the rule (fixed + token).
+  4. Capture the actual amount, or release it on failure.
+- The existing call sites move from `consumeAiCredit/reserveAiCredits` to this wrapper. Their idempotency keys already exist and are reused.
+- Combined features record two usage rows sharing `parent_operation_id`.
+
+**Low balance**
+- After every debit, the ledger RPC compares the new balance with the thresholds and inserts a `wallet_alerts` row on crossing. A job then sends an in-app notification through the existing `notifications` realtime table, plus email. The alert clears when the balance rises above the threshold again.
+- Only wallet-billed operations are blocked. Booking, labels, tracking and the rest are never gated on the wallet.
+- Auto-recharge is **out of scope for v1**. It needs Razorpay recurring/e-mandate consent, which I'd propose as a later phase.
+
+### B6. Migrating existing AI credits
+- Each org gets an opening ledger entry `MIGRATION_OPENING` = `ai_credits_balance × conversion_rate`.
+- The old columns, RPCs and ledger are kept **read-only** for history. Old `ai_credits` payment fulfilment keeps working for any checkout already in flight.
+- A feature flag `WALLET_ENABLED` switches the consumers and UI. While it is off, everything behaves exactly as today.
+
+### B7. UI
+- **Merchant:** a `Wallet` sidebar item → `/dashboard/wallet`, using the existing PageHeader, cards, data-table and sheet components. It shows:
+  - KPI cards: balance, WhatsApp spend, AI spend, total recharged, this month.
+  - Recharge sheet with presets and a custom amount.
+  - Usage chart (daily, split by service).
+  - Transactions table with filters and CSV export.
+  - Low-balance banner.
+  - The AI-credits section on `/dashboard/billing` becomes a link to Wallet.
+- **Super Admin:** `Wallet Management` → `/admin/wallet` with three tabs:
+  - **Tenant wallets:** a table with all the requested columns, plus freeze/unfreeze.
+  - **Pricing:** versioned rules editor, tenant overrides, history view.
+  - **Adjustments:** promo / refund / manual credit or debit. Each needs a reason and the action PIN, and the admin can export a statement.
+  - Plus a reconciliation status card.
+
+### B8. Code layout
+- `modules/wallet/`: `money.ts`, `pricing.ts`, `service.ts`, `recharge.ts`, `webhooks.ts`, `whatsapp-billing.ts`, `ai-billing.ts`, `alerts.ts`, `reconcile.ts`, `admin.ts`, `constants.ts`, each with `*.test.ts`. Postgres-backed tests go in `*.pg.test.ts` (PGlite, matching the existing `inclusive-tax.pg.test.ts` pattern) to cover concurrency, idempotency and immutability.
+- Routes:
+  - `lib/api/v1/wallet.ts`
+  - `lib/api/admin/wallet.ts`
+  - cron `app/api/cron/wallet` for expiring reservations, reconciling, re-checking stale recharge orders and resuming held sends.
+
+### B9. Test matrix (maps to Phase 10)
+
+| # | Test | Kind |
+|---|---|---|
+| 1 | Wallet created on org insert and backfilled | pg |
+| 2–4 | Recharge success, failure, and duplicate webhook + callback race | unit + pg |
+| 5 | 50 concurrent reserves/recharges keep balance = Σ ledger | pg |
+| 6–8 | WhatsApp charge, failed release, duplicate status webhook | unit + pg |
+| 9 | AI token pricing, capture ≤ reserve, retry idempotency | unit + pg |
+| 10 | Insufficient balance: no send, held job, resumes after recharge | unit |
+| 11 | Org A cannot read or charge org B (RLS + RPC grants) | pg |
+| 12 | Admin adjustment needs PIN + reason and is immutable | unit + pg |
+| 13–14 | Statement totals, refund reversal, reconcile mismatch detection | pg |
+| 15 | Existing billing/ai-credits/vachat suites stay green; typecheck; staging browser pass on desktop, tablet and mobile | regression |
+
+### B10. Delivery phases (each one is a commit)
+1. Migration + money/pricing/service RPCs + pg tests (staging only).
+2. Recharge (API, webhook routing, verify, reconcile) + merchant Wallet page.
+3. AI billing wrapper + migrate consumers (flagged).
+4. WhatsApp billing in the platform VaChat path + held sends.
+5. Super Admin wallet management + adjustments + exports.
+6. Low-balance alerts + cron + reconciliation.
+7. Full regression, staging E2E with Razorpay **test mode**, then a prod rollout plan for your approval.
+
+---
+
+## Part C: Decisions (answered 2026-11-21)
+- **Credit conversion:** ₹0.20 per existing AI credit, recorded as a `MIGRATION_OPENING` entry.
+- **WhatsApp billing:** only sends through the **platform VaChat** account are billed. Merchant-own WATI/VaChat sends and PostBus OTP/signup messages are recorded as `FREE`.
+- **GST:** each recharge is **GST-inclusive** and gets a tax invoice at recharge time from the existing subscription tax-invoice engine. The wallet is credited with the net (taxable) value. *The recharge-confirm UI must show the split, for example "Pay ₹1,000 → ₹847.46 wallet credit + ₹152.54 GST"; please confirm this is the intended effect.*
+- **New tenant:** gets a ₹100 `PROMO_CREDIT`.
+
+### Original questions
+1. **Credit conversion:** what INR value for each existing AI credit? My suggestion is ₹0.20, which is the Starter pack rate of ₹99 / 500.
+2. **New-tenant starting balance:** today it is 500 free AI credits. Should new tenants get the equivalent promo INR (₹100 at ₹0.20), or start at ₹0?
+3. **GST on recharges:** treat a recharge as an advance with a GST tax invoice at recharge time, reusing the subscription tax-invoice engine, or defer GST? This is an accounting call.
+4. **Who gets billed for WhatsApp:** the proposal bills only sends through the platform VaChat account, not merchants on their own WATI/VaChat, and not PostBus's own OTP/signup messages. Confirm?
+
+---
+
+## Part D: Phase 1 status (2026-11-21, branch `feat/tenant-wallet`)
+
+**Built**
+- Migration `supabase/migrations/20261121120000_tenant_wallet.sql`. **Not applied to any database.**
+  - **Tables:** `wallets`, `wallet_ledger`, `wallet_reservations`, `wallet_recharge_orders`, `wallet_pricing_rules`, `wallet_adjustments`, `wallet_alerts`, `wallet_reconciliation_issues`, `wallet_status_events`.
+  - **Settings:** wallet columns on `platform_settings`, plus `wallet_recharge` added to `payments.payment_purpose`.
+  - **Functions (service_role only):** reserve, capture, release, debit, reverse usage, expire, fulfil/fail/refund recharge, admin adjust, set status, versioned pricing (set/resolve/quote), reconcile, AI-credit cutover.
+  - **Guards:** ledger, adjustments and status events can't be edited. Pricing rules can only be closed. Balances change only inside wallet functions.
+  - **Backfill:** every existing org gets an empty wallet. Credits move only when `wallet_migrate_all_ai_credits` runs at cutover.
+  - **Signup promo:** off until `wallet_signup_promo_enabled` is set at cutover.
+- `modules/wallet/{money,pricing,constants,service}.ts`. Money is bigint micros, and the TS pricing mirrors the SQL exactly. `WALLET_ENABLED` flag; nothing calls the wallet yet.
+
+**Tests**
+- `money.test.ts` and `pricing.test.ts`: unit tests.
+- `wallet.pg.test.ts`: 29 PGlite tests against the real migration. They cover:
+  - creation, backfill and promo
+  - recharge once-only, mismatch, wrong tenant, fail-then-retry
+  - partial and full refunds, freeze and unfreeze
+  - holds, captures and releases, plus idempotency
+  - immutability, tenant isolation (RLS and function grants)
+  - admin audit, pricing versions and overrides
+  - SQL = TS pricing on 200 random cases
+  - alerts, reconcile, cutover
+- `scripts/wallet/concurrency-check.sh` runs on a throwaway real Postgres 17 cluster:
+  - 80 clients × 250 mixed transactions (colliding keys, racing fulfilments).
+  - A drain where 1,600 parallel charges stop exactly at ₹0.
+  - Fails if the wallet row lock is removed.
+
+**Changed from the original plan**
+- Usage-record tables and free allowances move to the phases that write them (AI → Phase 3, WhatsApp → Phase 4).
+- Credits move at cutover, not at migration time, so balances aren't double-counted while the old AI credit flow is still live.
+
+**Known, not caused by this work:** `modules/billing/consume-quota.test.ts` has 2 failures at base commit `db76c90`.
