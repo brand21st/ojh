@@ -4,6 +4,7 @@ import type { TenantContext } from "@/lib/api/context";
 import { AppError, ERROR_CODES } from "@/lib/api/errors";
 import { logError, logInfo } from "@/lib/logger";
 import { consumeAiCredit, getAiCreditsRemaining } from "@/modules/ai-credits/service";
+import { openRouterUsage, type AiUsageSink } from "@/modules/wallet/ai-billing";
 import { isAiAddressCheckEnabled } from "@/modules/automation/service";
 import {
   OPENROUTER_API_BASE,
@@ -108,7 +109,12 @@ export function parseErrorStatusContent(content: string, orderIds: string[]) {
   }
 }
 
-async function askModel(apiKey: string, model: string, payload: Array<{ orderId: string; facts: ErrorFact[] }>) {
+async function askModel(
+  apiKey: string,
+  model: string,
+  payload: Array<{ orderId: string; facts: ErrorFact[] }>,
+  sink?: AiUsageSink
+) {
   const body = {
     model,
     temperature: 0,
@@ -143,6 +149,7 @@ async function askModel(apiKey: string, model: string, payload: Array<{ orderId:
   const json = (await response.json().catch(() => null)) as {
     choices?: Array<{ message?: { content?: string } }>;
   } | null;
+  if (sink) Object.assign(sink, openRouterUsage(json), { model });
   return parseErrorStatusContent(json?.choices?.[0]?.message?.content ?? "", payload.map((row) => row.orderId));
 }
 
@@ -204,11 +211,20 @@ export async function explainOrderErrorStatuses(
     const config = await getPlatformOpenRouterConfig();
     const credits = await getAiCreditsRemaining(supabase, ctx.organizationId);
     if (config.enabled && config.apiKey && credits > 0) {
-      const explained = await askModel(config.apiKey, config.model, pending.map(({ orderId, facts }) => ({ orderId, facts })));
+      const usage: AiUsageSink = {};
+      const explained = await askModel(
+        config.apiKey,
+        config.model,
+        pending.map(({ orderId, facts }) => ({ orderId, facts })),
+        usage
+      );
       if (explained.size) {
         await consumeAiCredit(supabase, ctx.organizationId, {
           reason: "AI_ERROR_STATUS",
           idempotencyKey: `error-status:${ctx.organizationId}:${factHash(pending.flatMap((row) => row.facts))}`,
+          feature: "order_error_explain",
+          model: usage.model,
+          usage,
         });
         logInfo("orders.error_status_ai", {
           organizationId: ctx.organizationId,

@@ -4,6 +4,7 @@ import { AppError, ERROR_CODES } from "@/lib/api/errors";
 import { logError } from "@/lib/logger";
 import { AI_CREDIT_REASON_PRODUCT_COPY, ZERO_AI_CREDITS_MESSAGE } from "@/modules/ai-credits/constants";
 import { consumeAiCredit, getAiCreditsRemaining } from "@/modules/ai-credits/service";
+import { openRouterUsage, type AiUsageSink } from "@/modules/wallet/ai-billing";
 import {
   DEFAULT_OPENROUTER_MODEL,
   OPENROUTER_API_BASE,
@@ -123,7 +124,8 @@ type UserContentPart =
 export async function extractProductCopyWithOpenRouter(
   prompt: string,
   images: string[],
-  config: Pick<PlatformOpenRouterConfig, "apiKey" | "model">
+  config: Pick<PlatformOpenRouterConfig, "apiKey" | "model">,
+  sink?: AiUsageSink
 ): Promise<{ title: string; description: string }> {
   const model = visionSafeOpenRouterModel(config.model, images.length > 0);
   const userContent: UserContentPart[] = [
@@ -164,6 +166,7 @@ export async function extractProductCopyWithOpenRouter(
       `OpenRouter request failed (${response.status}).`;
     throw new Error(message);
   }
+  if (sink) Object.assign(sink, openRouterUsage(json), { model });
   const content = json.choices?.[0]?.message?.content?.trim() || "";
   if (!content) throw new Error("OpenRouter returned empty product copy.");
   return parseMessageContent(content);
@@ -189,10 +192,14 @@ export async function generateProductCopy(
   }
 
   try {
-    const copy = await extractProductCopyWithOpenRouter(prompt, images, config);
+    const usage: AiUsageSink = {};
+    const copy = await extractProductCopyWithOpenRouter(prompt, images, config, usage);
     const remaining = await consumeAiCredit(options.supabase, options.organizationId, {
       reason: AI_CREDIT_REASON_PRODUCT_COPY,
       idempotencyKey: input.idempotencyKey ?? null,
+      feature: "product_copy",
+      model: usage.model,
+      usage,
     });
     return {
       title: copy.title,

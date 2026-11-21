@@ -91,5 +91,8 @@ export async function runWalletSweep(db: SupabaseClient) {
   if (mismatches > 0) logError("wallet.reconcile_mismatch", { wallets: mismatches });
   // After recovery, so a recharge credited just now gets its invoice in the same run.
   const invoices = await issuePendingRechargeInvoices(db, 200);
-  return { expired, recharges, mismatches, invoices };
+  // AI jobs whose hold expired (worker crashed) stop showing as in progress.
+  const { data: abandonedAi, error: abandonError } = await db.rpc("wallet_ai_abandon_stale", { p_limit: 500 });
+  if (abandonError && abandonError.code !== "PGRST202") logError("wallet.ai_abandon_failed", { message: abandonError.message });
+  return { expired, recharges, mismatches, invoices, abandonedAi: Number(abandonedAi ?? 0) };
 }

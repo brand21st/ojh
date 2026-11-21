@@ -327,3 +327,32 @@ There are three send paths:
 - **Refunds:** a refund doesn't issue a GST credit note. The invoice stays as issued and the refund amount is printed as a note.
 - **GST timing:** whether a prepaid wallet top-up is taxed at recharge (as built) or at use is a question for your accountant.
 - **Signature:** Rule 46 asks for a signature or digital signature. The PDF is unsigned.
+
+---
+
+## Part G: Phase 3: AI features charge the wallet (2026-11-21)
+
+**How an organization switches:** `wallet_ai_mode` returns `wallet` once `wallet_migrate_ai_credits` has run for that organization (and `WALLET_ENABLED` is on). Every other organization keeps the legacy AI credits exactly as before. Moving the credits is the per-tenant switch.
+
+**Built**
+- **Migration** `20261121180000_wallet_ai_usage.sql` (**not applied anywhere**):
+  - `ai_usage_records`: one row per operation, keyed by idempotency key. It records feature, model, units, input/output tokens, pricing rule, hold, charge and status (`RESERVED / CHARGED / FREE / RELEASED / REJECTED / ABANDONED`).
+  - **Seeded AI prices at today's credit rate** (₹0.20 per credit): ₹0.20 per operation for data extraction, address checker, address validation, product/cover copy, prompt rewrite and error explanations; ₹2.00 per Image/Cover Studio variation; plus a ₹0.20 catch-all. Super Admin can add per-model, per-token rates, markup and tenant overrides through versioned pricing rules.
+  - `wallet_ai_charge` charges an operation once it has run. A refusal is stored as `REJECTED`, and the same key can be retried after a recharge.
+  - `wallet_ai_reserve` and `wallet_ai_settle` handle slow jobs. The hold is priced up front. Settling charges the actual usage at that same pinned rule, never above the hold; any shortfall is recorded as `underBilledMicros`.
+  - `wallet_ai_quote`, `wallet_ai_mode`, and `wallet_ai_abandon_stale` (run from the wallet cron).
+- **Routing:** `modules/ai-credits/service.ts` functions route wallet-billed organizations to the wallet:
+  - `getAiCreditsRemaining` and the snapshot return the balance in credit terms (available ÷ ₹0.20), so existing screens and "out of credits" checks keep working.
+  - `consumeAiCredit` returns `null` when the wallet refuses, so address features drop the AI result rather than giving it away.
+  - Reserve, finalize and release go through the wallet hold.
+  - Buying AI credit packs is blocked for wallet-billed organizations.
+- **Every AI call site** now passes its feature, model and OpenRouter token usage: WhatsApp paste (`data_extraction`), Shopify address checker, pre-booking address validation, product copy, cover copy, prompt rewrite, order error explanations, Image Studio and Cover Studio (with units = variations).
+
+**Tests**
+- 98 wallet tests pass. They include 8 PGlite AI tests: mode switch, seeded prices, once-only charge with refusal and retry, per-model token pricing with markup, hold/settle/release, cap at hold, abandoned holds, tenant isolation. A routing test covers both the wallet path and the flag-off legacy path.
+- Existing AI, billing and API suites pass. The only failures predate this work: 2 address-length tests and 2 consume-quota tests, all confirmed against the base commit. One Shopify test timed out under parallel load and passes on its own.
+- The concurrency check passes.
+
+**Known limits**
+- **Quick AI calls** check affordability before the model call and charge after it, the same as credits today. Two simultaneous calls on a nearly empty wallet can each pass the check; the second charge is then refused and logged. Image jobs use a real hold.
+- **Screens still say "AI credits".** For wallet-billed organizations the number shown is wallet-equivalent operations; changing the wording to rupees is a UI follow-up.

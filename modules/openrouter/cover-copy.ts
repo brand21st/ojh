@@ -4,6 +4,7 @@ import { AppError, ERROR_CODES } from "@/lib/api/errors";
 import { logError } from "@/lib/logger";
 import { AI_CREDIT_REASON_PRODUCT_COPY, ZERO_AI_CREDITS_MESSAGE } from "@/modules/ai-credits/constants";
 import { consumeAiCredit, getAiCreditsRemaining } from "@/modules/ai-credits/service";
+import { openRouterUsage } from "@/modules/wallet/ai-billing";
 import {
   OPENROUTER_API_BASE,
   getPlatformOpenRouterConfig,
@@ -145,6 +146,9 @@ export async function generateCoverCopy(
     const creditsRemaining = await consumeAiCredit(options.supabase, options.organizationId, {
       reason: AI_CREDIT_REASON_PRODUCT_COPY,
       idempotencyKey: input.idempotencyKey ?? null,
+      feature: "cover_copy",
+      model: config.model,
+      usage: openRouterUsage(json),
     });
     return { ...copy, creditsRemaining: creditsRemaining ?? remaining - 1 };
   } catch (error) {
