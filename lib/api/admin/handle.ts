@@ -88,6 +88,10 @@ export async function handleAdminRoutes(
   const supabase = createAdminClient();
   if (slugs[0] === "tax-policies") return handleTaxPolicyAdmin(supabase, request, ctx.userId, slugs.slice(1), method);
   if (slugs[0] === "tax-invoices") return handleAdminTaxInvoices(supabase, request, ctx.userId, slugs.slice(1), method);
+  if (slugs[0] === "wallet") {
+    const { handleAdminWallet } = await import("@/modules/wallet/admin");
+    return handleAdminWallet(request, supabase, ctx, slugs.slice(1), method);
+  }
   const path = slugs.join("/");
   const key = `${method} ${path}`;
 

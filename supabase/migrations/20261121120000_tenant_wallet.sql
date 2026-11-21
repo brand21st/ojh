@@ -261,9 +261,10 @@ create table if not exists public.wallet_adjustments (
   reason text not null,
   admin_user_id uuid not null,
   admin_email text,
-  idempotency_key text not null unique,
+  idempotency_key text not null,
   ledger_id uuid references public.wallet_ledger(id) on delete set null,
   created_at timestamptz not null default now(),
+  constraint wallet_adjustments_org_key_uniq unique (organization_id, idempotency_key),
   constraint wallet_adjustments_kind_chk check (kind in ('PROMO', 'REFUND', 'MANUAL_CREDIT', 'MANUAL_DEBIT')),
   constraint wallet_adjustments_amount_chk check (amount_micros > 0),
   constraint wallet_adjustments_reason_chk check (char_length(btrim(reason)) between 10 and 500)
@@ -1311,7 +1312,7 @@ begin
 
   w := public.wallet__lock(p_org);
 
-  select * into a from public.wallet_adjustments where idempotency_key = v_key;
+  select * into a from public.wallet_adjustments where organization_id = p_org and idempotency_key = v_key;
   if found then
     return jsonb_build_object('status', 'DUPLICATE', 'adjustmentId', a.id, 'ledgerId', a.ledger_id)
       || public.wallet__snapshot(w);
