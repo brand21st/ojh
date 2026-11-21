@@ -243,6 +243,34 @@ export async function sendVachatNotice(
     return { skipped: true, reason: "missing_phone" };
   }
 
+  // Notices through the PostBus account are paid from the merchant's wallet.
+  let walletBilled = false;
+  if (creds.source === "platform") {
+    const { holdWhatsappNotice, HELD_FOR_BALANCE_STATUS } = await import("@/modules/wallet/whatsapp-billing");
+    const hold = await holdWhatsappNotice(organizationId, { externalRef, event, phone });
+    if (!hold.proceed) {
+      await upsertVachatNotificationLog(supabase, {
+        organizationId,
+        orderId: ids.orderId,
+        shipmentId: ids.shipmentId,
+        event,
+        phone,
+        externalRef,
+        status: HELD_FOR_BALANCE_STATUS,
+        error: hold.status === "WALLET_FROZEN" ? "wallet_on_hold" : "wallet_balance_low",
+        walletHoldPayload: {
+          event,
+          shipmentId: ids.shipmentId ?? null,
+          orderId: ids.orderId ?? null,
+          eventCode: ids.eventCode ?? null,
+          occurredAt: ids.occurredAt ?? null,
+        },
+      });
+      return { skipped: true, reason: "wallet_balance_low" };
+    }
+    walletBilled = hold.billed;
+  }
+
   try {
     const result = await postVachatNotification(creds, {
       merchant_id: organizationId,
@@ -269,7 +297,17 @@ export async function sendVachatNotice(
       status: "sent",
       vachatMessageId: result.messageId,
       whatsappMessageId: result.whatsappMessageId,
+      ...(walletBilled ? { walletHoldPayload: null } : {}),
     });
+    if (walletBilled) {
+      const { settleWhatsappNotice } = await import("@/modules/wallet/whatsapp-billing");
+      await settleWhatsappNotice(organizationId, {
+        externalRef,
+        outcome: "sent",
+        providerMessageId: result.messageId,
+        whatsappMessageId: result.whatsappMessageId,
+      });
+    }
     return result;
   } catch (error) {
     const anyError = error as { status?: number; code?: string; message?: string };
@@ -283,6 +321,11 @@ export async function sendVachatNotice(
       status: "failed",
       error: anyError.message?.slice(0, 240) ?? "send_failed",
     });
+    if (walletBilled) {
+      // Not sent: give the money back now; a retry holds it again.
+      const { settleWhatsappNotice } = await import("@/modules/wallet/whatsapp-billing");
+      await settleWhatsappNotice(organizationId, { externalRef, outcome: "send_error" });
+    }
     if (isPermanentVachatNotifyFailure(anyError.code, anyError.status)) {
       return { skipped: true, reason: anyError.code ?? "permanent_failure" };
     }

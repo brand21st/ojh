@@ -23,6 +23,8 @@ PSQL=("$PG_BIN/psql" -v ON_ERROR_STOP=1 -q -X -d postgres)
 "${PSQL[@]}" -f "$ROOT/supabase/migrations/20261121140000_wallet_recharge.sql"
 "${PSQL[@]}" -f "$ROOT/supabase/migrations/20261121160000_wallet_recharge_invoices.sql"
 "${PSQL[@]}" -f "$ROOT/supabase/migrations/20261121180000_wallet_ai_usage.sql"
+"${PSQL[@]}" -c "create table vachat_notification_logs (id uuid primary key default gen_random_uuid(), organization_id uuid, external_ref text, status text)"
+"${PSQL[@]}" -f "$ROOT/supabase/migrations/20261121200000_wallet_whatsapp_usage.sql"
 "${PSQL[@]}" -f "$ROOT/scripts/wallet/concurrency-seed.sql" >/dev/null
 
 CLIENTS="${CLIENTS:-50}"; TX="${TX:-200}"

@@ -33,6 +33,8 @@ function parseEnvelope(rawBody: string) {
       merchant_id?: string;
       message_id?: string;
       whatsapp_message_id?: string;
+      /** Meta pricing block, when the provider forwards it. */
+      pricing?: { billable?: boolean; category?: string };
       from?: string;
       wa_id?: string;
       phone?: string;
@@ -118,6 +120,19 @@ async function recordAccepted(
       whatsappMessageId: body.data?.whatsapp_message_id ?? null,
       error: status === "failed" ? "Message failed" : null,
     });
+    if (matched.id === "platform") {
+      const { settleWhatsappNotice, whatsappOutcomeFromWebhook } = await import("@/modules/wallet/whatsapp-billing");
+      const { outcome, category } = whatsappOutcomeFromWebhook(status, body.data?.pricing ?? null);
+      if (outcome) {
+        await settleWhatsappNotice(matched.organization_id, {
+          externalRef,
+          outcome,
+          category,
+          providerMessageId: body.data?.message_id ?? null,
+          whatsappMessageId: body.data?.whatsapp_message_id ?? null,
+        });
+      }
+    }
   }
 
   const providerMessageId = String(body.data?.message_id ?? body.data?.whatsapp_message_id ?? "").trim();

@@ -61,6 +61,10 @@ export async function handleWalletRazorpayEvent(db: SupabaseClient, payload: Pay
     }
     logInfo("wallet.webhook_recharge", { event, orderId, status: result.status });
     if (result.raw.rechargeOrderId) await issueRechargeInvoice(db, String(result.raw.rechargeOrderId));
+    if (result.status === "CREDITED" && result.snapshot?.organizationId) {
+      const { resumeHeldWhatsappNotices } = await import("@/modules/wallet/whatsapp-billing");
+      await resumeHeldWhatsappNotices({ organizationId: result.snapshot.organizationId, limit: 200 }).catch(() => undefined);
+    }
     return { processed: true, wallet: true, status: result.status };
   }
 

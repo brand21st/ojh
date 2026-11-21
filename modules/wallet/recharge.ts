@@ -198,6 +198,8 @@ export async function verifyWalletRecharge(
   logInfo("wallet.recharge_verified", { organizationId: input.organizationId, status: result.status });
   const rechargeOrderId = String(result.raw.rechargeOrderId ?? "");
   const invoice = rechargeOrderId ? await issueRechargeInvoice(db, rechargeOrderId) : null;
+  const { resumeHeldWhatsappNotices } = await import("@/modules/wallet/whatsapp-billing");
+  await resumeHeldWhatsappNotices({ organizationId: input.organizationId, limit: 200 }).catch(() => undefined);
 
   return {
     status: "CREDITED" as const,

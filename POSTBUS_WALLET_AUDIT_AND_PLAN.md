@@ -356,3 +356,41 @@ There are three send paths:
 **Known limits**
 - **Quick AI calls** check affordability before the model call and charge after it, the same as credits today. Two simultaneous calls on a nearly empty wallet can each pass the check; the second charge is then refused and logged. Image jobs use a real hold.
 - **Screens still say "AI credits".** For wallet-billed organizations the number shown is wallet-equivalent operations; changing the wording to rupees is a UI follow-up.
+
+---
+
+## Part H: Phase 4: WhatsApp notice billing (2026-11-21)
+
+**What's billed:** the automated order notices (order confirmation, processing, booked, in transit, delayed, delivered) sent through the **PostBus platform VaChat account**.
+- Merchants on their own WATI or VaChat, support replies, OTP and signup messages aren't billed.
+- **Off by default.** Super Admin turns on `platform_settings.wallet_whatsapp_billing_enabled` *after* entering rates.
+- Only Service (₹0) is seeded. Meta's Marketing, Utility and Authentication rates aren't guessed, and an unpriced category sends free, recorded with `NO_PRICE`.
+
+**Built**
+- **Migration** `20261121200000_wallet_whatsapp_usage.sql` (**not applied anywhere**):
+  - `whatsapp_usage_records`: one row per notice, keyed by `external_ref`. Status is `RESERVED / CHARGED / FREE / RELEASED / BLOCKED / UNCONFIRMED`, with category, country, provider ids and attempts.
+  - `wallet_free_allowances`: monthly free messages per category, global or per tenant (the tenant row wins).
+  - `vachat_notification_logs.wallet_hold_payload`.
+  - Settings `wallet_whatsapp_billing_enabled` and `wallet_whatsapp_resume_hours` (default 24).
+  - Functions `wallet_whatsapp_reserve`, `wallet_whatsapp_settle` and `wallet_whatsapp_expire`.
+- **Charge timing:**
+  1. **Before send** (`modules/vachat/send.ts`): the price is held. Each attempt gets its own hold key, so a retry after a release can hold again.
+  2. **Low balance:** if the wallet can't pay (or is frozen), the notice isn't sent and is logged as `held_balance` with what's needed to send it.
+  3. **Send error:** the hold is released and the job retries as before.
+  4. **Delivered or read** (status webhook, platform account only): charged once.
+  5. **`failed`, or Meta pricing `billable:false`:** released.
+  6. **Reported category:** the charge is re-priced at the category Meta reports, never above the hold.
+  7. **Duplicate or out-of-order webhooks:** no-ops.
+  8. **No confirmation within 72h:** the hold expires and the record becomes `UNCONFIRMED`. A late delivery report is still charged directly if the balance allows.
+- **Resume after a recharge:** notices held for balance are re-queued as `vachat-notify` jobs after a successful recharge (callback, webhook, cron), only when the wallet can pay and only if they're younger than the resume window.
+- **Billing faults never stop a notice.** If the wallet itself errors, the notice sends unbilled and the error is logged.
+
+**Tests**
+- 107 wallet tests pass, including 9 PGlite WhatsApp tests: billing off, hold → deliver → charge once, failures release, low balance blocks then holds after a recharge, category re-pricing capped at the hold, late delivery after expiry, free allowance precedence, unpriced categories, access.
+- 9 unit tests cover hold and webhook mapping, resume (only affordable wallets), and the send path (hold, park, release on error, merchant-own account never billed).
+- The VaChat, WATI, support, manifest, jobs, billing and API suites pass, apart from the 2 consume-quota failures that predate this work.
+- The concurrency check passes.
+
+**Before turning WhatsApp billing on**
+- Enter current Meta rates per category (and markup) in Pricing. The Super Admin pricing screen is Phase 5; until then rules go in through `wallet_set_pricing_rule`.
+- Check whether VaChat forwards Meta's `pricing` block on status webhooks. Without it every notice is priced as UTILITY, and "not billable" can't be detected.
