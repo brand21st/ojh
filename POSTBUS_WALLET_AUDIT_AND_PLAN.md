@@ -394,3 +394,36 @@ There are three send paths:
 **Before turning WhatsApp billing on**
 - Enter current Meta rates per category (and markup) in Pricing. The Super Admin pricing screen is Phase 5; until then rules go in through `wallet_set_pricing_rule`.
 - Check whether VaChat forwards Meta's `pricing` block on status webhooks. Without it every notice is priced as UTILITY, and "not billable" can't be detected.
+
+---
+
+## Part I: Phase 5: Super Admin → Wallet Management (2026-11-21)
+
+**Built**
+- **Migration** `20261121220000_wallet_admin.sql` (**not applied anywhere**):
+  - `wallet_admin_totals` and `wallet_admin_list` (search by name or ID, filters low / frozen / active / AI-credits-not-moved, seven sort orders, paging).
+  - `wallet_set_credit_limit`: never below money on hold, recorded in status events.
+  - `wallet_set_free_allowance`: versioned; 0 removes.
+  - `wallet_resolve_reconciliation_issue`.
+  - Each takes the acting admin's id and re-checks `platform_admins`.
+- **API** `/api/admin/wallet/...` (`modules/wallet/admin.ts`):
+  - Every write needs the 6-digit confirmation PIN and a reason, and is written to `billing_audit_logs` as `SUPER_ADMIN`.
+  - **Actions:** adjust (promo / refund / manual credit / manual debit, using a client UUID so a double-click applies once), freeze/unfreeze, credit limit, low-balance alert levels, move one tenant's or up to 500 tenants' AI credits, and refund a recharge through Razorpay (capped at what's left; the refund webhook takes the credit back).
+  - **Statements:** CSV export per tenant.
+  - **Pricing:** versioned rules entered in rupees and %, for everyone or one tenant; free allowances.
+  - **Settings:** recharge limits and presets, GST rate, place of supply, SAC, the WhatsApp billing switch (refused without a Utility rate), resend window, default alert levels, welcome credit.
+  - **Reconciliation:** list, run, resolve.
+- **UI** `/admin/wallet` (admin sidebar "Wallet Management"):
+  - Platform totals, then tabs for Tenant wallets / Pricing / Settings / Checks.
+  - A tenant detail dialog with balances, Adjust / Controls / Refund recharge / History (statement export, adjustments, ledger, status changes) / Usage (AI by feature, WhatsApp by notice type).
+- **Fix to Phase 1:** admin adjustment idempotency keys are now unique per tenant (they were global, so a repeated key from another tenant was silently treated as a duplicate).
+
+**Tests**
+- 124 wallet tests pass on two consecutive runs. They include 5 PGlite admin tests (list, sort, filter, page, totals; credit limit; allowance versions; issue resolve; merchant access) and 7 admin API tests (wrong PIN, short reason, rupee → micros with audit, WhatsApp switch guard, settings units, pricing units, refund cap).
+- The concurrency check passes.
+- Regression: only the 2 consume-quota failures that predate this work.
+- Visual check in a mock-data preview (no database): list, detail dialog, history, pricing, settings and checks on desktop. Mobile tab-bar overflow found and fixed.
+
+**Worth knowing**
+- `lib/admin/action-pin.ts` falls back to a hard-coded PIN when `ADMIN_ACCOUNT_ACTION_PIN` isn't set. That predates the wallet, but every wallet money action relies on this PIN, so set the env var in production.
+- "Issue refunds" covers both a wallet refund (credit back, no card movement) and a Razorpay refund of a recharge (money back to the card; the wallet credit is removed when Razorpay confirms).

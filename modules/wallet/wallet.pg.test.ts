@@ -147,6 +147,7 @@ describe("tenant wallet", () => {
       order_id uuid, shipment_id uuid, event text, phone text, external_ref text not null, status text not null default 'queued',
       error text, created_at timestamptz default now(), updated_at timestamptz default now());`);
     await db.exec(readFileSync("supabase/migrations/20261121200000_wallet_whatsapp_usage.sql", "utf8"));
+    await db.exec(readFileSync("supabase/migrations/20261121220000_wallet_admin.sql", "utf8"));
   }, 60000);
 
   afterAll(async () => {
@@ -983,6 +984,72 @@ describe("tenant wallet", () => {
       await rejected("select wallet_whatsapp_settle($1,'x','delivered',null,null,null)", [org], /permission denied/);
       // Readable only by platform admins: a merchant sees no rows.
       expect(Number(await scalar("select count(*) from wallet_free_allowances"))).toBe(0);
+      await db.exec("reset role");
+    });
+  });
+  describe("Super Admin wallet management (phase 5)", () => {
+    it("lists wallets with search, filters, sorting and totals", async () => {
+      await credit(5 * RUPEE);
+      await credit(9 * RUPEE, "seed", otherOrg);
+      await db.query("update organizations set ai_credits_balance = 0 where id=$1", [org]);
+      await rpc("wallet_migrate_ai_credits($1)", [org]);
+      const all = await rpc("wallet_admin_list(null,null,'balance_desc',50,0)");
+      expect(all.total).toBe(2);
+      expect((all.rows as Array<{ organizationName: string }>).map((r) => r.organizationName)).toEqual(["Other", "Merchant"]);
+      const search = await rpc("wallet_admin_list('merch',null,'balance_asc',50,0)");
+      expect((search.rows as Array<{ organizationId: string }>).map((r) => r.organizationId)).toEqual([org]);
+      const pending = await rpc("wallet_admin_list(null,'NOT_MIGRATED','name_asc',50,0)");
+      expect((pending.rows as Array<{ organizationId: string }>).map((r) => r.organizationId)).toEqual([otherOrg]);
+      const page2 = await rpc("wallet_admin_list(null,null,'balance_asc',1,1)");
+      expect(page2.total).toBe(2);
+      expect((page2.rows as unknown[]).length).toBe(1);
+      expect((await rpc("wallet_admin_list('100%_',null,'balance_asc',50,0)")).total).toBe(0);
+
+      const totals = await rpc("wallet_admin_totals()");
+      expect(totals).toMatchObject({ wallets: 2, frozen: 0, totalBalanceMicros: String(14 * RUPEE), pendingAiMigrations: 1 });
+    });
+
+    it("sets a credit limit only for admins, never below money on hold, and records it", async () => {
+      await credit(RUPEE);
+      await rejected("select wallet_set_credit_limit($1, 100, 'Trusted merchant line', $2)", [org, outsider], /platform admin/);
+      await rpc("wallet_reserve($1,'ai',$2,'big-hold')", [org, RUPEE]);
+      const set = await rpc("wallet_set_credit_limit($1, $2, 'Trusted merchant line', $3)", [org, 50 * RUPEE, admin]);
+      expect(set.status).toBe("UPDATED");
+      expect(set.availableMicros).toBe(String(50 * RUPEE));
+      expect(await scalar("select reason from wallet_status_events order by created_at desc limit 1")).toMatch(/credit limit 0 -> 50000000/);
+      // With the credit line the wallet may hold more than its balance; removing it would break the holds.
+      await rpc("wallet_reserve($1,'ai',$2,'bigger')", [org, 20 * RUPEE]);
+      expect((await rpc("wallet_set_credit_limit($1, 0, 'Remove credit line', $2)", [org, admin])).status).toBe("BELOW_HOLDS");
+    });
+
+    it("versions free allowances and removes them with zero", async () => {
+      expect((await rpc("wallet_set_free_allowance(null,'UTILITY',100,'launch offer',$1)", [admin])).status).toBe("OK");
+      expect((await rpc("wallet_set_free_allowance(null,'UTILITY',250,'raised',$1)", [admin])).status).toBe("OK");
+      expect(Number(await scalar("select count(*) from wallet_free_allowances where effective_to is null"))).toBe(1);
+      expect(Number(await scalar("select monthly_messages from wallet_free_allowances where effective_to is null"))).toBe(250);
+      expect((await rpc("wallet_set_free_allowance(null,'UTILITY',0,null,$1)", [admin])).status).toBe("REMOVED");
+      expect(Number(await scalar("select count(*) from wallet_free_allowances where effective_to is null"))).toBe(0);
+      await rejected("select wallet_set_free_allowance(null,'UTILITY',5,null,$1)", [outsider], /platform admin/);
+    });
+
+    it("resolves a reconciliation issue with a note, once", async () => {
+      await credit(RUPEE);
+      await db.exec("alter table wallets disable trigger wallets_balance_guard");
+      await db.query("update wallets set balance_micros = balance_micros + 1 where organization_id=$1", [org]);
+      await db.exec("alter table wallets enable trigger wallets_balance_guard");
+      await scalar("select wallet_reconcile(null)");
+      const id = await scalar("select id from wallet_reconciliation_issues where resolved_at is null");
+      await rejected("select wallet_resolve_reconciliation_issue($1,'short',$2)", [id, admin], /10 characters/);
+      expect((await rpc("wallet_resolve_reconciliation_issue($1,'Test tamper, corrected by hand',$2)", [id, admin])).status).toBe("RESOLVED");
+      expect((await rpc("wallet_resolve_reconciliation_issue($1,'Test tamper, corrected by hand',$2)", [id, admin])).status).toBe("NOT_FOUND");
+      expect((await rpc("wallet_admin_totals()")).openReconciliationIssues).toBe(0);
+    });
+
+    it("keeps admin wallet functions away from signed-in merchants", async () => {
+      await db.exec(`set local role authenticated; select set_config('request.jwt.claim.sub','${merchant}',true);`);
+      await rejected("select wallet_admin_totals()", [], /permission denied/);
+      await rejected("select wallet_admin_list(null,null,'balance_asc',10,0)", [], /permission denied/);
+      await rejected("select wallet_set_credit_limit($1,1,'give me credit please',$2)", [org, merchant], /permission denied/);
       await db.exec("reset role");
     });
   });

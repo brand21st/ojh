@@ -17,6 +17,7 @@ import {
   Radio,
   Truck,
   Sheet,
+  Wallet,
   type LucideIcon,
 } from "lucide-react";
 
@@ -36,6 +37,7 @@ export const adminNav: AdminNavItem[] = [
   { label: "Tax policy", href: "/admin/tax", icon: Receipt },
   { label: "Tax invoices", href: "/admin/invoices", icon: FileText },
   { label: "AI Credits", href: "/admin/ai-credits", icon: Sparkles },
+  { label: "Wallet Management", href: "/admin/wallet", icon: Wallet },
   { label: "Payments", href: "/admin/payments", icon: CreditCard },
   { label: "Revenue", href: "/admin/revenue", icon: TrendingUp },
   { label: "Usage", href: "/admin/usage", icon: Gauge },
