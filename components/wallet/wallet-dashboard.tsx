@@ -5,6 +5,7 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { AlertTriangle, ChevronLeft, ChevronRight, Download, FileText, Lock, Plus, Wallet } from "lucide-react";
 import { PageHeader } from "@/components/dashboard/page-header";
+import { AiCreditsSection, type AiCreditsPayload } from "@/components/billing/ai-credits-section";
 import { AlertLevels } from "@/components/wallet/alert-levels";
 import { RechargeDialog } from "@/components/wallet/recharge-dialog";
 import { Badge } from "@/components/ui/badge";
@@ -153,6 +154,10 @@ export function WalletDashboard() {
     queryFn: () => api<Transactions>(`/api/v1/wallet/transactions?type=${filter}&page=${txPage}&pageSize=15`),
     placeholderData: keepPreviousData,
   });
+  const aiCredits = useQuery({
+    queryKey: ["ai-credits"],
+    queryFn: () => api<AiCreditsPayload>("/api/v1/ai-credits"),
+  });
   const recharges = useQuery({
     queryKey: ["wallet", "recharges", rcPage],
     queryFn: () => api<Recharges>(`/api/v1/wallet/recharges?page=${rcPage}&pageSize=10`),
@@ -269,6 +274,7 @@ export function WalletDashboard() {
         <TabsList>
           <TabsTrigger value="transactions">Transactions</TabsTrigger>
           <TabsTrigger value="recharges">Recharges</TabsTrigger>
+          <TabsTrigger value="ai-credits">AI credits</TabsTrigger>
           <TabsTrigger value="statement">Statement</TabsTrigger>
           <TabsTrigger value="alerts">Alerts</TabsTrigger>
         </TabsList>
@@ -418,6 +424,24 @@ export function WalletDashboard() {
             </CardContent>
           </Card>
         </TabsContent>
+        <TabsContent value="ai-credits">
+          {aiCredits.isLoading ? (
+            <Skeleton className="h-64 rounded-2xl" />
+          ) : aiCredits.data?.walletBilled ? (
+            <Card>
+              <CardContent className="space-y-2 p-4 text-sm">
+                <p className="font-medium text-ink">AI features are paid from this wallet.</p>
+                <p className="text-muted">
+                  Your AI credits were moved into your wallet balance. Each AI use is charged from the balance above; see the
+                  AI filter under Transactions for every charge.
+                </p>
+              </CardContent>
+            </Card>
+          ) : (
+            <AiCreditsSection credits={aiCredits.data} />
+          )}
+        </TabsContent>
+
         <TabsContent value="alerts">
           {data ? <AlertLevels key={data.thresholdsMicros.join(",")} thresholdsMicros={data.thresholdsMicros} canEdit={data.canRecharge} /> : null}
         </TabsContent>

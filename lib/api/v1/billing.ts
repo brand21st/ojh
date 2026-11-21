@@ -119,10 +119,15 @@ export async function handleBillingRoutes(
   }
 
   if (key === "GET billing/payments") {
+    // Billing lists SaaS payments only: wallet recharges are on the Wallet page, and so are
+    // AI credit purchases once the wallet is on.
+    const { walletEnabled } = await import("@/modules/wallet/constants");
+    const hidden = walletEnabled() ? ["wallet_recharge", "ai_credits"] : ["wallet_recharge"];
     const { data } = await supabase
       .from("payments")
       .select("*, plans(name, slug)")
       .eq("organization_id", ctx.organizationId)
+      .not("payment_purpose", "in", `(${hidden.join(",")})`)
       .order("created_at", { ascending: false })
       .limit(50);
     return { payments: data ?? [] };

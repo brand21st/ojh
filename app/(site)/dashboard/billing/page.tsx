@@ -18,6 +18,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { formatDate, formatNumber, formatPaise } from "@/lib/format";
 import { api } from "@/lib/hooks/use-api";
+import { useMe } from "@/lib/hooks/use-me";
 import { cn } from "@/lib/utils";
 import { subscriptionCoverageEnded } from "@/modules/billing/usage";
 
@@ -65,9 +66,13 @@ export default function BillingPage() {
         payments: Array<{ id: string; amount_paise: number; status: string; created_at: string; razorpay_payment_id?: string; billing_cycle?: string }>;
       }>("/api/v1/billing/payments"),
   });
+  const me = useMe();
+  // With the wallet on, AI credits live on the Wallet page and Billing shows only the SaaS subscription.
+  const showAiCredits = me.isSuccess && !me.data?.wallet?.enabled;
   const aiCredits = useQuery({
     queryKey: ["ai-credits"],
     queryFn: () => api<AiCreditsPayload>("/api/v1/ai-credits"),
+    enabled: showAiCredits,
   });
   const profile = useQuery({
     queryKey: ["billing", "profile"],
@@ -228,7 +233,7 @@ export default function BillingPage() {
             </Card>
           </div>
 
-          <AiCreditsSection credits={aiCredits.data} />
+          {showAiCredits ? <AiCreditsSection credits={aiCredits.data} /> : null}
 
           {data?.subscription?.status === "TRIAL" && (data.plan?.features?.length ?? 0) > 0 ? (
             <Card>
