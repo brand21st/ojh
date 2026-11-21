@@ -33,6 +33,8 @@ export type AiCreditsPayload = {
   packPaise?: number;
   packages?: AiCreditPackageCard[];
   custom?: { min: number; max: number };
+  /** True once this workspace pays for AI from its wallet (credits moved). */
+  walletBilled?: boolean;
 };
 
 type LedgerPayload = {
