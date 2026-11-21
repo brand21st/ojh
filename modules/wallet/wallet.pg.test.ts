@@ -148,6 +148,9 @@ describe("tenant wallet", () => {
       error text, created_at timestamptz default now(), updated_at timestamptz default now());`);
     await db.exec(readFileSync("supabase/migrations/20261121200000_wallet_whatsapp_usage.sql", "utf8"));
     await db.exec(readFileSync("supabase/migrations/20261121220000_wallet_admin.sql", "utf8"));
+    await db.exec(`create table profiles (id uuid primary key, email text);
+      alter table organization_members add column role text not null default 'VIEWER';`);
+    await db.exec(readFileSync("supabase/migrations/20261121230000_wallet_alerts.sql", "utf8"));
   }, 60000);
 
   afterAll(async () => {
@@ -1050,6 +1053,58 @@ describe("tenant wallet", () => {
       await rejected("select wallet_admin_totals()", [], /permission denied/);
       await rejected("select wallet_admin_list(null,null,'balance_asc',10,0)", [], /permission denied/);
       await rejected("select wallet_set_credit_limit($1,1,'give me credit please',$2)", [org, merchant], /permission denied/);
+      await db.exec("reset role");
+    });
+  });
+  describe("low-balance alerts (phase 6)", () => {
+    async function owner(email: string, o = org) {
+      const id = crypto.randomUUID();
+      await db.query("insert into auth.users(id) values($1)", [id]);
+      await db.query("insert into profiles(id,email) values($1,$2)", [id, email]);
+      await db.query("insert into organization_members(organization_id,user_id,role) values($1,$2,'OWNER')", [o, id]);
+    }
+
+    it("sends one alert per wallet at the lowest level crossed, once", async () => {
+      await owner("owner@merchant.test");
+      await credit(150 * RUPEE);
+      await rpc("wallet_debit($1,'ai',$2,'drop')", [org, 135 * RUPEE]); // Rs 15 left: below 100, 50 and 20
+      const claimed = (await rpc("wallet_claim_alerts(100)")) as unknown as Array<Record<string, unknown>>;
+      expect(claimed).toHaveLength(1);
+      expect(claimed[0]).toMatchObject({
+        organizationId: org,
+        organizationName: "Merchant",
+        thresholdMicros: String(20 * RUPEE),
+        balanceMicros: String(15 * RUPEE),
+        ownerEmails: ["owner@merchant.test"],
+      });
+      expect((await rpc("wallet_claim_alerts(100)")) as unknown as unknown[]).toEqual([]);
+      expect(Number(await scalar("select count(*) from wallet_alerts where notified_at is null"))).toBe(0);
+    });
+
+    it("stays quiet for a wallet that recovered before the alert went out", async () => {
+      await credit(150 * RUPEE);
+      await rpc("wallet_debit($1,'ai',$2,'drop')", [org, 60 * RUPEE]); // Rs 90: below 100
+      await credit(50 * RUPEE, "topup");
+      expect((await rpc("wallet_claim_alerts(100)")) as unknown as unknown[]).toEqual([]);
+    });
+
+    it("lets a wallet choose its own levels and keeps open alerts in line", async () => {
+      await credit(150 * RUPEE);
+      await rpc("wallet_debit($1,'ai',$2,'drop')", [org, 110 * RUPEE]); // Rs 40: below 100 and 50
+      expect(Number(await scalar("select count(*) from wallet_alerts where status='OPEN'"))).toBe(2);
+      const set = await rpc("wallet_set_thresholds($1,$2::bigint[])", [org, [String(500 * RUPEE), String(30 * RUPEE), String(500 * RUPEE)]]);
+      expect(set.thresholdsMicros).toEqual([String(500 * RUPEE), String(30 * RUPEE)]);
+      const open = await db.query<{ t: string }>("select threshold_micros::text t from wallet_alerts where status='OPEN' order by 1");
+      expect(open.rows.map((r) => r.t)).toEqual([String(500 * RUPEE)]);
+      await rpc("wallet_set_thresholds($1,$2::bigint[])", [org, []]);
+      expect(Number(await scalar("select count(*) from wallet_alerts where status='OPEN'"))).toBe(0);
+      await rejected("select wallet_set_thresholds($1, array[1,2,3,4,5,6]::bigint[])", [org], /at most 5/);
+    });
+
+    it("keeps alert functions away from merchants", async () => {
+      await db.exec(`set local role authenticated; select set_config('request.jwt.claim.sub','${merchant}',true);`);
+      await rejected("select wallet_claim_alerts(1)", [], /permission denied/);
+      await rejected("select wallet_set_thresholds($1, array[1]::bigint[])", [org], /permission denied/);
       await db.exec("reset role");
     });
   });

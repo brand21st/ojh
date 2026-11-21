@@ -26,6 +26,8 @@ PSQL=("$PG_BIN/psql" -v ON_ERROR_STOP=1 -q -X -d postgres)
 "${PSQL[@]}" -c "create table vachat_notification_logs (id uuid primary key default gen_random_uuid(), organization_id uuid, external_ref text, status text)"
 "${PSQL[@]}" -f "$ROOT/supabase/migrations/20261121200000_wallet_whatsapp_usage.sql"
 "${PSQL[@]}" -f "$ROOT/supabase/migrations/20261121220000_wallet_admin.sql"
+"${PSQL[@]}" -c "create table profiles (id uuid primary key, email text); alter table organization_members add column role text not null default 'VIEWER'"
+"${PSQL[@]}" -f "$ROOT/supabase/migrations/20261121230000_wallet_alerts.sql"
 "${PSQL[@]}" -f "$ROOT/scripts/wallet/concurrency-seed.sql" >/dev/null
 
 CLIENTS="${CLIENTS:-50}"; TX="${TX:-200}"

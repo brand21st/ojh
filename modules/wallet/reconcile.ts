@@ -98,6 +98,11 @@ export async function runWalletSweep(db: SupabaseClient) {
   if (waError && waError.code !== "PGRST202") logError("wallet.whatsapp_expire_failed", { message: waError.message });
   const { resumeHeldWhatsappNotices } = await import("@/modules/wallet/whatsapp-billing");
   const resumedWhatsapp = await resumeHeldWhatsappNotices({ limit: 500 });
+  const { deliverWalletAlerts } = await import("@/modules/wallet/alerts");
+  const alerts = await deliverWalletAlerts(db).catch((cause) => {
+    logError("wallet.alerts_failed", { message: cause instanceof Error ? cause.message : "unknown" });
+    return null;
+  });
   return {
     expired,
     recharges,
@@ -106,5 +111,6 @@ export async function runWalletSweep(db: SupabaseClient) {
     abandonedAi: Number(abandonedAi ?? 0),
     unconfirmedWhatsapp: Number(unconfirmedWhatsapp ?? 0),
     resumedWhatsapp: resumedWhatsapp.resumed,
+    alerts,
   };
 }

@@ -229,9 +229,10 @@ export async function handleAdminWallet(
         .object({ pin, reason, thresholdsRupees: z.array(z.number().int().min(1).max(1_000_000)).max(5) })
         .parse(body);
       assertAdminActionPin(input.pin);
-      const thresholds = [...new Set(input.thresholdsRupees)].sort((a, b) => b - a).map((r) => String(BigInt(r) * BigInt(1_000_000)));
-      const { error } = await db.from("wallets").update({ low_balance_thresholds_micros: thresholds }).eq("organization_id", organizationId);
-      if (error) throw new AppError(ERROR_CODES.JOB_FAILED, "Could not save the alert levels.");
+      await rpc(db, "wallet_set_thresholds", {
+        p_org: organizationId,
+        p_thresholds_micros: input.thresholdsRupees.map((r) => String(BigInt(r) * BigInt(1_000_000))),
+      });
       await audit(db, request, ctx, "wallet.thresholds_set", organizationId, { thresholdsRupees: input.thresholdsRupees, reason: input.reason });
       return { status: "UPDATED" };
     }

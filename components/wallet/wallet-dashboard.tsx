@@ -5,6 +5,7 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { AlertTriangle, ChevronLeft, ChevronRight, Download, FileText, Lock, Plus, Wallet } from "lucide-react";
 import { PageHeader } from "@/components/dashboard/page-header";
+import { AlertLevels } from "@/components/wallet/alert-levels";
 import { RechargeDialog } from "@/components/wallet/recharge-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -34,6 +35,7 @@ type Overview = {
   monthRechargedMicros: string;
   lastRechargedAt: string | null;
   lowBalance: boolean;
+  thresholdsMicros: string[];
   recharge: RechargeLimits;
   canRecharge: boolean;
 };
@@ -268,6 +270,7 @@ export function WalletDashboard() {
           <TabsTrigger value="transactions">Transactions</TabsTrigger>
           <TabsTrigger value="recharges">Recharges</TabsTrigger>
           <TabsTrigger value="statement">Statement</TabsTrigger>
+          <TabsTrigger value="alerts">Alerts</TabsTrigger>
         </TabsList>
 
         <TabsContent value="transactions">
@@ -414,6 +417,9 @@ export function WalletDashboard() {
               </a>
             </CardContent>
           </Card>
+        </TabsContent>
+        <TabsContent value="alerts">
+          {data ? <AlertLevels key={data.thresholdsMicros.join(",")} thresholdsMicros={data.thresholdsMicros} canEdit={data.canRecharge} /> : null}
         </TabsContent>
       </Tabs>
 

@@ -14,6 +14,24 @@ import { getRequestAuthUser } from "@/lib/supabase/request-auth";
 import { isMerchantApiOpenForOrg } from "@/modules/merchant-api/flags";
 import { setIndiaPostBookingGuideHiddenForUser } from "@/lib/dashboard/india-post-booking-guide";
 import { walletEnabled } from "@/modules/wallet/constants";
+
+/** Read with the member's own session (RLS), so it costs two indexed lookups and nothing more. */
+async function walletFlags(supabase: SupabaseClient, organizationId: string) {
+  if (!walletEnabled()) return { enabled: false };
+  const [wallet, alerts] = await Promise.all([
+    supabase.from("wallets").select("status").eq("organization_id", organizationId).maybeSingle(),
+    supabase
+      .from("wallet_alerts")
+      .select("id", { count: "exact", head: true })
+      .eq("organization_id", organizationId)
+      .eq("status", "OPEN"),
+  ]);
+  return {
+    enabled: true,
+    frozen: wallet.data?.status === "FROZEN",
+    lowBalance: (alerts.count ?? 0) > 0,
+  };
+}
 import { dismissIndiaPostOnboardingForUser } from "@/lib/dashboard/india-post-onboarding";
 import { shouldWritePresence } from "@/lib/admin/user-presence";
 import { effectivePermissions } from "@/lib/permissions/rbac";
@@ -108,9 +126,7 @@ export async function handleSessionRoutes(
       merchantApi: {
         enabled: isMerchantApiOpenForOrg(organization?.id),
       },
-      wallet: {
-        enabled: walletEnabled(),
-      },
+      wallet: organization ? await walletFlags(supabase, organization.id) : { enabled: false },
       addons: addons
         .filter((row) => row.access_mode === "FULL" || row.access_mode === "READ_ONLY")
         .map((row) => ({
