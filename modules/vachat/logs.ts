@@ -7,7 +7,8 @@ export type VachatLogStatus =
   | "delivered"
   | "read"
   | "failed"
-  | "skipped";
+  | "skipped"
+  | "held_balance";
 
 export type VachatLogWrite = {
   organizationId?: string | null;
@@ -20,6 +21,8 @@ export type VachatLogWrite = {
   error?: string | null;
   vachatMessageId?: string | null;
   whatsappMessageId?: string | null;
+  /** Set only when a notice waits for a wallet recharge (needs the phase 4 wallet migration). */
+  walletHoldPayload?: Record<string, unknown> | null;
 };
 
 export async function upsertVachatNotificationLog(
@@ -38,6 +41,7 @@ export async function upsertVachatNotificationLog(
     vachat_message_id: row.vachatMessageId ?? null,
     whatsapp_message_id: row.whatsappMessageId ?? null,
     updated_at: new Date().toISOString(),
+    ...(row.walletHoldPayload !== undefined ? { wallet_hold_payload: row.walletHoldPayload } : {}),
   };
   if (!row.organizationId) {
     const { data: existing } = await supabase

@@ -143,6 +143,10 @@ describe("tenant wallet", () => {
     `);
     await db.exec(readFileSync("supabase/migrations/20261121160000_wallet_recharge_invoices.sql", "utf8"));
     await db.exec(readFileSync("supabase/migrations/20261121180000_wallet_ai_usage.sql", "utf8"));
+    await db.exec(`create table vachat_notification_logs (id uuid primary key default gen_random_uuid(), organization_id uuid,
+      order_id uuid, shipment_id uuid, event text, phone text, external_ref text not null, status text not null default 'queued',
+      error text, created_at timestamptz default now(), updated_at timestamptz default now());`);
+    await db.exec(readFileSync("supabase/migrations/20261121200000_wallet_whatsapp_usage.sql", "utf8"));
   }, 60000);
 
   afterAll(async () => {
@@ -861,6 +865,124 @@ describe("tenant wallet", () => {
       expect(Number(await scalar("select count(*) from ai_usage_records"))).toBe(1);
       await rejected("select wallet_ai_charge($1,'x','m','k',1,0,0)", [org], /permission denied/);
       await rejected("select wallet_ai_mode($1)", [org], /permission denied/);
+      await db.exec("reset role");
+    });
+  });
+  describe("WhatsApp notice billing (phase 4)", () => {
+    const utility = `wallet_set_pricing_rule('{"service":"whatsapp","whatsappCategory":"UTILITY","countryCode":"IN","perUnitMicros":"115000","markupBps":2000,"effectiveFrom":"2026-01-01T00:00:00Z"}'::jsonb,$1)`;
+    const marketing = `wallet_set_pricing_rule('{"service":"whatsapp","whatsappCategory":"MARKETING","countryCode":"IN","perUnitMicros":"785000","effectiveFrom":"2026-01-01T00:00:00Z"}'::jsonb,$1)`;
+    const reserve = (ref: string, category = "UTILITY") =>
+      rpc("wallet_whatsapp_reserve($1,$2,'booked',$3,'IN','vachat')", [org, ref, category]);
+    const settle = (ref: string, outcome: string, category: string | null = null) =>
+      rpc("wallet_whatsapp_settle($1,$2,$3,$4,'msg_1','wamid_1')", [org, ref, outcome, category]);
+
+    async function on() {
+      await db.query("update platform_settings set wallet_whatsapp_billing_enabled = true");
+      await rpc(utility, [admin]);
+    }
+
+    it("does nothing until Super Admin turns WhatsApp billing on", async () => {
+      expect((await reserve("postbus:booked:s1")).status).toBe("BILLING_OFF");
+      expect(Number(await scalar("select count(*) from whatsapp_usage_records"))).toBe(0);
+    });
+
+    it("holds the rate before sending and charges once when delivered", async () => {
+      await on();
+      await credit(RUPEE);
+      const held = await reserve("postbus:booked:s1");
+      expect(held).toMatchObject({ status: "HELD", holdMicros: "138000" });
+      expect(await reserved()).toBe(138000);
+      expect((await reserve("postbus:booked:s1")).status).toBe("DUPLICATE");
+      expect((await settle("postbus:booked:s1", "sent")).status).toBe("PENDING");
+      expect(await settle("postbus:booked:s1", "delivered")).toMatchObject({ status: "CHARGED", chargeMicros: "138000" });
+      expect((await settle("postbus:booked:s1", "delivered")).status).toBe("DUPLICATE");
+      expect((await settle("postbus:booked:s1", "read")).status).toBe("DUPLICATE");
+      expect((await settle("postbus:booked:s1", "failed")).status).toBe("DUPLICATE");
+      expect(await balance()).toBe(RUPEE - 138000);
+      expect(await reserved()).toBe(0);
+      expect(Number(await scalar("select lifetime_whatsapp_micros from wallets where organization_id=$1", [org]))).toBe(138000);
+      const row = await one("select status, provider_message_id, whatsapp_message_id, provider_status from whatsapp_usage_records");
+      expect(row).toEqual({ status: "CHARGED", provider_message_id: "msg_1", whatsapp_message_id: "wamid_1", provider_status: "failed" });
+    });
+
+    it("charges nothing for a failed, unsent or non-billable message", async () => {
+      await on();
+      await credit(RUPEE);
+      await reserve("r-failed");
+      expect((await settle("r-failed", "failed")).status).toBe("RELEASED");
+      await reserve("r-error");
+      expect((await settle("r-error", "send_error")).status).toBe("RELEASED");
+      await reserve("r-free");
+      expect((await settle("r-free", "not_billable")).status).toBe("RELEASED");
+      expect(await balance()).toBe(RUPEE);
+      expect(await reserved()).toBe(0);
+      // A send error that the job retries holds again with a fresh hold.
+      expect((await reserve("r-error")).status).toBe("HELD");
+      expect(Number(await scalar("select attempts from whatsapp_usage_records where external_ref='r-error'"))).toBe(2);
+    });
+
+    it("holds a notice back when the wallet cannot pay, then sends it after a recharge", async () => {
+      await on();
+      await credit(100000);
+      expect((await reserve("r-low")).status).toBe("INSUFFICIENT_BALANCE");
+      expect(await scalar("select status || ':' || reject_reason from whatsapp_usage_records where external_ref='r-low'")).toBe(
+        "BLOCKED:INSUFFICIENT_BALANCE"
+      );
+      await credit(RUPEE, "topup");
+      expect((await reserve("r-low")).status).toBe("HELD");
+    });
+
+    it("prices at the category Meta reports, never above the hold", async () => {
+      await on();
+      await rpc(marketing, [admin]);
+      await credit(RUPEE);
+      await reserve("r-cat", "MARKETING");
+      expect(await settle("r-cat", "delivered", "UTILITY")).toMatchObject({ chargeMicros: "138000" });
+      await reserve("r-up", "UTILITY");
+      expect(await settle("r-up", "delivered", "MARKETING")).toMatchObject({ chargeMicros: "138000" });
+      expect(await scalar("select category from whatsapp_usage_records where external_ref='r-up'")).toBe("MARKETING");
+    });
+
+    it("charges a delivery that arrives after the hold expired, if the balance allows", async () => {
+      await on();
+      await credit(RUPEE);
+      const held = await reserve("r-late");
+      await db.query(
+        "update wallet_reservations set expires_at = now() - interval '1 minute' where reference_id = $1",
+        [String(held.recordId)]
+      );
+      await scalar("select wallet_expire_reservations(10)");
+      expect(Number(await scalar("select wallet_whatsapp_expire(10)"))).toBe(1);
+      expect(await scalar("select status from whatsapp_usage_records where external_ref='r-late'")).toBe("UNCONFIRMED");
+      expect(await settle("r-late", "delivered")).toMatchObject({ status: "CHARGED", late: true });
+      expect(await balance()).toBe(RUPEE - 138000);
+      expect((await settle("r-late", "delivered")).status).toBe("DUPLICATE");
+    });
+
+    it("uses free monthly messages before charging, tenant allowance first", async () => {
+      await on();
+      await credit(RUPEE);
+      await db.query("insert into wallet_free_allowances(organization_id, whatsapp_category, monthly_messages) values (null,'UTILITY',5), ($1,'UTILITY',2)", [org]);
+      expect(await reserve("f1")).toMatchObject({ status: "FREE", freeAllowance: true });
+      expect((await reserve("f2")).status).toBe("FREE");
+      expect((await reserve("f3")).status).toBe("HELD");
+      expect(await balance()).toBe(RUPEE);
+    });
+
+    it("sends unpriced categories free and records why", async () => {
+      await db.query("update platform_settings set wallet_whatsapp_billing_enabled = true");
+      expect((await reserve("u1", "AUTHENTICATION")).status).toBe("UNPRICED");
+      expect((await reserve("u2", "SERVICE")).status).toBe("FREE");
+      expect(await scalar("select reject_reason from whatsapp_usage_records where external_ref='u1'")).toBe("NO_PRICE");
+    });
+
+    it("keeps WhatsApp billing functions away from merchants", async () => {
+      await on();
+      await db.exec(`set local role authenticated; select set_config('request.jwt.claim.sub','${merchant}',true);`);
+      await rejected("select wallet_whatsapp_reserve($1,'x','booked','UTILITY','IN','vachat')", [org], /permission denied/);
+      await rejected("select wallet_whatsapp_settle($1,'x','delivered',null,null,null)", [org], /permission denied/);
+      // Readable only by platform admins: a merchant sees no rows.
+      expect(Number(await scalar("select count(*) from wallet_free_allowances"))).toBe(0);
       await db.exec("reset role");
     });
   });

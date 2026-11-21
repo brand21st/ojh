@@ -94,5 +94,17 @@ export async function runWalletSweep(db: SupabaseClient) {
   // AI jobs whose hold expired (worker crashed) stop showing as in progress.
   const { data: abandonedAi, error: abandonError } = await db.rpc("wallet_ai_abandon_stale", { p_limit: 500 });
   if (abandonError && abandonError.code !== "PGRST202") logError("wallet.ai_abandon_failed", { message: abandonError.message });
-  return { expired, recharges, mismatches, invoices, abandonedAi: Number(abandonedAi ?? 0) };
+  const { data: unconfirmedWhatsapp, error: waError } = await db.rpc("wallet_whatsapp_expire", { p_limit: 1000 });
+  if (waError && waError.code !== "PGRST202") logError("wallet.whatsapp_expire_failed", { message: waError.message });
+  const { resumeHeldWhatsappNotices } = await import("@/modules/wallet/whatsapp-billing");
+  const resumedWhatsapp = await resumeHeldWhatsappNotices({ limit: 500 });
+  return {
+    expired,
+    recharges,
+    mismatches,
+    invoices,
+    abandonedAi: Number(abandonedAi ?? 0),
+    unconfirmedWhatsapp: Number(unconfirmedWhatsapp ?? 0),
+    resumedWhatsapp: resumedWhatsapp.resumed,
+  };
 }
