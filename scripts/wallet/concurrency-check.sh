@@ -20,6 +20,7 @@ PSQL=("$PG_BIN/psql" -v ON_ERROR_STOP=1 -q -X -d postgres)
 "${PSQL[@]}" -f "$ROOT/supabase/migrations/20261008120000_ai_credits.sql"
 "${PSQL[@]}" -f "$ROOT/supabase/migrations/20261008180000_ai_credit_wallet.sql"
 "${PSQL[@]}" -f "$ROOT/supabase/migrations/20261121120000_tenant_wallet.sql"
+"${PSQL[@]}" -f "$ROOT/supabase/migrations/20261121140000_wallet_recharge.sql"
 "${PSQL[@]}" -f "$ROOT/scripts/wallet/concurrency-seed.sql" >/dev/null
 
 CLIENTS="${CLIENTS:-50}"; TX="${TX:-200}"

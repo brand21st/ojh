@@ -13,6 +13,7 @@ import { isTransientAuthClass } from "@/lib/auth/session/classify";
 import { getRequestAuthUser } from "@/lib/supabase/request-auth";
 import { isMerchantApiOpenForOrg } from "@/modules/merchant-api/flags";
 import { setIndiaPostBookingGuideHiddenForUser } from "@/lib/dashboard/india-post-booking-guide";
+import { walletEnabled } from "@/modules/wallet/constants";
 import { dismissIndiaPostOnboardingForUser } from "@/lib/dashboard/india-post-onboarding";
 import { shouldWritePresence } from "@/lib/admin/user-presence";
 import { effectivePermissions } from "@/lib/permissions/rbac";
@@ -106,6 +107,9 @@ export async function handleSessionRoutes(
       },
       merchantApi: {
         enabled: isMerchantApiOpenForOrg(organization?.id),
+      },
+      wallet: {
+        enabled: walletEnabled(),
       },
       addons: addons
         .filter((row) => row.access_mode === "FULL" || row.access_mode === "READ_ONLY")

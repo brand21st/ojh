@@ -60,6 +60,7 @@ export type MeResponse = {
   memberships?: MeMembership[];
   subscription?: MeSubscription | null;
   merchantApi?: { enabled: boolean };
+  wallet?: { enabled: boolean };
   addons?: Array<{ slug: string; accessMode: "FULL" | "READ_ONLY" | "NONE"; status: string }>;
 };
 

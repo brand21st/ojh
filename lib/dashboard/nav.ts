@@ -20,6 +20,7 @@ import {
   Store,
   PackageCheck,
   Users,
+  Wallet,
 } from "lucide-react";
 import type { Permission } from "@/types/domain";
 import { YoutubeIcon } from "@/components/icons/youtube-icon";
@@ -84,6 +85,13 @@ export const aiAccountantNav: NavItem = {
   label: "AI Accountant",
   href: "/dashboard/ai-accountant",
   icon: Calculator,
+};
+
+/** Shown after Billing only while the server-side WALLET_ENABLED flag is on. */
+export const walletNav: NavItem = {
+  label: "Wallet",
+  href: "/dashboard/wallet",
+  icon: Wallet,
 };
 
 export const tutorialsNav: NavItem = {

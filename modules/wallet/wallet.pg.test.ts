@@ -2,6 +2,7 @@ import { PGlite } from "@electric-sql/pglite";
 import { readFileSync } from "node:fs";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { chargeMicros } from "@/modules/wallet/pricing";
+import { quoteRecharge } from "@/modules/wallet/recharge-quote";
 
 let db: PGlite;
 
@@ -10,7 +11,6 @@ const merchant = "10000000-0000-4000-8000-000000000002";
 const outsider = "10000000-0000-4000-8000-000000000003";
 const org = "30000000-0000-4000-8000-000000000001";
 const otherOrg = "30000000-0000-4000-8000-000000000002";
-const pay = "50000000-0000-4000-8000-000000000001";
 
 const RUPEE = 1_000_000;
 
@@ -61,20 +61,16 @@ async function credit(amountMicros: number, key = "seed", o = org) {
   ]);
 }
 
-async function rechargeOrder(opts: { amountPaise?: number; taxPaise?: number; orderId?: string } = {}) {
-  const amount = opts.amountPaise ?? 100000;
-  const tax = opts.taxPaise ?? 15254;
+/** Rs 1,000 at 18% GST: Rs 847.46 credit, Rs 152.54 GST. */
+async function rechargeOrder(opts: { amountPaise?: number; orderId?: string } = {}) {
   const orderId = opts.orderId ?? "order_w1";
-  await db.query(
-    "insert into payments(id,organization_id,amount_paise,status,razorpay_order_id,payment_purpose,billing_cycle) values($1,$2,$3,'PENDING',$4,'wallet_recharge','wallet')",
-    [pay, org, amount, orderId]
-  );
-  await db.query(
-    `insert into wallet_recharge_orders(wallet_id,organization_id,payment_id,razorpay_order_id,amount_paise,taxable_paise,tax_paise,credit_micros,created_by)
-     select id,$1,$2,$3,$4,$5,$6,$7,$8 from wallets where organization_id=$1`,
-    [org, pay, orderId, amount, amount - tax, tax, (amount - tax) * 10000, merchant]
-  );
+  const created = await rpc("wallet_create_recharge_order($1,$2,$3,$4)", [org, orderId, opts.amountPaise ?? 100000, merchant]);
+  expect(created.status).toBe("CREATED");
   return orderId;
+}
+
+async function paymentStatus(orderId = "order_w1") {
+  return scalar("select status from payments where razorpay_order_id=$1", [orderId]);
 }
 
 describe("tenant wallet", () => {
@@ -120,6 +116,7 @@ describe("tenant wallet", () => {
       alter table ai_credit_ledger add constraint ai_credit_ledger_status_chk check (status in ('POSTED','REVERSED','RESERVED','RELEASED'));
     `);
     await db.exec(readFileSync("supabase/migrations/20261121120000_tenant_wallet.sql", "utf8"));
+    await db.exec(readFileSync("supabase/migrations/20261121140000_wallet_recharge.sql", "utf8"));
   }, 60000);
 
   afterAll(async () => {
@@ -173,7 +170,7 @@ describe("tenant wallet", () => {
       expect(second.status).toBe("DUPLICATE");
       expect(await balance()).toBe(847_460_000);
       expect(Number(await scalar("select count(*) from wallet_ledger where entry_type='RECHARGE'"))).toBe(1);
-      expect(await scalar("select status from payments where id=$1", [pay])).toBe("CAPTURED");
+      expect(await paymentStatus()).toBe("CAPTURED");
       expect(await scalar("select status from wallet_recharge_orders where razorpay_order_id=$1", [orderId])).toBe("PAID");
       expect(Number(await scalar("select lifetime_recharged_micros from wallets where organization_id=$1", [org]))).toBe(847_460_000);
     });
@@ -189,7 +186,7 @@ describe("tenant wallet", () => {
     it("records a failure and still credits a later successful retry", async () => {
       const orderId = await rechargeOrder();
       expect((await rpc("wallet_mark_recharge_failed($1,'Card declined')", [orderId])).status).toBe("FAILED");
-      expect(await scalar("select status from payments where id=$1", [pay])).toBe("FAILED");
+      expect(await paymentStatus()).toBe("FAILED");
       expect((await rpc("wallet_mark_recharge_failed($1,'again')", [orderId])).status).toBe("UNCHANGED");
       expect((await rpc("wallet_fulfill_recharge($1,'pay_2',100000,null,null)", [orderId])).status).toBe("CREDITED");
       expect(await balance()).toBe(847_460_000);
@@ -197,7 +194,7 @@ describe("tenant wallet", () => {
     });
 
     it("reverses partial refunds without drift and full refunds exactly", async () => {
-      const orderId = await rechargeOrder({ amountPaise: 100000, taxPaise: 15254 });
+      const orderId = await rechargeOrder({ amountPaise: 100000 });
       await rpc("wallet_fulfill_recharge($1,'pay_1',100000,null,null)", [orderId]);
       const a = await rpc("wallet_reverse_recharge('pay_1','rfnd_a',33333)");
       expect(a.status).toBe("REVERSED");
@@ -206,7 +203,7 @@ describe("tenant wallet", () => {
       await rpc("wallet_reverse_recharge('pay_1','rfnd_c',33334)");
       expect(await balance()).toBe(0);
       expect(await scalar("select status from wallet_recharge_orders")).toBe("REFUNDED");
-      expect(await scalar("select status from payments where id=$1", [pay])).toBe("REFUNDED");
+      expect(await paymentStatus()).toBe("REFUNDED");
       expect((await rpc("wallet_reverse_recharge('pay_1','rfnd_d',1)")).status).toBe("NOT_PAID");
       expect(await ledgerSum()).toBe(await balance());
     });
@@ -503,6 +500,101 @@ describe("tenant wallet", () => {
       expect(all).toEqual({ migrated: 1, pending: 1 });
       expect(await balance(otherOrg)).toBe(0);
       expect(await balance(org)).toBe(100 * RUPEE);
+    });
+  });
+  describe("recharge orders (phase 2)", () => {
+    it("writes the payment and the order together with the GST split", async () => {
+      const created = await rpc("wallet_create_recharge_order($1,'order_g1',100000,$2)", [org, merchant]);
+      expect(created).toMatchObject({
+        status: "CREATED",
+        amountPaise: 100000,
+        taxablePaise: 84746,
+        taxPaise: 15254,
+        cgstPaise: 7627,
+        sgstPaise: 7627,
+        igstPaise: 0,
+        gstRateBps: 1800,
+        creditMicros: "847460000",
+      });
+      const payment = await one<{ payment_purpose: string; status: string; amount_paise: string }>(
+        "select payment_purpose, status, amount_paise::text from payments where razorpay_order_id='order_g1'"
+      );
+      expect(payment).toEqual({ payment_purpose: "wallet_recharge", status: "PENDING", amount_paise: "100000" });
+      expect((await rpc("wallet_create_recharge_order($1,'order_g1',100000,$2)", [org, merchant])).status).toBe("DUPLICATE");
+    });
+
+    it("refuses amounts outside the Super Admin limits", async () => {
+      expect((await rpc("wallet_create_recharge_order($1,'o_low',9900,null)", [org])).status).toBe("AMOUNT_OUT_OF_RANGE");
+      expect((await rpc("wallet_create_recharge_order($1,'o_high',5000100,null)", [org])).status).toBe("AMOUNT_OUT_OF_RANGE");
+      await db.query("update platform_settings set wallet_recharge_min_paise = 50000");
+      expect((await rpc("wallet_create_recharge_order($1,'o_mid',25000,null)", [org])).status).toBe("AMOUNT_OUT_OF_RANGE");
+      expect(Number(await scalar("select count(*) from payments where payment_purpose='wallet_recharge'"))).toBe(0);
+    });
+
+    it("splits inter-state GST as IGST and keeps the rate each order was sold at", async () => {
+      await db.query("update platform_settings set wallet_gst_place_of_supply='INTER', wallet_gst_rate_bps=500");
+      const created = await rpc("wallet_create_recharge_order($1,'order_i1',25000,null)", [org]);
+      expect(created).toMatchObject({ taxablePaise: 23810, taxPaise: 1190, igstPaise: 1190, cgstPaise: 0, placeOfSupply: "INTER" });
+      await db.query("update platform_settings set wallet_gst_rate_bps=1800");
+      expect(Number(await scalar("select gst_rate_bps from wallet_recharge_orders where razorpay_order_id='order_i1'"))).toBe(500);
+    });
+
+    it("matches the TypeScript recharge split for every whole-rupee amount tried", async () => {
+      for (const rate of [0, 500, 1200, 1800, 2800]) {
+        for (let rupees = 100; rupees <= 50000; rupees += 997) {
+          const sql = await rpc("wallet_quote_recharge($1,$2,'INTRA')", [rupees * 100, rate]);
+          const ts = quoteRecharge(rupees * 100, rate, "INTRA");
+          expect([sql.taxablePaise, sql.taxPaise, sql.cgstPaise, sql.sgstPaise, sql.creditMicros]).toEqual([
+            ts.taxablePaise,
+            ts.taxPaise,
+            ts.cgstPaise,
+            ts.sgstPaise,
+            ts.creditMicros.toString(),
+          ]);
+        }
+      }
+    });
+
+    it("summarises this month by service in India time", async () => {
+      await credit(100 * RUPEE);
+      await rpc("wallet_debit($1,'whatsapp',138000,'m1')", [org]);
+      await rpc("wallet_debit($1,'ai',$2,'m2')", [org, 2 * RUPEE]);
+      const charge = await rpc("wallet_debit($1,'whatsapp',138000,'m3')", [org]);
+      await rpc("wallet_reverse_usage($1,'Not delivered',null)", [charge.ledgerId]);
+      const orderId = await rechargeOrder();
+      await rpc("wallet_fulfill_recharge($1,'pay_s',100000,null,null)", [orderId]);
+      const summary = await rpc("wallet_summary($1)", [org]);
+      expect(summary).toMatchObject({
+        status: "OK",
+        walletStatus: "ACTIVE",
+        monthWhatsappMicros: "138000",
+        monthAiMicros: String(2 * RUPEE),
+        monthSpendMicros: String(2 * RUPEE + 138000),
+        monthRechargedMicros: "847460000",
+        lifetimeRechargedMicros: "847460000",
+      });
+      expect(summary.balanceMicros).toBe(String(100 * RUPEE - 2 * RUPEE - 138000 + 847460000));
+      expect((await rpc("wallet_summary('30000000-0000-4000-8000-0000000000ff')")).status).toBe("NO_WALLET");
+    });
+
+    it("returns one row per day with zeros for quiet days", async () => {
+      await credit(10 * RUPEE);
+      await rpc("wallet_debit($1,'ai',500000,'d1')", [org]);
+      const rows = await db.query<{ day: string; ai_micros: string }>(
+        "select day::text, ai_micros::text from wallet_usage_daily($1, 7)",
+        [org]
+      );
+      expect(rows.rows).toHaveLength(7);
+      expect(rows.rows.at(-1)?.ai_micros).toBe("500000");
+      expect(rows.rows.slice(0, 6).every((r) => r.ai_micros === "0")).toBe(true);
+    });
+
+    it("keeps the new functions away from signed-in merchants", async () => {
+      await db.exec(`set local role authenticated; select set_config('request.jwt.claim.sub','${merchant}',true);`);
+      await rejected("select wallet_create_recharge_order($1,'x',10000,null)", [org], /permission denied/);
+      await rejected("select wallet_summary($1)", [org], /permission denied/);
+      await rejected("select * from wallet_usage_daily($1,7)", [org], /permission denied/);
+      await db.exec("reset role");
     });
   });
 });
