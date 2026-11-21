@@ -32,9 +32,7 @@ export async function getWalletOverview(db: SupabaseClient, organizationId: stri
   }
   const raw = (data ?? {}) as Record<string, unknown>;
   if (raw.status !== "OK") throw new AppError(ERROR_CODES.RESOURCE_NOT_FOUND, "Wallet is not set up yet.");
-  const balance = toMicros(raw.balanceMicros);
   const thresholds = (Array.isArray(raw.thresholdsMicros) ? raw.thresholdsMicros : []).map(toMicros);
-  const highestThreshold = thresholds.reduce((max, t) => (t > max ? t : max), ZERO);
   return {
     walletStatus: raw.walletStatus === "FROZEN" ? "FROZEN" : "ACTIVE",
     balanceMicros: String(raw.balanceMicros),
@@ -50,7 +48,8 @@ export async function getWalletOverview(db: SupabaseClient, organizationId: stri
     monthRechargedMicros: String(raw.monthRechargedMicros),
     monthStart: raw.monthStart ?? null,
     lastRechargedAt: raw.lastRechargedAt ?? null,
-    lowBalance: raw.lowestOpenAlertMicros != null || (highestThreshold > ZERO && balance < highestThreshold),
+    // Only a real drop past an alert level counts, never a wallet that has not been funded yet.
+    lowBalance: raw.lowestOpenAlertMicros != null,
     lowestOpenAlertMicros: raw.lowestOpenAlertMicros ?? null,
     thresholdsMicros: thresholds.map((t) => t.toString()),
   };
