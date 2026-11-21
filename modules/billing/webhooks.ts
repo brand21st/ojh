@@ -251,6 +251,16 @@ export async function processRazorpayEvent(
   eventId: string
 ) {
   const event = payload.event ?? "";
+  // Wallet recharges are one-time orders with their own ledger; they never
+  // reach the subscription, add-on or AI credit paths below.
+  if (
+    (event === "payment.captured" || event === "order.paid" || event === "payment.failed" || event === "refund.processed") &&
+    !entity(payload, "payment").subscription_id
+  ) {
+    const { handleWalletRazorpayEvent } = await import("@/modules/wallet/webhooks");
+    const wallet = await handleWalletRazorpayEvent(supabase, payload);
+    if (wallet) return wallet;
+  }
   let subscriptionEntity = entity(payload, "subscription");
   const paymentEntity = entity(payload, "payment");
   const refundEntity = entity(payload, "refund");

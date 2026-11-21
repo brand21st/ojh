@@ -120,12 +120,13 @@ export function captureClientException(error: unknown, extra?: Record<string, un
   return true;
 }
 
-export type PurchaseProduct = "plan" | "ai-credits" | "addon:ai-accountant";
+export type PurchaseProduct = "plan" | "ai-credits" | "addon:ai-accountant" | "wallet-recharge";
 
 export const PURCHASE_EVENTS = {
   plan: "purchase_completed",
   "ai-credits": "purchase_completed",
   "addon:ai-accountant": "addon_purchase_completed",
+  "wallet-recharge": "wallet_recharge_completed",
 } as const satisfies Record<PurchaseProduct, string>;
 
 /**

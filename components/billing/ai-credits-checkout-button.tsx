@@ -28,7 +28,7 @@ declare global {
   }
 }
 
-function loadCheckoutScript() {
+export function loadCheckoutScript() {
   return new Promise<void>((resolve, reject) => {
     if (window.Razorpay) {
       resolve();

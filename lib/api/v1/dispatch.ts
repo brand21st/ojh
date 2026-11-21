@@ -22,6 +22,7 @@ import { handleSupportRoutes } from "@/lib/api/v1/support";
 import { handleTariffRoutes } from "@/lib/api/v1/tariff";
 import { handleMerchantTutorials } from "@/lib/api/v1/tutorials";
 import { handleUiRoutes } from "@/lib/api/v1/ui";
+import { handleWalletRoutes } from "@/lib/api/v1/wallet";
 import { handleWorkspaceRoutes } from "@/lib/api/v1/workspace";
 import { permissionForTenantRoute } from "@/lib/api/v1-permissions";
 import { hasPermission } from "@/lib/permissions/rbac";
@@ -54,6 +55,7 @@ export async function dispatchTenantRoutes(
     (await handleTariffRoutes(request, supabase, ctx, path)) ??
     (await handleBillingRoutes(request, supabase, ctx, key)) ??
     (await handleAddonRoutes(request, supabase, ctx, key)) ??
+    (await handleWalletRoutes(request, ctx, key)) ??
     (await handleAiAccountantRoutes(request, supabase, ctx, key, method, slugs)) ??
     (await handleWorkspaceRoutes(request, supabase, ctx, key, method, slugs)) ??
     (await handleSupportRoutes(request, supabase, ctx, method, slugs)) ??

@@ -253,3 +253,45 @@ There are three send paths:
 - Credits move at cutover, not at migration time, so balances aren't double-counted while the old AI credit flow is still live.
 
 **Known, not caused by this work:** `modules/billing/consume-quota.test.ts` has 2 failures at base commit `db76c90`.
+
+---
+
+## Part E: Phase 2 status (2026-11-21): recharge and merchant Wallet page
+
+**Built**
+- **Migration** `20261121140000_wallet_recharge.sql` (**not applied anywhere**):
+  - Settings: GST rate (default 18%) and place of supply on `platform_settings`. Each order stores its own GST rate and CGST/SGST/IGST split.
+  - `wallet_quote_recharge`: same rounding as the subscription GST engine.
+  - `wallet_create_recharge_order`: writes the `payments` row and the recharge order in one transaction, enforcing the min/max.
+  - Read models: `wallet_summary` (month boundaries in IST) and `wallet_usage_daily`.
+- **Recharge flow** in `modules/wallet/recharge.ts`:
+  1. The amount is validated before any Razorpay order is created.
+  2. The Razorpay order is created and recorded through the database function.
+  3. Verify checks the signature, reads the payment back from Razorpay, requires the same order and INR, and credits only a **captured** payment. An authorized-only payment returns PENDING and the webhook credits it.
+- **Webhook:** `modules/wallet/webhooks.ts` handles `payment.captured`, `order.paid`, `payment.failed` and `refund.processed` for wallet orders.
+  - `processRazorpayEvent` calls it first and returns early. Subscription, add-on and AI-credit paths are unchanged.
+  - A lookup error other than "table missing" throws, so Razorpay retries instead of the event being lost.
+- **Recovery:** `modules/wallet/reconcile.ts` asks Razorpay about orders still pending after 2 minutes and credits any captured payment.
+  - It runs from the new `/api/cron/wallet` and also whenever a merchant opens the Wallet page, because the billing cron isn't scheduled in production.
+- **API** `lib/api/v1/wallet.ts`:
+  - `GET wallet`, `wallet/transactions`, `wallet/recharges`, `wallet/usage`, `wallet/statement` (CSV).
+  - `POST wallet/recharge`, `wallet/recharge/verify`, `wallet/recharge/preview`.
+  - Any member can read; recharging needs `org.billing` (owners). All of it returns 404 while `WALLET_ENABLED` is off.
+- **UI:**
+  - `/dashboard/wallet` shows the KPIs, a 30-day chart by service, Transactions / Recharges / Statement tabs, and low-balance and frozen notices.
+  - The recharge dialog has presets, a custom amount and a live GST split.
+  - The sidebar shows Wallet after Billing only when `me.wallet.enabled` is true.
+
+**Tests**
+- 114 tests pass across wallet, permissions and analytics:
+  - PGlite: create-order split, limits, IGST, summary and daily usage, grants.
+  - SQL = TS recharge split across 5 rates × 51 amounts.
+  - Unit: webhook routing, verify, recovery.
+- The concurrency check passes with the Phase 2 migration.
+- Visual check: a temporary preview route with mocked API data on the worktree dev server, with no database credentials. It covered desktop and mobile; normal, low and frozen states; the recharge dialog; and the recharges list. It found and fixed a mobile overflow in the chart.
+- **Not done:** an end-to-end payment in Razorpay test mode against a real database. That needs staging (Docker isn't installed) or a test-mode project.
+
+**Still open**
+- **Numbered GST tax invoice PDF for recharges.** The subscription invoice tables require a subscription, so this needs its own small invoice table and series. All amounts it needs are already stored on each order.
+- **Place of supply** is a platform setting (INTRA by default). It should come from the merchant's billing profile state when invoices are built.
+- **AI Accountant** books recharges as "platform fees"; strictly a wallet top-up is a prepaid asset.

@@ -154,6 +154,12 @@ export function permissionForTenantRoute(
 
   if (root === "ai-credits") return "orders.read";
 
+  // Any member can see the wallet; paying into it is an owner action like billing.
+  if (root === "wallet") {
+    if (key === "POST wallet/recharge" || key === "POST wallet/recharge/verify") return "org.billing";
+    return undefined;
+  }
+
   if (root === "billing") {
     if (method === "GET") return undefined;
     return "org.billing";

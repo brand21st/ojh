@@ -8,7 +8,7 @@ import { ChevronsLeft, Lock } from "lucide-react";
 import { Logo } from "@/components/layout/logo";
 import { WhatsappIcon } from "@/components/layout/whatsapp-support-button";
 import { Badge } from "@/components/ui/badge";
-import { aiAccountantNav, helpNav, isNavItemActive, sidebarNav, tutorialsNav } from "@/lib/dashboard/nav";
+import { aiAccountantNav, helpNav, isNavItemActive, sidebarNav, tutorialsNav, walletNav } from "@/lib/dashboard/nav";
 import { useSupportUnread } from "@/lib/hooks/use-support-unread";
 import { initials } from "@/lib/format";
 import { siteConfig } from "@/lib/site-config";
@@ -136,7 +136,9 @@ export function Sidebar({
           (addon.accessMode === "FULL" || addon.accessMode === "READ_ONLY")
       )
         ? [aiAccountantNav]
-        : [];
+        : item.href === "/dashboard/billing" && me?.wallet?.enabled
+          ? [walletNav]
+          : [];
     return [item, ...extra];
   });
 

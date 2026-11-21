@@ -80,6 +80,15 @@ export async function createRazorpayOrder(input: {
   });
 }
 
+/** Payments attempted against one order, newest first. Used to recover a missed webhook. */
+export async function fetchRazorpayOrderPayments(orderId: string) {
+  const result = await razorpayRequest<{ items?: RazorpayEntity[] }>(
+    "GET",
+    `/orders/${encodeURIComponent(orderId)}/payments`
+  );
+  return Array.isArray(result.items) ? result.items : [];
+}
+
 export async function createRazorpayPlan(input: {
   period: "monthly" | "yearly";
   name: string;

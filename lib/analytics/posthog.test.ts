@@ -202,6 +202,7 @@ describe("trackPurchase", () => {
       plan: "purchase_completed",
       "ai-credits": "purchase_completed",
       "addon:ai-accountant": "addon_purchase_completed",
+      "wallet-recharge": "wallet_recharge_completed",
     });
   });
 });
