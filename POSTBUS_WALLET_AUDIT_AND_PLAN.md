@@ -427,3 +427,25 @@ There are three send paths:
 **Worth knowing**
 - `lib/admin/action-pin.ts` falls back to a hard-coded PIN when `ADMIN_ACCOUNT_ACTION_PIN` isn't set. That predates the wallet, but every wallet money action relies on this PIN, so set the env var in production.
 - "Issue refunds" covers both a wallet refund (credit back, no card movement) and a Razorpay refund of a recharge (money back to the card; the wallet credit is removed when Razorpay confirms).
+
+---
+
+## Part J: Phase 6: low-balance alerts and rollout (2026-11-21)
+
+**Built**
+- **Migration** `20261121230000_wallet_alerts.sql` (**not applied anywhere**):
+  - `wallet_claim_alerts`: claims unsent alerts in the same statement that marks them sent, so there are no duplicates across cron runs. It sends one message per wallet, at the lowest level crossed, with the owners' emails, and skips wallets that recovered first.
+  - `wallet_set_thresholds`: up to 5 levels. Removed levels close their open alerts; levels already crossed open one.
+- **Delivery** `modules/wallet/alerts.ts`, run from the wallet cron:
+  - In-app notification (`notifications`, type `wallet.low_balance`) for every alert.
+  - Email to workspace owners only when `WALLET_EMAIL_ENABLED=true`. Outside production it goes only to `WALLET_EMAIL_TEST_RECIPIENT`. A failed email is logged, not retried.
+  - Wording changes for low, empty and on-hold wallets.
+- **Merchant:** an Alerts tab on the Wallet page (owners edit; `PATCH /api/v1/wallet/alerts`, `org.billing`). A dashboard-wide banner ("balance low" / "on hold", links to Wallet, dismissible for the session) shows on every page except Wallet. It's driven by `me.wallet.lowBalance` and `me.wallet.frozen`, read with the member's own session.
+- **Super Admin** alert levels now go through the same function.
+- **Runbook:** `POSTBUS_WALLET_ROLLOUT_RUNBOOK.md` covers migration order and prerequisite checks, env vars, Razorpay webhook events, the cron schedule, the staged cutover (recharges → AI pilot → all AI → WhatsApp → email) with staging checklists and per-stage rollback, the production watch list, and open accountant questions.
+
+**Tests**
+- 137 wallet tests pass, including 4 PGlite alert tests (one message per wallet at the lowest level, once; recovered wallets stay quiet; own levels keep alerts consistent; access) and 7 unit tests (email gating, wording, escaping, delivery, no retry on failure).
+- The concurrency check passes.
+- Regression: only the 2 consume-quota failures that predate this work.
+- Visual check (mock data, no database): the banner, the Alerts tab, and six levels refused with Save disabled.

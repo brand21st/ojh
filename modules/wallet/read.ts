@@ -52,6 +52,7 @@ export async function getWalletOverview(db: SupabaseClient, organizationId: stri
     lastRechargedAt: raw.lastRechargedAt ?? null,
     lowBalance: raw.lowestOpenAlertMicros != null || (highestThreshold > ZERO && balance < highestThreshold),
     lowestOpenAlertMicros: raw.lowestOpenAlertMicros ?? null,
+    thresholdsMicros: thresholds.map((t) => t.toString()),
   };
 }
 

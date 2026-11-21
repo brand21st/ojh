@@ -54,7 +54,7 @@ export type MeResponse = {
   memberships?: MeMembership[];
   subscription?: MeSubscription | null;
   merchantApi?: { enabled: boolean };
-  wallet?: { enabled: boolean };
+  wallet?: { enabled: boolean; lowBalance?: boolean; frozen?: boolean };
   addons?: Array<{ slug: string; accessMode: "FULL" | "READ_ONLY" | "NONE"; status: string }>;
 };
 

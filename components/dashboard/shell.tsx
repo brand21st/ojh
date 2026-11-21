@@ -9,6 +9,7 @@ import { NewOrderAlerts } from "@/components/dashboard/new-order-alerts";
 import { WebusbJobListener } from "@/components/dashboard/webusb-job-listener";
 import { Sidebar } from "@/components/dashboard/sidebar";
 import { Topbar } from "@/components/dashboard/topbar";
+import { WalletBalanceBanner } from "@/components/wallet/wallet-balance-banner";
 import { Skeleton } from "@/components/ui/skeleton";
 import { isConfirmedSessionLoss, isTransientApiAuthError } from "@/lib/hooks/use-api";
 import { membershipsFromMe, useMe } from "@/lib/hooks/use-me";
@@ -214,6 +215,7 @@ export function DashboardShell({
             }
           >
             {me.data && !confirmedLoss ? <IndiaPostOnboardingHost /> : null}
+            {me.data && !confirmedLoss ? <WalletBalanceBanner me={me.data} /> : null}
             {transientAuth ? (
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-card px-3 py-2 text-sm text-muted">
                 <p>Connection issue. Retrying your session without signing you out…</p>

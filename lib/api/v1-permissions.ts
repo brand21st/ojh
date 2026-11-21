@@ -156,7 +156,7 @@ export function permissionForTenantRoute(
 
   // Any member can see the wallet; paying into it is an owner action like billing.
   if (root === "wallet") {
-    if (key === "POST wallet/recharge" || key === "POST wallet/recharge/verify") return "org.billing";
+    if (key === "POST wallet/recharge" || key === "POST wallet/recharge/verify" || key === "PATCH wallet/alerts") return "org.billing";
     return undefined;
   }
 

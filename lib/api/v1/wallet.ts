@@ -35,7 +35,7 @@ export async function handleWalletRoutes(
   ctx: TenantContext,
   key: string
 ) {
-  if (key !== "GET wallet" && !key.startsWith("GET wallet/") && !key.startsWith("POST wallet/")) return null;
+  if (key !== "GET wallet" && !key.startsWith("GET wallet/") && !key.startsWith("POST wallet/") && !key.startsWith("PATCH wallet/")) return null;
   assertOpen();
   const db = walletDb();
   const params = request.nextUrl.searchParams;
@@ -89,6 +89,18 @@ export async function handleWalletRoutes(
         "Cache-Control": "no-store",
       },
     });
+  }
+
+  if (key === "PATCH wallet/alerts") {
+    const body = z
+      .object({ thresholdsRupees: z.array(z.number().int().min(1).max(100000)).max(5) })
+      .parse(await request.json());
+    const { data, error } = await db.rpc("wallet_set_thresholds", {
+      p_org: ctx.organizationId,
+      p_thresholds_micros: body.thresholdsRupees.map((rupees) => String(BigInt(rupees) * BigInt(1_000_000))),
+    });
+    if (error) throw new AppError(ERROR_CODES.VALIDATION_ERROR, "Could not save alert levels.");
+    return data;
   }
 
   if (key === "POST wallet/recharge/preview") {
