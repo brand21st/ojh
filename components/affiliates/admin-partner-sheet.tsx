@@ -148,7 +148,7 @@ export function PartnerSheet({
                     <span className="text-xs text-muted">{formatDate(String(p.created_at))}</span>
                     {p.status === "REQUESTED" || p.status === "REVIEW" ? (
                       <Button size="xs" className="ml-auto" onClick={() => onAction(payoutAction(p, "APPROVED"))}>Approve</Button>
-                    ) : p.status === "APPROVED" ? (
+                    ) : p.status === "APPROVED" && p.send_via !== "RAZORPAYX" ? (
                       <Button size="xs" className="ml-auto" onClick={() => onAction(payoutAction(p, "PAID"))}>Mark paid</Button>
                     ) : p.settlement_reference ? (
                       <span className="ml-auto text-xs text-muted">Ref {String(p.settlement_reference)}</span>

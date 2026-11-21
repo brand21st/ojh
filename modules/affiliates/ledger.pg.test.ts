@@ -25,7 +25,7 @@ describe("affiliate PostgreSQL transactions and RLS", () => {
         db = new PGlite();
         await db.exec(`
  create role anon;create role authenticated;create role service_role bypassrls;
- create schema auth;create table auth.users(id uuid primary key,created_at timestamptz default now());
+ create schema auth;create table auth.users(id uuid primary key,email text,created_at timestamptz default now());
  create function auth.uid() returns uuid language sql stable as $$select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$;
  grant usage on schema public,auth to anon,authenticated,service_role;
  create table organizations(id uuid primary key default gen_random_uuid(),name text);
@@ -36,7 +36,7 @@ describe("affiliate PostgreSQL transactions and RLS", () => {
  create table razorpay_webhook_events(id uuid primary key default gen_random_uuid(),event_id text unique,event text,payload jsonb,status text,created_at timestamptz default now());
  create function create_organization_for_user(p_name text) returns organizations language plpgsql as $$declare o organizations;begin insert into organizations(name) values(p_name) returning * into o;insert into organization_members values(o.id,auth.uid());return o;end$$;
  `);
-        for (const file of ["20261017120000_affiliate_program.sql", "20261017121000_affiliate_operations.sql", "20261017122000_affiliate_webhook_leases.sql", "20261017123000_affiliate_reporting.sql", "20261017124000_affiliate_reconciliation.sql", "20261017125000_affiliate_partner_portal.sql", "20261017130000_subscription_tax_policy.sql", "20261017140000_subscription_tax_invoices.sql"]) {
+        for (const file of ["20261017120000_affiliate_program.sql", "20261017121000_affiliate_operations.sql", "20261017122000_affiliate_webhook_leases.sql", "20261017123000_affiliate_reporting.sql", "20261017124000_affiliate_reconciliation.sql", "20261017125000_affiliate_partner_portal.sql", "20261017130000_subscription_tax_policy.sql", "20261017140000_subscription_tax_invoices.sql", "20261121090000_affiliate_auto_payouts.sql"]) {
             await db.exec(readFileSync(`supabase/migrations/${file}`, "utf8"));
         }
     }, 30000);

@@ -30,6 +30,11 @@ const STATUS_TONE: Record<string, "success" | "warning" | "error" | "brand" | "d
   REVERSED: "error",
   SUSPENDED: "default",
   RETURNED: "default",
+  PROCESSING: "brand",
+  FAILED: "error",
+  SENT: "success",
+  SENDING: "brand",
+  SKIPPED: "default",
 };
 
 export function StatusPill({ status }: { status: unknown }) {
