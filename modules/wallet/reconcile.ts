@@ -3,6 +3,7 @@ import { logError, logInfo } from "@/lib/logger";
 import { fetchRazorpayOrderPayments } from "@/modules/razorpay/client";
 import { isMissingRelation } from "@/modules/wallet/recharge";
 import { expireReservations, fulfillRecharge, reconcileWallets } from "@/modules/wallet/service";
+import { issuePendingRechargeInvoices } from "@/modules/wallet/invoices";
 
 const RECHECK_AFTER_MS = 5 * 60 * 1000;
 const GIVE_UP_AFTER_MS = 3 * 24 * 60 * 60 * 1000;
@@ -88,5 +89,7 @@ export async function runWalletSweep(db: SupabaseClient) {
     return -1;
   });
   if (mismatches > 0) logError("wallet.reconcile_mismatch", { wallets: mismatches });
-  return { expired, recharges, mismatches };
+  // After recovery, so a recharge credited just now gets its invoice in the same run.
+  const invoices = await issuePendingRechargeInvoices(db, 200);
+  return { expired, recharges, mismatches, invoices };
 }

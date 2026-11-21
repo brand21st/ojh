@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { AlertTriangle, ChevronLeft, ChevronRight, Download, Lock, Plus, Wallet } from "lucide-react";
+import { AlertTriangle, ChevronLeft, ChevronRight, Download, FileText, Lock, Plus, Wallet } from "lucide-react";
 import { PageHeader } from "@/components/dashboard/page-header";
 import { RechargeDialog } from "@/components/wallet/recharge-dialog";
 import { Badge } from "@/components/ui/badge";
@@ -66,6 +66,7 @@ type Recharges = {
     failureReason: string | null;
     createdAt: string;
     paidAt: string | null;
+    invoiceNumber: string | null;
   }>;
   page: number;
   pageSize: number;
@@ -358,11 +359,31 @@ export function WalletDashboard() {
                           )}
                           <p className="tabular-nums">GST {rupeesFromPaise(row.taxPaise)}</p>
                           {row.refundedPaise > 0 ? <p className="tabular-nums">Refunded {rupeesFromPaise(row.refundedPaise)}</p> : null}
+                          {row.invoiceNumber ? (
+                            <a
+                              href={`/api/v1/wallet/recharges/${row.id}/invoice`}
+                              download
+                              className="mt-0.5 inline-flex items-center gap-1 font-medium text-brand hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+                              aria-label={`Download tax invoice ${row.invoiceNumber}`}
+                            >
+                              <FileText className="size-3.5" />
+                              Invoice
+                            </a>
+                          ) : row.status === "PAID" ? (
+                            <p title="Issued as soon as PostBus and your billing details are complete.">Invoice pending</p>
+                          ) : null}
                         </div>
                       </li>
                     ))}
                   </ul>
                   <Pager page={recharges.data.page} pageSize={recharges.data.pageSize} total={recharges.data.total} onPage={setRcPage} />
+                  <p className="pt-3 text-xs text-muted">
+                    Each paid recharge gets a GST tax invoice. To show your GSTIN and address on new invoices, add them under{" "}
+                    <a href="/dashboard/billing" className="font-medium text-ink underline-offset-2 hover:underline">
+                      Billing
+                    </a>
+                    .
+                  </p>
                 </>
               )}
             </CardContent>

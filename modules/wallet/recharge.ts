@@ -14,6 +14,7 @@ import {
 } from "@/modules/wallet/constants";
 import { quoteRecharge, validateRechargeAmount, type RechargeLimits } from "@/modules/wallet/recharge-quote";
 import { fulfillRecharge } from "@/modules/wallet/service";
+import { issueRechargeInvoice } from "@/modules/wallet/invoices";
 
 const DEFAULT_GST_RATE_BPS = 1800;
 
@@ -195,11 +196,14 @@ export async function verifyWalletRecharge(
     metadata: { razorpayOrderId: input.razorpayOrderId, razorpayPaymentId: input.razorpayPaymentId, result: result.status },
   });
   logInfo("wallet.recharge_verified", { organizationId: input.organizationId, status: result.status });
+  const rechargeOrderId = String(result.raw.rechargeOrderId ?? "");
+  const invoice = rechargeOrderId ? await issueRechargeInvoice(db, rechargeOrderId) : null;
 
   return {
     status: "CREDITED" as const,
     duplicate: result.status === "DUPLICATE",
     balanceMicros: result.snapshot?.balanceMicros.toString() ?? null,
+    invoiceNumber: invoice?.invoiceNumber ?? null,
   };
 }
 

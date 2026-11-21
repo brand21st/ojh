@@ -101,6 +101,12 @@ export async function listWalletTransactions(
   };
 }
 
+function invoiceNumberOf(value: unknown): string | null {
+  const row = Array.isArray(value) ? value[0] : value;
+  const number = (row as { invoice_number?: unknown } | null | undefined)?.invoice_number;
+  return typeof number === "string" ? number : null;
+}
+
 export async function listRechargeOrders(
   db: SupabaseClient,
   organizationId: string,
@@ -110,7 +116,7 @@ export async function listRechargeOrders(
   const { data, error, count } = await db
     .from("wallet_recharge_orders")
     .select(
-      "id, razorpay_order_id, razorpay_payment_id, amount_paise, taxable_paise, tax_paise, gst_rate_bps, credit_micros::text, refunded_paise, status, method, failure_reason, created_at, paid_at",
+      "id, razorpay_order_id, razorpay_payment_id, amount_paise, taxable_paise, tax_paise, gst_rate_bps, credit_micros::text, refunded_paise, status, method, failure_reason, created_at, paid_at, wallet_recharge_invoices(invoice_number)",
       { count: "exact" }
     )
     .eq("organization_id", organizationId)
@@ -136,6 +142,7 @@ export async function listRechargeOrders(
       failureReason: (row.failure_reason as string | null) ?? null,
       createdAt: String(row.created_at),
       paidAt: (row.paid_at as string | null) ?? null,
+      invoiceNumber: invoiceNumberOf(row.wallet_recharge_invoices),
     })),
     page: p.page,
     pageSize: p.pageSize,

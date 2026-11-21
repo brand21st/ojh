@@ -117,6 +117,31 @@ describe("tenant wallet", () => {
     `);
     await db.exec(readFileSync("supabase/migrations/20261121120000_tenant_wallet.sql", "utf8"));
     await db.exec(readFileSync("supabase/migrations/20261121140000_wallet_recharge.sql", "utf8"));
+    // Stand-ins for 20261017140000 (subscription invoices): same columns and the same allocator.
+    await db.exec(`
+      create table subscription_invoice_settings (id boolean primary key default true check (id), legal_name text not null default '',
+        address text not null default '', gstin text not null default '', numbering_prefix text not null default 'PB',
+        financial_year_start_month integer not null default 4);
+      insert into subscription_invoice_settings(id) values (true);
+      create table subscription_invoice_counters (series text primary key, last_value bigint not null);
+      create table organization_billing_profiles (organization_id uuid primary key, legal_name text not null default '',
+        address text not null default '', gstin text not null default '');
+      create table billing_audit_logs (id uuid primary key default gen_random_uuid(), actor_id uuid, actor_type text, action text,
+        target_type text, target_id text, organization_id uuid, ip text, metadata jsonb, created_at timestamptz default now());
+      create function public.subscription_allocate_invoice_number(p_prefix text, p_series text) returns text
+      language plpgsql security definer set search_path = public as $$
+      declare n bigint;
+      begin
+        if p_prefix !~ '^[A-Za-z0-9]{1,8}$' or p_series !~ '^[0-9]{4}-[0-9]{2}$' then
+          raise exception 'Invoice numbering policy is incomplete';
+        end if;
+        insert into subscription_invoice_counters(series, last_value) values (p_series, 1)
+          on conflict (series) do update set last_value = subscription_invoice_counters.last_value + 1
+          returning last_value into n;
+        return upper(p_prefix) || '/' || p_series || '/' || lpad(n::text, 6, '0');
+      end $$;
+    `);
+    await db.exec(readFileSync("supabase/migrations/20261121160000_wallet_recharge_invoices.sql", "utf8"));
   }, 60000);
 
   afterAll(async () => {
@@ -594,6 +619,123 @@ describe("tenant wallet", () => {
       await rejected("select wallet_create_recharge_order($1,'x',10000,null)", [org], /permission denied/);
       await rejected("select wallet_summary($1)", [org], /permission denied/);
       await rejected("select * from wallet_usage_daily($1,7)", [org], /permission denied/);
+      await db.exec("reset role");
+    });
+  });
+  describe("recharge tax invoices", () => {
+    const supplier =
+      "update subscription_invoice_settings set legal_name='PostBus Technologies Pvt Ltd', address='12 MG Road, Bengaluru 560001', gstin='29AAACP1234A1Z5'";
+
+    async function paidOrder(orderId: string, amountPaise = 100000) {
+      await rechargeOrder({ orderId, amountPaise });
+      await rpc("wallet_fulfill_recharge($1,$2,$3,'upi',null)", [orderId, `pay_${orderId}`, amountPaise]);
+      return String(await scalar("select id from wallet_recharge_orders where razorpay_order_id=$1", [orderId]));
+    }
+
+    it("waits for supplier details, then numbers invoices once in the shared series", async () => {
+      const first = await paidOrder("inv_1");
+      expect((await rpc("wallet_issue_recharge_invoice($1)", [first])).status).toBe("SUPPLIER_INCOMPLETE");
+      await db.query(supplier);
+      const issued = await rpc("wallet_issue_recharge_invoice($1)", [first]);
+      expect(issued.status).toBe("ISSUED");
+      expect(issued.invoiceNumber).toMatch(/^PB\/\d{4}-\d{2}\/000001$/);
+      expect(await rpc("wallet_issue_recharge_invoice($1)", [first])).toMatchObject({
+        status: "DUPLICATE",
+        invoiceNumber: issued.invoiceNumber,
+      });
+
+      // A subscription invoice in between takes the next number; the series stays gap-free across both.
+      const series = String(issued.invoiceNumber).split("/")[1];
+      expect(await scalar("select subscription_allocate_invoice_number('PB',$1)", [series])).toBe(`PB/${series}/000002`);
+      const second = await paidOrder("inv_2", 25000);
+      expect((await rpc("wallet_issue_recharge_invoice($1)", [second])).invoiceNumber).toBe(`PB/${series}/000003`);
+
+      const row = await one<Record<string, unknown>>(
+        "select gross_paise::text, taxable_paise::text, total_tax_paise::text, customer_legal_name, customer_gstin, payment_reference from wallet_recharge_invoices where recharge_order_id=$1",
+        [first]
+      );
+      expect(row).toEqual({
+        gross_paise: "100000",
+        taxable_paise: "84746",
+        total_tax_paise: "15254",
+        customer_legal_name: "Merchant",
+        customer_gstin: "",
+        payment_reference: "pay_inv_1",
+      });
+      expect(Number(await scalar("select count(*) from billing_audit_logs where action='wallet_invoice.issued'"))).toBe(2);
+    });
+
+    it("never invoices an unpaid recharge", async () => {
+      await db.query(supplier);
+      await rechargeOrder({ orderId: "inv_unpaid" });
+      const id = await scalar("select id from wallet_recharge_orders where razorpay_order_id='inv_unpaid'");
+      expect((await rpc("wallet_issue_recharge_invoice($1)", [id])).status).toBe("NOT_PAID");
+      expect((await rpc("wallet_issue_recharge_invoice('30000000-0000-4000-8000-0000000000ff')")).status).toBe("NOT_FOUND");
+    });
+
+    it("needs a valid GSTIN and an address for a registered buyer", async () => {
+      await db.query(supplier);
+      const id = await paidOrder("inv_b2b");
+      await db.query(
+        "insert into organization_billing_profiles(organization_id,legal_name,address,gstin) values($1,'Merchant Pvt Ltd','','29ABCDE1234F1Z5')",
+        [org]
+      );
+      expect(await rpc("wallet_issue_recharge_invoice($1)", [id])).toMatchObject({
+        status: "CUSTOMER_INCOMPLETE",
+        reason: expect.stringMatching(/address/),
+      });
+      await db.query("update organization_billing_profiles set address='4 Residency Road, Bengaluru', gstin='29-BAD'");
+      expect(await rpc("wallet_issue_recharge_invoice($1)", [id])).toMatchObject({
+        status: "CUSTOMER_INCOMPLETE",
+        reason: expect.stringMatching(/GSTIN/),
+      });
+      await db.query("update organization_billing_profiles set gstin='29abcde1234f1z5'");
+      expect((await rpc("wallet_issue_recharge_invoice($1)", [id])).status).toBe("ISSUED");
+      expect(await scalar("select customer_gstin from wallet_recharge_invoices")).toBe("29ABCDE1234F1Z5");
+      expect(await scalar("select customer_legal_name from wallet_recharge_invoices")).toBe("Merchant Pvt Ltd");
+    });
+
+    it("charges IGST when the buyer is registered in another state", async () => {
+      await db.query(supplier);
+      await db.query(
+        "insert into organization_billing_profiles(organization_id,legal_name,address,gstin) values($1,'Merchant','Pune','27ABCDE1234F1Z5')",
+        [org]
+      );
+      const created = await rpc("wallet_create_recharge_order($1,'inv_inter',100000,null)", [org]);
+      expect(created).toMatchObject({ placeOfSupply: "INTER", igstPaise: 15254, cgstPaise: 0 });
+      await db.query("update organization_billing_profiles set gstin='29ABCDE1234F1Z5'");
+      expect(await rpc("wallet_create_recharge_order($1,'inv_intra',100000,null)", [org])).toMatchObject({
+        placeOfSupply: "INTRA",
+        cgstPaise: 7627,
+      });
+      const states = await one(
+        "select supplier_state_code, customer_state_code from wallet_recharge_orders where razorpay_order_id='inv_inter'"
+      );
+      expect(states).toEqual({ supplier_state_code: "29", customer_state_code: "27" });
+    });
+
+    it("keeps issued invoices unchangeable and lists recharges still waiting", async () => {
+      const waiting = await paidOrder("inv_wait");
+      const ids = await db.query<{ id: string }>("select r as id from wallet_recharges_missing_invoice(10) r");
+      expect(ids.rows.map((r) => r.id)).toEqual([waiting]);
+      await db.query(supplier);
+      await rpc("wallet_issue_recharge_invoice($1)", [waiting]);
+      expect((await db.query("select * from wallet_recharges_missing_invoice(10)")).rows).toHaveLength(0);
+      await rejected("update wallet_recharge_invoices set gross_paise = 1", [], /immutable/);
+      await rejected("delete from wallet_recharge_invoices", [], /immutable/);
+    });
+
+    it("dates the series by the Indian financial year", async () => {
+      expect(await scalar("select wallet__fy_series('2026-03-31T20:00:00Z', 4)")).toBe("2026-27");
+      expect(await scalar("select wallet__fy_series('2026-03-31T10:00:00Z', 4)")).toBe("2025-26");
+      expect(await scalar("select wallet__fy_series('2026-11-21T00:00:00Z', 4)")).toBe("2026-27");
+    });
+
+    it("keeps invoice functions away from signed-in merchants", async () => {
+      await db.exec(`set local role authenticated; select set_config('request.jwt.claim.sub','${merchant}',true);`);
+      await rejected("select wallet_issue_recharge_invoice(gen_random_uuid())", [], /permission denied/);
+      await rejected("select * from wallet_recharges_missing_invoice(1)", [], /permission denied/);
+      expect(Number(await scalar("select count(*) from wallet_recharge_invoices"))).toBe(0);
       await db.exec("reset role");
     });
   });
