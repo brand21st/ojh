@@ -151,9 +151,6 @@ type Row = Record<string, unknown>;
 export const autoSettingsSchema = z.object({
     autoPayoutEnabled: z.boolean(),
     autoPayoutDay: z.number().int().min(1).max(28),
-    autoPayoutMaxPaise: paise.positive(),
-    autoPayoutDailyCapPaise: paise.positive(),
-    newAccountHoldHours: z.number().int().min(0).max(720),
     reason: z.string().min(3).max(500),
 });
 /** Next scheduled payout date (IST) for a given payout day. */
@@ -164,12 +161,12 @@ export function nextPayoutDate(now: Date, day: number) {
 }
 async function payoutOverview(db: SupabaseClient, affiliateId: string) {
     const [settings, balance, account, open] = await Promise.all([
-        db.from("affiliate_settings").select("minimum_payout_paise,auto_payout_enabled,auto_payout_day,auto_payout_max_paise,new_account_hold_hours").single(),
+        db.from("affiliate_settings").select("minimum_payout_paise,auto_payout_enabled,auto_payout_day").single(),
         db.rpc("affiliate_balance", { p_affiliate: affiliateId }),
         db.from("affiliate_payout_accounts").select("id,masked_details,created_at").eq("affiliate_id", affiliateId).order("created_at", { ascending: false }).limit(1).maybeSingle(),
         db.from("affiliate_payout_requests").select("id,amount_paise,status,hold_reason,created_at").eq("affiliate_id", affiliateId).in("status", ["REQUESTED", "APPROVED", "PROCESSING", "REVIEW"]).order("created_at", { ascending: false }).limit(1).maybeSingle(),
     ]);
-    const s = checked(settings) as { minimum_payout_paise: number; auto_payout_enabled: boolean; auto_payout_day: number; auto_payout_max_paise: number; new_account_hold_hours: number };
+    const s = checked(settings) as { minimum_payout_paise: number; auto_payout_enabled: boolean; auto_payout_day: number };
     const acct = checked(account) as { id: string; masked_details: string; created_at: string } | null;
     const automatic = Boolean(s.auto_payout_enabled) && payoutsEnabled() && razorpayxConfigured();
     return {
@@ -178,9 +175,8 @@ async function payoutOverview(db: SupabaseClient, affiliateId: string) {
         minimumPaise: String(s.minimum_payout_paise),
         nextPayoutDate: automatic ? nextPayoutDate(new Date(), s.auto_payout_day) : null,
         payoutDay: s.auto_payout_day,
-        account: acct ? { masked: acct.masked_details, addedAt: acct.created_at, heldUntil: new Date(Date.parse(acct.created_at) + s.new_account_hold_hours * 3600000).toISOString() } : null,
+        account: acct ? { masked: acct.masked_details, addedAt: acct.created_at } : null,
         openPayout: checked(open),
-        rules: { maxPaise: String(s.auto_payout_max_paise), holdHours: s.new_account_hold_hours },
     };
 }
 const adminStatusFilter = z.union([z.literal(""), z.enum(["PENDING", "APPROVED", "REJECTED", "SUSPENDED", "REQUESTED", "PROCESSING", "PAID", "FAILED", "REVIEW", "RETURNED"])]);

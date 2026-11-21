@@ -36,7 +36,7 @@ describe("affiliate PostgreSQL transactions and RLS", () => {
  create table razorpay_webhook_events(id uuid primary key default gen_random_uuid(),event_id text unique,event text,payload jsonb,status text,created_at timestamptz default now());
  create function create_organization_for_user(p_name text) returns organizations language plpgsql as $$declare o organizations;begin insert into organizations(name) values(p_name) returning * into o;insert into organization_members values(o.id,auth.uid());return o;end$$;
  `);
-        for (const file of ["20261017120000_affiliate_program.sql", "20261017121000_affiliate_operations.sql", "20261017122000_affiliate_webhook_leases.sql", "20261017123000_affiliate_reporting.sql", "20261017124000_affiliate_reconciliation.sql", "20261017125000_affiliate_partner_portal.sql", "20261017130000_subscription_tax_policy.sql", "20261017140000_subscription_tax_invoices.sql", "20261121090000_affiliate_auto_payouts.sql"]) {
+        for (const file of ["20261017120000_affiliate_program.sql", "20261017121000_affiliate_operations.sql", "20261017122000_affiliate_webhook_leases.sql", "20261017123000_affiliate_reporting.sql", "20261017124000_affiliate_reconciliation.sql", "20261017125000_affiliate_partner_portal.sql", "20261017130000_subscription_tax_policy.sql", "20261017140000_subscription_tax_invoices.sql", "20261121090000_affiliate_auto_payouts.sql", "20261121120000_affiliate_auto_approve.sql"]) {
             await db.exec(readFileSync(`supabase/migrations/${file}`, "utf8"));
         }
     }, 30000);
@@ -45,6 +45,8 @@ describe("affiliate PostgreSQL transactions and RLS", () => {
         await db.exec("begin");
         await db.query("insert into auth.users(id) values($1),($2),($3)", [u, merchant, other]);
         await db.query("insert into platform_admins values($1)", [u]);
+        // These tests cover the manual settlement path, so pause RazorpayX sending.
+        await db.query("update affiliate_settings set auto_payout_enabled=false");
         await db.query("insert into affiliate_profiles(id,user_id,status,application,terms_version) values($1,$2,'APPROVED','{}','v1')", [a, u]);
         await db.query("insert into organizations(id,name) values($1,'Merchant')", [org]);
         await db.query("insert into subscriptions(id,organization_id) values($1,$2)", [sub, org]);

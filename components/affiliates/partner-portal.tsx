@@ -156,7 +156,7 @@ function ApplicationCard({ email, profile }: { email?: string; profile?: Profile
     <Card>
       <CardHeader>
         <CardTitle>{profile ? "Profile" : "Apply to become a partner"}</CardTitle>
-        <CardDescription>{profile ? "These details stay on your partner application." : "Referral links are issued after approval."}</CardDescription>
+        <CardDescription>{profile ? "These details stay on your partner application." : "You're approved instantly and get your referral link right away."}</CardDescription>
       </CardHeader>
       <CardContent>
         <form className="grid gap-4 sm:grid-cols-2" onSubmit={submit}>
@@ -177,7 +177,7 @@ function ApplicationCard({ email, profile }: { email?: string; profile?: Profile
             <input name="terms" type="checkbox" required defaultChecked={Boolean(profile)} />
             I accept the <Link className="underline" href="/partner/terms">partner terms</Link>.
           </label>
-          <Button disabled={mutation.isPending}>{profile ? "Save profile" : "Submit application"}</Button>
+          <Button disabled={mutation.isPending}>{profile ? "Save profile" : "Join and get my link"}</Button>
           {mutation.error ? <p role="alert" className="sm:col-span-2">{mutation.error.message}</p> : null}
           {mutation.isSuccess ? <p role="status" className="sm:col-span-2">Saved.</p> : null}
         </form>
