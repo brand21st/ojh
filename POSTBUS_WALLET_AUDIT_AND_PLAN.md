@@ -295,3 +295,35 @@ There are three send paths:
 - **Numbered GST tax invoice PDF for recharges.** The subscription invoice tables require a subscription, so this needs its own small invoice table and series. All amounts it needs are already stored on each order.
 - **Place of supply** is a platform setting (INTRA by default). It should come from the merchant's billing profile state when invoices are built.
 - **AI Accountant** books recharges as "platform fees"; strictly a wallet top-up is a prepaid asset.
+
+---
+
+## Part F: Recharge tax invoices (2026-11-21)
+
+**Built**
+- **Migration** `20261121160000_wallet_recharge_invoices.sql` (**not applied anywhere**):
+  - `wallet_recharge_invoices` holds an immutable snapshot of each invoice: supplier, customer, place of supply, rate, CGST/SGST/IGST, payment reference.
+  - Optional SAC setting (`platform_settings.wallet_invoice_sac`). It's blank until you set it with your accountant.
+- **Numbering:** `subscription_allocate_invoice_number` with the Super Admin prefix (default `PB`). Subscription and wallet invoices share **one consecutive series per Indian financial year** (`PB/2026-27/000001`), using the same counter. No subscription code changed.
+- **Supplier** details come from the existing Super Admin invoice settings. An invoice waits (`SUPPLIER_INCOMPLETE`) until legal name, address and GSTIN are filled in.
+- **Customer** details come from the merchant's Billing details:
+  - With no billing profile, the workspace name is used, as an unregistered buyer.
+  - A GSTIN must be valid and needs an address.
+  - Above ₹50,000 an address is required.
+- **Place of supply** is set when the recharge order is created. If both GSTINs are known, the same state gives CGST + SGST and different states give IGST. Otherwise the platform default applies.
+- **When invoices are issued:**
+  - right after a credit (checkout callback, webhook, recovery);
+  - by the wallet cron for any paid recharge still without one.
+  - Issuing never blocks or reverses a credit.
+- **PDF:** `GET /api/v1/wallet/recharges/{id}/invoice` returns it, only to the owning tenant. The Recharges tab shows an Invoice link, or "Invoice pending".
+
+**Tests**
+- 7 PGlite invoice tests: supplier wait, once-only shared numbering, unpaid refusal, buyer GSTIN/address rules, IGST across states, immutability, FY series in IST, merchant access.
+- PDF render tests.
+- Sample PDF checked by eye.
+- Recharges tab checked in a mock-data preview.
+
+**Open**
+- **Refunds:** a refund doesn't issue a GST credit note. The invoice stays as issued and the refund amount is printed as a note.
+- **GST timing:** whether a prepaid wallet top-up is taxed at recharge (as built) or at use is a question for your accountant.
+- **Signature:** Rule 46 asks for a signature or digital signature. The PDF is unsigned.

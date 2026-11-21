@@ -159,7 +159,8 @@ describe("verifyWalletRecharge", () => {
       p_method: "card",
       p_expected_org: ORG,
     });
-    expect(result).toEqual({ status: "CREDITED", duplicate: false, balanceMicros: "847460000" });
+    expect(result).toEqual({ status: "CREDITED", duplicate: false, balanceMicros: "847460000", invoiceNumber: null });
+    expect(rpc).toHaveBeenCalledWith("wallet_issue_recharge_invoice", { p_recharge_order_id: "rc" });
   });
 
   it("turns a wrong tenant or amount into an error", async () => {

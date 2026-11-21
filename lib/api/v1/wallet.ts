@@ -10,6 +10,7 @@ import { walletEnabled } from "@/modules/wallet/constants";
 import { getWalletOverview, listRechargeOrders, listWalletTransactions, walletDailyUsage, walletStatementRows } from "@/modules/wallet/read";
 import { loadRechargeLimits, previewRecharge, startWalletRecharge, verifyWalletRecharge } from "@/modules/wallet/recharge";
 import { recoverPendingRecharges } from "@/modules/wallet/reconcile";
+import { rechargeInvoicePdf } from "@/modules/wallet/invoices";
 
 const TRANSACTION_TYPES = ["all", "recharge", "whatsapp", "ai", "credits"] as const;
 
@@ -60,6 +61,11 @@ export async function handleWalletRoutes(
       page: Number(params.get("page") ?? 1),
       pageSize: Number(params.get("pageSize") ?? 20),
     });
+  }
+
+  const invoiceMatch = /^GET wallet\/recharges\/([0-9a-f-]{36})\/invoice$/i.exec(key);
+  if (invoiceMatch) {
+    return rechargeInvoicePdf(db, ctx.organizationId, invoiceMatch[1]);
   }
 
   if (key === "GET wallet/usage") {

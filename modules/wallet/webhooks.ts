@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { logError, logInfo } from "@/lib/logger";
 import { isMissingRelation } from "@/modules/wallet/recharge";
 import { fulfillRecharge, markRechargeFailed, reverseRecharge } from "@/modules/wallet/service";
+import { issueRechargeInvoice } from "@/modules/wallet/invoices";
 
 type Payload = { event?: string; payload?: Record<string, unknown> };
 type Entity = Record<string, unknown>;
@@ -59,6 +60,7 @@ export async function handleWalletRazorpayEvent(db: SupabaseClient, payload: Pay
       return { ignored: true, wallet: true };
     }
     logInfo("wallet.webhook_recharge", { event, orderId, status: result.status });
+    if (result.raw.rechargeOrderId) await issueRechargeInvoice(db, String(result.raw.rechargeOrderId));
     return { processed: true, wallet: true, status: result.status };
   }
 
