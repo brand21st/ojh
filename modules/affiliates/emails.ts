@@ -1,4 +1,3 @@
-import { createTransport } from "nodemailer";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { logError } from "@/lib/logger";
 import { formatPaiseInr } from "./policy";
@@ -12,6 +11,13 @@ type Claimed = { id: string; kind: string; payload: Payload; lease: string; emai
 
 const BRAND = "#e11d48";
 const SKIP_WHEN_OPTED_OUT = new Set(["status_approved", "status_rejected", "status_suspended", "first_commission", "application_received"]);
+
+function createTransport(options: Record<string, unknown>) {
+  const load = new Function("name", "return require(name)") as (name: string) => {
+    createTransport: (opts: Record<string, unknown>) => { sendMail: (m: Record<string, unknown>) => Promise<unknown> };
+  };
+  return load("nodemailer").createTransport(options);
+}
 
 function env(name: string) {
   return process.env[`AFFILIATE_SMTP_${name}`]?.trim() || process.env[`MANIFEST_SMTP_${name}`]?.trim() || "";
