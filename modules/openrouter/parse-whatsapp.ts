@@ -9,6 +9,7 @@ import {
   type WhatsAppCustomerFields,
 } from "@/lib/parsers/whatsapp-customer-message";
 import { consumeAiCredit, getAiCreditsRemaining } from "@/modules/ai-credits/service";
+import { openRouterUsage, type AiUsageSink } from "@/modules/wallet/ai-billing";
 import {
   OPENROUTER_API_BASE,
   getPlatformOpenRouterConfig,
@@ -45,7 +46,8 @@ function filledCount(fields: WhatsAppCustomerFields) {
 
 export async function extractWhatsAppFieldsWithOpenRouter(
   text: string,
-  config: Pick<PlatformOpenRouterConfig, "apiKey" | "model">
+  config: Pick<PlatformOpenRouterConfig, "apiKey" | "model">,
+  sink?: AiUsageSink
 ): Promise<unknown> {
   const response = await fetch(`${OPENROUTER_API_BASE}/chat/completions`, {
     method: "POST",
@@ -76,6 +78,7 @@ export async function extractWhatsAppFieldsWithOpenRouter(
       `OpenRouter request failed (${response.status}).`;
     throw new Error(message);
   }
+  if (sink) Object.assign(sink, openRouterUsage(json), { model: config.model });
   const content = json.choices?.[0]?.message?.content?.trim() || "";
   if (!content) throw new Error("OpenRouter returned an empty extract.");
   return JSON.parse(content) as unknown;
@@ -115,12 +118,16 @@ export async function parseWhatsAppOrderPaste(
     return withCredits(mergeWhatsAppPasteResult(trimmed, null), creditsRemaining);
   }
   try {
-    const json = await extractWhatsAppFieldsWithOpenRouter(trimmed, config);
+    const usage: AiUsageSink = {};
+    const json = await extractWhatsAppFieldsWithOpenRouter(trimmed, config, usage);
     const merged = mergeWhatsAppPasteResult(trimmed, json);
     if (merged.source === "ai" && organizationId && supabase) {
       const remaining = await consumeAiCredit(supabase, organizationId, {
         reason: "AI_ADDRESS_EXTRACTION",
         idempotencyKey: options?.idempotencyKey ?? null,
+        feature: "data_extraction",
+        model: usage.model,
+        usage,
       });
       return withCredits(merged, remaining ?? creditsRemaining);
     }

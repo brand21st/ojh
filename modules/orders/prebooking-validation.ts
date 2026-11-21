@@ -520,7 +520,8 @@ export async function assessPrebookingAddress(
     try {
       const { requestAiAddressSuggestion } = await import("@/modules/shopify/address-ai");
       const contact = contactFromStored(next);
-      const suggestion = await requestAiAddressSuggestion(contact);
+      const usage: { inputTokens?: number; outputTokens?: number; model?: string } = {};
+      const suggestion = await requestAiAddressSuggestion(contact, undefined, usage);
       const applied = suggestion ? applyAiAddressSuggestion(contact, suggestion) : null;
       if (applied) {
         const wrapped = wrapIndiaPostAddressLines(applied.line1, applied.line2, applied.line3, applied.city);
@@ -542,6 +543,9 @@ export async function assessPrebookingAddress(
             const remaining = await consumeAiCredit(options.supabase, options.organizationId, {
               reason: "AI_ADDRESS_EXTRACTION",
               idempotencyKey: `prebooking-address:${options.organizationId}:${address.id || addressValidationFingerprint(address)}`,
+              feature: "address_validation",
+              model: usage.model,
+              usage,
             });
             credited = remaining != null;
           }

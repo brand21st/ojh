@@ -270,6 +270,9 @@ export async function enqueueImageStudioJob(
     qty: creditQty,
     reason: AI_CREDIT_REASON_IMAGE_STUDIO,
     idempotencyKey: body.idempotencyKey,
+    feature: "image_studio",
+    model: config.model,
+    units: variations,
   });
   if (!reservation.reserved && reservation.status === "INSUFFICIENT") {
     throw new AppError(ERROR_CODES.CONFLICT, ZERO_AI_CREDITS_MESSAGE);
@@ -380,6 +383,9 @@ export async function enqueueCoverJob(
     qty: creditQty,
     reason: AI_CREDIT_REASON_IMAGE_STUDIO,
     idempotencyKey: body.idempotencyKey,
+    feature: "cover_studio",
+    model: config.model,
+    units: variations * variants.length,
   });
   if (!reservation.reserved && reservation.status === "INSUFFICIENT") {
     throw new AppError(ERROR_CODES.CONFLICT, ZERO_AI_CREDITS_MESSAGE);

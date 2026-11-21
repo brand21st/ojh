@@ -15,6 +15,16 @@ import { loadAiCreditCatalog, publicAiCreditPackage } from "@/modules/ai-credits
 import { quoteAiCredits } from "@/modules/ai-credits/quote";
 import { getRazorpayConfig } from "@/modules/razorpay/config";
 import { createRazorpayOrder } from "@/modules/razorpay/client";
+import {
+  chargeWalletAi,
+  featureForReason,
+  reserveWalletAi,
+  settleWalletAi,
+  walletBillsAi,
+  walletCreditEquivalent,
+  type AiFeature,
+  type AiUsage,
+} from "@/modules/wallet/ai-billing";
 
 export {
   AI_CREDITS_BILLING_CYCLE,
@@ -32,6 +42,8 @@ export type AiCreditsSnapshot = {
   packPaise: number;
   packages: ReturnType<typeof publicAiCreditPackage>[];
   custom: { min: number; max: number };
+  /** True once this organization pays for AI from its wallet; remaining is then the balance in credit terms. */
+  walletBilled?: boolean;
 };
 
 export type AiCreditPackConfig = {
@@ -63,6 +75,7 @@ export async function getAiCreditPackConfig(): Promise<AiCreditPackConfig> {
 }
 
 export async function getAiCreditsRemaining(supabase: SupabaseClient, organizationId: string) {
+  if (await walletBillsAi(organizationId)) return walletCreditEquivalent(organizationId);
   const { data, error } = await supabase
     .from("organizations")
     .select("ai_credits_balance")
@@ -91,10 +104,10 @@ export async function getAiCreditsSnapshot(
   if (wallet.error) {
     logError("ai_credits.balance_load_failed", { message: wallet.error.message, organizationId });
   }
-  const remaining = Math.max(
-    0,
-    Math.floor(asNumber(wallet.data?.ai_credits_balance, DEFAULT_AI_CREDIT_START))
-  );
+  const walletBilled = await walletBillsAi(organizationId);
+  const remaining = walletBilled
+    ? await walletCreditEquivalent(organizationId)
+    : Math.max(0, Math.floor(asNumber(wallet.data?.ai_credits_balance, DEFAULT_AI_CREDIT_START)));
   const purchased = Math.max(0, Math.floor(asNumber(wallet.data?.ai_credits_purchased, 0)));
   const used = Math.max(0, Math.floor(asNumber(wallet.data?.ai_credits_used, 0)));
   const featured =
@@ -110,6 +123,7 @@ export async function getAiCreditsSnapshot(
     packPaise: featured?.pricePaise ?? DEFAULT_AI_CREDIT_PACK_PAISE,
     packages: catalog.packages.filter((item) => item.isActive !== false).map(publicAiCreditPackage),
     custom: catalog.custom,
+    walletBilled,
   };
 }
 
@@ -181,8 +195,27 @@ function ledgerDescription(type: string, reason: string) {
 export async function consumeAiCredit(
   supabase: AiCreditsDb,
   organizationId: string,
-  input?: { reason?: string; idempotencyKey?: string | null; qty?: number }
+  input?: {
+    reason?: string;
+    idempotencyKey?: string | null;
+    qty?: number;
+    /** Wallet billing: which feature, model and token usage to price. Ignored on legacy credits. */
+    feature?: AiFeature;
+    model?: string | null;
+    usage?: AiUsage;
+  }
 ) {
+  if (await walletBillsAi(organizationId)) {
+    const charge = await chargeWalletAi({
+      organizationId,
+      feature: featureForReason(input?.reason, input?.feature),
+      model: input?.model,
+      idempotencyKey: input?.idempotencyKey,
+      usage: input?.usage,
+    });
+    // null tells callers the operation was not paid for, so they drop the AI result.
+    return charge.charged ? walletCreditEquivalent(organizationId) : null;
+  }
   const { data, error } = await supabase.rpc("consume_ai_credit", {
     p_org: organizationId,
     p_reason: input?.reason ?? AI_CREDIT_REASON_EXTRACTION,
@@ -214,8 +247,24 @@ export type CreditReservationResult = {
 export async function reserveAiCredits(
   supabase: AiCreditsDb,
   organizationId: string,
-  input: { qty: number; reason: string; idempotencyKey: string }
+  input: { qty: number; reason: string; idempotencyKey: string; feature?: AiFeature; model?: string | null; units?: number }
 ): Promise<CreditReservationResult> {
+  if (await walletBillsAi(organizationId)) {
+    const held = await reserveWalletAi({
+      organizationId,
+      feature: featureForReason(input.reason, input.feature),
+      model: input.model,
+      idempotencyKey: input.idempotencyKey,
+      units: input.units ?? 1,
+    });
+    if (held.status === "ERROR") throw new AppError(ERROR_CODES.PROVIDER_ERROR, "Could not reserve wallet balance.");
+    return {
+      remaining: await walletCreditEquivalent(organizationId),
+      reserved: held.held,
+      duplicate: held.duplicate,
+      status: held.held ? "RESERVED" : held.duplicate ? "DUPLICATE" : "INSUFFICIENT",
+    };
+  }
   const { data, error } = await supabase.rpc("reserve_ai_credits", {
     p_org: organizationId,
     p_qty: Math.max(1, Math.floor(input.qty)),
@@ -238,8 +287,14 @@ export async function reserveAiCredits(
 export async function finalizeAiCreditReservation(
   supabase: AiCreditsDb,
   organizationId: string,
-  idempotencyKey: string
+  idempotencyKey: string,
+  usage?: AiUsage
 ) {
+  if (await walletBillsAi(organizationId)) {
+    const settled = await settleWalletAi({ organizationId, idempotencyKey, success: true, usage });
+    // NOT_FOUND: the job was held on legacy credits before this organization moved.
+    if (settled.status !== "NOT_FOUND") return { ok: settled.status !== "ERROR", status: settled.status };
+  }
   const { data, error } = await supabase.rpc("finalize_ai_credit_reservation", {
     p_org: organizationId,
     p_idempotency_key: idempotencyKey,
@@ -256,6 +311,10 @@ export async function releaseAiCreditReservation(
   organizationId: string,
   idempotencyKey: string
 ) {
+  if (await walletBillsAi(organizationId)) {
+    const settled = await settleWalletAi({ organizationId, idempotencyKey, success: false, reason: "job_failed" });
+    if (settled.status !== "NOT_FOUND") return { ok: settled.status !== "ERROR", status: settled.status };
+  }
   const { data, error } = await supabase.rpc("release_ai_credit_reservation", {
     p_org: organizationId,
     p_idempotency_key: idempotencyKey,
@@ -448,6 +507,10 @@ export async function startAiCreditsCheckout(
     credits?: unknown;
   }
 ) {
+  if (await walletBillsAi(input.organizationId)) {
+    // Credits bought now would never be spent: this workspace pays for AI from its wallet.
+    throw new AppError(ERROR_CODES.CONFLICT, "AI features now use your wallet balance. Recharge your wallet instead.");
+  }
   const razorpay = await getRazorpayConfig();
   if (!razorpay.keyId || !razorpay.keySecret) {
     throw new AppError(ERROR_CODES.INTEGRATION_NOT_CONNECTED, "Billing is not configured yet.");

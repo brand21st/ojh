@@ -4,6 +4,7 @@ import { AppError, ERROR_CODES } from "@/lib/api/errors";
 import { logError } from "@/lib/logger";
 import { AI_CREDIT_REASON_PROMPT_ENHANCE, ZERO_AI_CREDITS_MESSAGE } from "@/modules/ai-credits/constants";
 import { consumeAiCredit, getAiCreditsRemaining } from "@/modules/ai-credits/service";
+import { openRouterUsage, type AiUsageSink } from "@/modules/wallet/ai-billing";
 import {
   AI_IMAGE_ASPECTS,
   AI_IMAGE_PRESETS,
@@ -74,7 +75,8 @@ function parseMessageContent(content: string) {
 async function rewriteWithOpenRouter(
   input: z.infer<typeof enhanceStudioPromptSchema>,
   apiKey: string,
-  model: string
+  model: string,
+  sink?: AiUsageSink
 ) {
   const user = [
     input.productName?.trim() ? `Product: ${input.productName.trim()}` : null,
@@ -119,6 +121,7 @@ async function rewriteWithOpenRouter(
       `OpenRouter request failed (${response.status}).`;
     throw new Error(message);
   }
+  if (sink) Object.assign(sink, openRouterUsage(json), { model });
   const content = json.choices?.[0]?.message?.content?.trim() || "";
   if (!content) throw new Error("OpenRouter returned an empty prompt.");
   return parseMessageContent(content);
@@ -140,10 +143,14 @@ export async function enhanceStudioPrompt(
     );
   }
   try {
-    const prompt = await rewriteWithOpenRouter(input, config.apiKey, config.model);
+    const usage: AiUsageSink = {};
+    const prompt = await rewriteWithOpenRouter(input, config.apiKey, config.model, usage);
     const remaining = await consumeAiCredit(options.supabase, options.organizationId, {
       reason: AI_CREDIT_REASON_PROMPT_ENHANCE,
       idempotencyKey: input.idempotencyKey ?? null,
+      feature: "prompt_enhance",
+      model: usage.model,
+      usage,
     });
     return { prompt, creditsRemaining: remaining ?? creditsRemaining - 1 };
   } catch (error) {

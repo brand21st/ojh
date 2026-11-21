@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { logError } from "@/lib/logger";
 import { consumeAiCredit } from "@/modules/ai-credits/service";
+import { openRouterUsage, type AiUsageSink } from "@/modules/wallet/ai-billing";
 import {
   OPENROUTER_API_BASE,
   getPlatformOpenRouterConfig,
@@ -150,7 +151,8 @@ async function complete(apiKey: string, model: string, user: string, schema: boo
  */
 export async function requestAiAddressSuggestion(
   contact: NormalizedShopifyShipping,
-  config?: { apiKey: string; model: string }
+  config?: { apiKey: string; model: string },
+  sink?: AiUsageSink
 ): Promise<AiAddressSuggestion | null> {
   const resolved = config ?? (await getPlatformOpenRouterConfig());
   if (!resolved.apiKey || !resolved.model) return null;
@@ -181,6 +183,7 @@ export async function requestAiAddressSuggestion(
   const json = (await response.json().catch(() => null)) as {
     choices?: Array<{ message?: { content?: string } }>;
   } | null;
+  if (sink) Object.assign(sink, openRouterUsage(json), { model: resolved.model });
   const content = json?.choices?.[0]?.message?.content ?? "";
   return parseContent(content);
 }
@@ -194,7 +197,8 @@ export async function maybeAiNormalizeShipping(
     const config = await getPlatformOpenRouterConfig();
     if (!config.enabled) return contact;
     return await withAddressAiSlot(async () => {
-      const suggestion = await requestAiAddressSuggestion(contact, config);
+      const usage: AiUsageSink = {};
+      const suggestion = await requestAiAddressSuggestion(contact, config, usage);
       if (!suggestion) return contact;
       const applied = applyAiAddressSuggestion(contact, suggestion);
       if (!applied) return contact;
@@ -202,6 +206,9 @@ export async function maybeAiNormalizeShipping(
         const remaining = await consumeAiCredit(options.supabase, options.organizationId, {
           reason: "AI_ADDRESS_EXTRACTION",
           idempotencyKey: `shopify-address:${options.organizationId}:${contact.original.address1}:${contact.pincode}`,
+          feature: "address_checker",
+          model: usage.model,
+          usage,
         });
         if (remaining == null) return contact;
       }

@@ -142,6 +142,7 @@ describe("tenant wallet", () => {
       end $$;
     `);
     await db.exec(readFileSync("supabase/migrations/20261121160000_wallet_recharge_invoices.sql", "utf8"));
+    await db.exec(readFileSync("supabase/migrations/20261121180000_wallet_ai_usage.sql", "utf8"));
   }, 60000);
 
   afterAll(async () => {
@@ -458,7 +459,8 @@ describe("tenant wallet", () => {
       ]);
       expect((await rpc("wallet_quote('ai',$1,'*','*','*','address_check')", [org])).chargeMicros).toBe("100000");
       expect((await rpc("wallet_quote('ai',$1,'*','*','*','address_check')", [otherOrg])).chargeMicros).toBe("200000");
-      expect((await rpc("wallet_quote('ai',$1,'*','*','*','unknown_feature')", [org])).status).toBe("NO_PRICE");
+      // Phase 3 seeds a catch-all AI price (Rs 0.20, the old credit rate) for features without their own rule.
+      expect((await rpc("wallet_quote('ai',$1,'*','*','*','unknown_feature')", [org])).chargeMicros).toBe("200000");
     });
 
     it("matches the TypeScript price calculation", async () => {
@@ -736,6 +738,129 @@ describe("tenant wallet", () => {
       await rejected("select wallet_issue_recharge_invoice(gen_random_uuid())", [], /permission denied/);
       await rejected("select * from wallet_recharges_missing_invoice(1)", [], /permission denied/);
       expect(Number(await scalar("select count(*) from wallet_recharge_invoices"))).toBe(0);
+      await db.exec("reset role");
+    });
+  });
+  describe("AI usage billing (phase 3)", () => {
+    async function migrate() {
+      await db.query("update organizations set ai_credits_balance = 0 where id=$1", [org]);
+      expect((await rpc("wallet_migrate_ai_credits($1)", [org])).status).toBe("MIGRATED");
+    }
+
+    it("bills an organization from its wallet only after its credits moved", async () => {
+      expect(await scalar("select wallet_ai_mode($1)", [org])).toBe("credits");
+      await migrate();
+      expect(await scalar("select wallet_ai_mode($1)", [org])).toBe("wallet");
+      expect(await scalar("select wallet_ai_mode($1)", [otherOrg])).toBe("credits");
+    });
+
+    it("seeds today's credit prices so the switch changes nothing", async () => {
+      const q = async (feature: string, units = 1) =>
+        (await rpc("wallet_ai_quote($1,$2,'openai/gpt-4o-mini',$3)", [org, feature, units])).chargeMicros;
+      expect(await q("data_extraction")).toBe("200000");
+      expect(await q("address_validation")).toBe("200000");
+      expect(await q("image_studio", 3)).toBe("6000000");
+      expect(await q("some_future_feature")).toBe("200000");
+    });
+
+    it("charges once per key, refuses without balance, and retries after a recharge", async () => {
+      await migrate();
+      const first = await rpc("wallet_ai_charge($1,'data_extraction','m','wa-1',1,900,120)", [org]);
+      expect(first.status).toBe("INSUFFICIENT_BALANCE");
+      expect(await scalar("select status || ':' || reject_reason from ai_usage_records where idempotency_key='wa-1'")).toBe(
+        "REJECTED:INSUFFICIENT_BALANCE"
+      );
+      await credit(RUPEE);
+      const retried = await rpc("wallet_ai_charge($1,'data_extraction','m','wa-1',1,900,120)", [org]);
+      expect(retried).toMatchObject({ status: "CHARGED", chargeMicros: "200000" });
+      expect((await rpc("wallet_ai_charge($1,'data_extraction','m','wa-1',1,900,120)", [org])).status).toBe("DUPLICATE");
+      expect(await balance()).toBe(RUPEE - 200000);
+      const record = await one(
+        "select feature, model, input_tokens::text, output_tokens::text, charge_micros::text, status from ai_usage_records where idempotency_key='wa-1'"
+      );
+      expect(record).toEqual({
+        feature: "data_extraction",
+        model: "m",
+        input_tokens: "900",
+        output_tokens: "120",
+        charge_micros: "200000",
+        status: "CHARGED",
+      });
+      expect(Number(await scalar("select lifetime_ai_micros from wallets where organization_id=$1", [org]))).toBe(200000);
+    });
+
+    it("prices tokens per model when Super Admin sets token rates", async () => {
+      await migrate();
+      await credit(10 * RUPEE);
+      await rpc(
+        `wallet_set_pricing_rule('{"service":"ai","aiFeature":"product_copy","aiModel":"anthropic/claude","perUnitMicros":"50000","per1kInputTokensMicros":"3000","per1kOutputTokensMicros":"15000","markupBps":2000}'::jsonb,$1)`,
+        [admin]
+      );
+      // 50000 + 2000 in * 3/1k = 6000 + 400 out * 15/1k = 6000 -> 62000 + 20% = 74400
+      const charged = await rpc("wallet_ai_charge($1,'product_copy','anthropic/claude','pc-1',1,2000,400)", [org]);
+      expect(charged.chargeMicros).toBe("74400");
+      const other = await rpc("wallet_ai_charge($1,'product_copy','openai/gpt-4o-mini','pc-2',1,2000,400)", [org]);
+      expect(other.chargeMicros).toBe("200000");
+    });
+
+    it("holds an image job, charges the actual usage up to the hold, and releases failures", async () => {
+      await migrate();
+      await credit(10 * RUPEE);
+      const held = await rpc("wallet_ai_reserve($1,'image_studio','img','job-1',3)", [org]);
+      expect(held).toMatchObject({ status: "HELD", holdMicros: "6000000" });
+      expect(await reserved()).toBe(6000000);
+      expect((await rpc("wallet_ai_reserve($1,'image_studio','img','job-1',3)", [org])).status).toBe("DUPLICATE");
+      const settled = await rpc("wallet_ai_settle($1,'job-1',true)", [org]);
+      expect(settled).toMatchObject({ status: "CHARGED", chargeMicros: "6000000" });
+      expect((await rpc("wallet_ai_settle($1,'job-1',true)", [org])).status).toBe("DUPLICATE");
+      expect(await balance()).toBe(4 * RUPEE);
+      expect(await reserved()).toBe(0);
+
+      await rpc("wallet_ai_reserve($1,'image_studio','img','job-2',1)", [org]);
+      expect(await rpc("wallet_ai_settle($1,'job-2',false,null,null,'model timeout')", [org])).toMatchObject({ status: "RELEASED" });
+      expect(await balance()).toBe(4 * RUPEE);
+      expect(await reserved()).toBe(0);
+      expect((await rpc("wallet_ai_reserve($1,'image_studio','img','job-3',3)", [org])).status).toBe("INSUFFICIENT_BALANCE");
+      expect((await rpc("wallet_ai_settle($1,'nope',true)", [org])).status).toBe("NOT_FOUND");
+    });
+
+    it("never charges more than was held when tokens run over the estimate", async () => {
+      await migrate();
+      await credit(10 * RUPEE);
+      await rpc(
+        `wallet_set_pricing_rule('{"service":"ai","aiFeature":"cover_studio","per1kOutputTokensMicros":"1000000"}'::jsonb,$1)`,
+        [admin]
+      );
+      expect((await rpc("wallet_ai_reserve($1,'cover_studio','img','cv-1',1,0,1000)", [org])).holdMicros).toBe("1000000");
+      const settled = await rpc("wallet_ai_settle($1,'cv-1',true,0,3000)", [org]);
+      expect(settled).toMatchObject({ chargeMicros: "1000000", actualMicros: "3000000" });
+      expect(await scalar("select metadata->>'underBilledMicros' from ai_usage_records where idempotency_key='cv-1'")).toBe("2000000");
+    });
+
+    it("marks a job abandoned once its hold expired", async () => {
+      await migrate();
+      await credit(10 * RUPEE);
+      const held = await rpc("wallet_ai_reserve($1,'image_studio','img','job-x',1)", [org]);
+      await db.query("update wallet_reservations set expires_at = now() - interval '1 minute' where id=$1", [held.reservationId]);
+      await scalar("select wallet_expire_reservations(10)");
+      expect(Number(await scalar("select wallet_ai_abandon_stale(10)"))).toBe(1);
+      expect(await scalar("select status from ai_usage_records where idempotency_key='job-x'")).toBe("ABANDONED");
+      expect((await rpc("wallet_ai_settle($1,'job-x',true)", [org])).status).toBe("DUPLICATE");
+      expect(await balance()).toBe(10 * RUPEE);
+    });
+
+    it("keeps AI billing functions and other tenants' usage away from merchants", async () => {
+      await migrate();
+      await credit(RUPEE);
+      await rpc("wallet_ai_charge($1,'data_extraction','m','own',1,0,0)", [org]);
+      await db.query("update organizations set ai_credits_balance = 0 where id=$1", [otherOrg]);
+      await rpc("wallet_migrate_ai_credits($1)", [otherOrg]);
+      await credit(RUPEE, "seed", otherOrg);
+      await rpc("wallet_ai_charge($1,'data_extraction','m','theirs',1,0,0)", [otherOrg]);
+      await db.exec(`set local role authenticated; select set_config('request.jwt.claim.sub','${merchant}',true);`);
+      expect(Number(await scalar("select count(*) from ai_usage_records"))).toBe(1);
+      await rejected("select wallet_ai_charge($1,'x','m','k',1,0,0)", [org], /permission denied/);
+      await rejected("select wallet_ai_mode($1)", [org], /permission denied/);
       await db.exec("reset role");
     });
   });
