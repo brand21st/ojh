@@ -1,4 +1,3 @@
-import { createTransport } from "nodemailer";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { logError, logInfo } from "@/lib/logger";
 import { formatMicros, toMicros } from "@/modules/wallet/money";
@@ -20,6 +19,13 @@ export type ClaimedAlert = {
 };
 
 type Mailer = { sendMail: (message: Record<string, unknown>) => Promise<unknown> };
+
+function createTransport(options: Record<string, unknown>) {
+  const load = new Function("name", "return require(name)") as (name: string) => {
+    createTransport: (opts: Record<string, unknown>) => Mailer;
+  };
+  return load("nodemailer").createTransport(options);
+}
 
 function env(name: string) {
   return process.env[`WALLET_SMTP_${name}`]?.trim() || process.env[`MANIFEST_SMTP_${name}`]?.trim() || "";
