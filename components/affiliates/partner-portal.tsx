@@ -60,9 +60,8 @@ export type PayoutOverview = {
   minimumPaise: string;
   nextPayoutDate: string | null;
   payoutDay: number;
-  account: { masked: string; addedAt: string; heldUntil: string } | null;
+  account: { masked: string; addedAt: string } | null;
   openPayout: { id: string; amount_paise: number; status: string; hold_reason: string | null; created_at: string } | null;
-  rules: { maxPaise: string; holdHours: number };
 };
 
 const money = (value: unknown) => formatPaiseInr(value ?? 0);
@@ -212,7 +211,7 @@ function ApplicationCard({ email, profile }: { email?: string; profile?: Profile
     <Card>
       <CardHeader>
         <CardTitle>{profile ? "Partner details" : "Apply to become a PostBus partner"}</CardTitle>
-        <CardDescription>{profile ? "Keep these up to date — we use them to contact you." : "Earn recurring commission when sellers you refer subscribe. We review every application within 2 working days."}</CardDescription>
+        <CardDescription>{profile ? "Keep these up to date — we use them to contact you." : "Earn recurring commission when sellers you refer subscribe. You're approved instantly and get your referral link right away."}</CardDescription>
       </CardHeader>
       <CardContent>
         <form className="grid gap-4 sm:grid-cols-2" onSubmit={submit}>
@@ -237,7 +236,7 @@ function ApplicationCard({ email, profile }: { email?: string; profile?: Profile
             <span>I accept the <Link className="font-medium text-brand underline-offset-4 hover:underline" href="/partner/terms">partner terms</Link>.</span>
           </label>
           <div className="flex flex-wrap items-center gap-3 sm:col-span-2">
-            <Button disabled={mutation.isPending}>{mutation.isPending ? "Saving…" : profile ? "Save details" : "Submit application"}</Button>
+            <Button disabled={mutation.isPending}>{mutation.isPending ? "Saving…" : profile ? "Save details" : "Join and get my link"}</Button>
             {mutation.error ? <p role="alert" className="text-sm text-red-700 dark:text-red-300">{mutation.error.message}</p> : null}
             {mutation.isSuccess ? <p role="status" className="flex items-center gap-1.5 text-sm text-emerald-700 dark:text-emerald-300"><Check className="size-4" /> Saved</p> : null}
           </div>
@@ -293,11 +292,6 @@ const PAYOUT_STATUS: Record<string, { label: string; tone: "success" | "warning"
 };
 
 const HOLD_COPY: Record<string, string> = {
-  FIRST_PAYOUT: "First payouts get a quick manual check.",
-  NEW_ACCOUNT: "Your UPI ID was added recently, so this payout gets a quick check.",
-  OVER_PARTNER_CAP: "Larger payouts get a quick manual check.",
-  OVER_DAILY_CAP: "It'll be sent on the next payout run.",
-  RISK_FLAG: "Our team is reviewing your account.",
   NOT_ELIGIBLE: "Our team is reviewing your account.",
 };
 
@@ -932,8 +926,6 @@ function UpiAccountCard({ overview }: { overview?: PayoutOverview }) {
     onSuccess: () => { setEditing(false); void client.invalidateQueries({ queryKey: ["partner"] }); },
   });
   const account = overview?.account;
-  const [now] = useState(() => Date.now());
-  const held = account && Date.parse(account.heldUntil) > now;
   return (
     <Card>
       <CardHeader>
@@ -948,7 +940,6 @@ function UpiAccountCard({ overview }: { overview?: PayoutOverview }) {
               <p className="font-semibold text-ink">{account.masked}</p>
               <p className="mt-1 text-xs text-muted">Added {fmtDate(account.addedAt)}</p>
             </div>
-            {held ? <p className="text-xs text-amber-800 dark:text-amber-300">For your security, payouts to a newly added UPI ID get a quick check until {fmtDate(account.heldUntil)}.</p> : null}
             <Button variant="secondary" size="sm" onClick={() => setEditing(true)}>Change UPI ID</Button>
           </>
         ) : (
@@ -966,7 +957,6 @@ function UpiAccountCard({ overview }: { overview?: PayoutOverview }) {
               <Input name="upi" required pattern="[\w.\-]{2,100}@[\w.\-]{2,50}" placeholder="yourname@okhdfcbank" autoComplete="off" inputMode="email" />
               <span className="text-xs text-muted">Double-check it — payouts to a wrong UPI ID can&apos;t always be recovered.</span>
             </label>
-            {overview && overview.rules.holdHours > 0 ? <p className="text-xs text-muted">New UPI IDs get a {overview.rules.holdHours}-hour security check before the first automatic payout.</p> : null}
             <div className="flex gap-2">
               <Button disabled={mutation.isPending}>{mutation.isPending ? "Saving…" : "Save UPI ID"}</Button>
               {account ? <Button type="button" variant="ghost" onClick={() => setEditing(false)}>Cancel</Button> : null}

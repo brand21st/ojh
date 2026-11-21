@@ -45,6 +45,8 @@ describe("affiliate PostgreSQL transactions and RLS", () => {
         await db.exec("begin");
         await db.query("insert into auth.users(id) values($1),($2),($3)", [u, merchant, other]);
         await db.query("insert into platform_admins values($1)", [u]);
+        // These tests cover the manual settlement path, so pause RazorpayX sending.
+        await db.query("update affiliate_settings set auto_payout_enabled=false");
         await db.query("insert into affiliate_profiles(id,user_id,status,application,terms_version) values($1,$2,'APPROVED','{}','v1')", [a, u]);
         await db.query("insert into organizations(id,name) values($1,'Merchant')", [org]);
         await db.query("insert into subscriptions(id,organization_id) values($1,$2)", [sub, org]);

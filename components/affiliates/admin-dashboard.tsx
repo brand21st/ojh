@@ -164,30 +164,20 @@ export function AffiliateAdminDashboard({ payoutsEnabled, accrualEnabled, razorp
 }
 
 function autoPayoutAction(program: Row): PendingAction {
-  const rupees = (v: unknown, d: number) => String(Number(v ?? d) / 100);
   return {
     title: "Automatic payouts",
-    description: "Pays cleared balances to partner UPI IDs through RazorpayX on the payout day. Payouts over a limit, to a new UPI ID, from a flagged partner, or a partner's first payout wait for your approval.",
+    description: "Pays cleared balances to partner UPI IDs through RazorpayX on the payout day, with no manual approval. Turning it off pauses sending; requests wait until it is back on.",
     confirmLabel: "Save",
     path: "auto-settings",
     successMessage: "Automatic payout settings saved.",
     fields: [
-      { name: "enabled", label: "Automatic payouts", type: "select", defaultValue: String(Boolean(program.auto_payout_enabled)), options: [{ value: "false", label: "Off — payouts are manual" }, { value: "true", label: "On — pay through RazorpayX" }] },
+      { name: "enabled", label: "Automatic payouts", type: "select", defaultValue: String(Boolean(program.auto_payout_enabled)), options: [{ value: "true", label: "On — pay through RazorpayX" }, { value: "false", label: "Off — pause sending" }] },
       { name: "day", label: "Payout day of the month (1–28, IST)", inputMode: "numeric", defaultValue: str(program.auto_payout_day, "5") },
-      { name: "max", label: "Per-partner auto limit (₹)", inputMode: "decimal", defaultValue: rupees(program.auto_payout_max_paise, 1000000), help: "Larger payouts are held for approval." },
-      { name: "daily", label: "Daily total limit (₹)", inputMode: "decimal", defaultValue: rupees(program.auto_payout_daily_cap_paise, 5000000), help: "Across all partners, per IST day." },
-      { name: "hold", label: "Hold new UPI IDs for (hours)", inputMode: "numeric", defaultValue: str(program.new_account_hold_hours, "72") },
     ],
     build: (v) => {
       const day = Number(v.day);
-      const hold = Number(v.hold);
-      const max = rupeesToPaise(v.max);
-      const daily = rupeesToPaise(v.daily);
       if (!Number.isInteger(day) || day < 1 || day > 28) return "Payout day must be 1–28.";
-      if (!Number.isInteger(hold) || hold < 0 || hold > 720) return "Hold must be 0–720 hours.";
-      if (!max || !daily) return "Enter both limits in rupees.";
-      if (daily < max) return "The daily limit should be at least the per-partner limit.";
-      return { autoPayoutEnabled: v.enabled === "true", autoPayoutDay: day, autoPayoutMaxPaise: max, autoPayoutDailyCapPaise: daily, newAccountHoldHours: hold };
+      return { autoPayoutEnabled: v.enabled === "true", autoPayoutDay: day };
     },
   };
 }
@@ -342,7 +332,7 @@ const HOLD_LABEL: Record<string, string> = {
 
 function Payouts({ payoutsEnabled, onAction, onOpen }: { payoutsEnabled: boolean; onAction: (a: PendingAction) => void; onOpen: (id: string) => void }) {
   const [page, setPage] = useState(0);
-  const [status, setStatus] = useState("REVIEW");
+  const [status, setStatus] = useState("");
   const [revealed, setRevealed] = useState<Row | null>(null);
   const query = useSection("payouts", { page, status });
   const rows = query.data ?? [];

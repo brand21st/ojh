@@ -1,14 +1,19 @@
--- Automatic RazorpayX partner payouts with safety caps, and the partner email outbox.
--- Additive. Automation is OFF by default (auto_payout_enabled=false).
+-- Automatic RazorpayX partner payouts (no manual approval), instant partner approval,
+-- and the partner email outbox. Automation is ON by default; the admin toggle only pauses it.
 -- Local file. Do not apply remotely without separate authorization.
 
 -- ---------- settings ----------
 alter table public.affiliate_settings
-  add column if not exists auto_payout_enabled boolean not null default false,
-  add column if not exists auto_payout_day smallint not null default 5 check (auto_payout_day between 1 and 28),
-  add column if not exists auto_payout_max_paise bigint not null default 1000000 check (auto_payout_max_paise > 0),
-  add column if not exists auto_payout_daily_cap_paise bigint not null default 5000000 check (auto_payout_daily_cap_paise > 0),
-  add column if not exists new_account_hold_hours integer not null default 72 check (new_account_hold_hours between 0 and 720);
+  add column if not exists auto_payout_enabled boolean not null default true,
+  add column if not exists auto_payout_day smallint not null default 5 check (auto_payout_day between 1 and 28);
+
+-- ---------- partners are approved instantly (no manual review) ----------
+alter table public.affiliate_profiles alter column status set default 'APPROVED';
+with approved as (
+  update public.affiliate_profiles set status='APPROVED', rejection_reason=null where status='PENDING' returning id
+)
+insert into public.affiliate_audit_logs(affiliate_id,action,details)
+select id,'status',jsonb_build_object('status','APPROVED','reason','Automatic approval') from approved;
 
 -- ---------- payout requests ----------
 alter table public.affiliate_payout_requests
@@ -61,22 +66,13 @@ grant all on public.affiliate_razorpay_accounts, public.affiliate_email_outbox t
 -- ---------- safety gate ----------
 create or replace function public.affiliate_payout_gate(p_id uuid) returns text
 language plpgsql stable set search_path=public as $$
-declare r public.affiliate_payout_requests; s public.affiliate_settings; acct timestamptz; today bigint;
+declare r public.affiliate_payout_requests;
 begin
+  -- No manual approval: only a partner who is not approved, or who owes a refund recovery, is held.
   select * into r from affiliate_payout_requests where id=p_id;
-  select * into s from affiliate_settings where id=true;
   if r.id is null then return 'NOT_ELIGIBLE'; end if;
   if not exists(select 1 from affiliate_profiles where id=r.affiliate_id and status='APPROVED')
      or (affiliate_balance(r.affiliate_id)->>'recoverable')::bigint>0 then return 'NOT_ELIGIBLE'; end if;
-  if exists(select 1 from affiliate_audit_logs where affiliate_id=r.affiliate_id and action='risk.identity_overlap') then return 'RISK_FLAG'; end if;
-  if not exists(select 1 from affiliate_payout_requests p where p.affiliate_id=r.affiliate_id and p.id<>r.id and p.status='PAID') then return 'FIRST_PAYOUT'; end if;
-  select created_at into acct from affiliate_payout_accounts where id=r.account_id;
-  if acct>now()-make_interval(hours=>s.new_account_hold_hours) then return 'NEW_ACCOUNT'; end if;
-  if r.amount_paise>s.auto_payout_max_paise then return 'OVER_PARTNER_CAP'; end if;
-  select coalesce(sum(amount_paise),0) into today from affiliate_payout_requests
-    where send_via='RAZORPAYX' and id<>r.id and status in ('PROCESSING','PAID')
-      and coalesce(sent_at,created_at)>=date_trunc('day',now() at time zone 'Asia/Kolkata') at time zone 'Asia/Kolkata';
-  if today+r.amount_paise>s.auto_payout_daily_cap_paise then return 'OVER_DAILY_CAP'; end if;
   return 'OK';
 end $$;
 
@@ -258,10 +254,7 @@ begin
  if length(coalesce(p_data->>'reason',''))<3 then raise exception 'Reason required'; end if;
  update affiliate_settings set
    auto_payout_enabled=(p_data->>'autoPayoutEnabled')::boolean,
-   auto_payout_day=(p_data->>'autoPayoutDay')::smallint,
-   auto_payout_max_paise=(p_data->>'autoPayoutMaxPaise')::bigint,
-   auto_payout_daily_cap_paise=(p_data->>'autoPayoutDailyCapPaise')::bigint,
-   new_account_hold_hours=(p_data->>'newAccountHoldHours')::integer
+   auto_payout_day=(p_data->>'autoPayoutDay')::smallint
  where id=true;
  insert into affiliate_audit_logs(affiliate_id,actor_id,action,details) values(null,p_actor,'settings.auto_payout',p_data-'pin');
 end $$;
@@ -285,7 +278,7 @@ declare k text;
 begin
  if new.affiliate_id is null then return new; end if;
  k:=case new.action
-   when 'application.submitted' then 'application_received'
+   when 'application.submitted' then case when exists(select 1 from affiliate_profiles where id=new.affiliate_id and status='APPROVED') then 'status_approved' else 'application_received' end
    when 'status' then 'status_'||lower(coalesce(new.details->>'status',''))
    when 'commission.first_cleared' then 'first_commission'
    when 'payout.sent' then 'payout_sent'

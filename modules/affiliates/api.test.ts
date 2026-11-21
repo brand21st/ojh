@@ -56,7 +56,7 @@ describe("automatic payout API helpers", () => {
     });
     it("validates admin automatic payout settings", async () => {
         const { autoSettingsSchema } = await import("./api");
-        expect(autoSettingsSchema.safeParse({ autoPayoutEnabled: true, autoPayoutDay: 5, autoPayoutMaxPaise: 1000000, autoPayoutDailyCapPaise: 5000000, newAccountHoldHours: 72, reason: "Go live" }).success).toBe(true);
-        expect(autoSettingsSchema.safeParse({ autoPayoutEnabled: true, autoPayoutDay: 31, autoPayoutMaxPaise: 1, autoPayoutDailyCapPaise: 1, newAccountHoldHours: 72, reason: "Go live" }).success).toBe(false);
+        expect(autoSettingsSchema.safeParse({ autoPayoutEnabled: true, autoPayoutDay: 5, reason: "Go live" }).success).toBe(true);
+        expect(autoSettingsSchema.safeParse({ autoPayoutEnabled: true, autoPayoutDay: 31, reason: "Go live" }).success).toBe(false);
     });
 });

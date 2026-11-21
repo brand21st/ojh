@@ -26,9 +26,8 @@ const overview = {
   minimumPaise: "100000",
   nextPayoutDate: "2026-12-05",
   payoutDay: 5,
-  account: { masked: "UPI •••3210", addedAt: "2026-10-02T00:00:00Z", heldUntil: "2026-10-05T00:00:00Z" },
+  account: { masked: "UPI •••3210", addedAt: "2026-10-02T00:00:00Z" },
   openPayout: null,
-  rules: { maxPaise: "1000000", holdHours: 72 },
 };
 const responses: Record<string, unknown> = {
   me,
@@ -38,7 +37,7 @@ const responses: Record<string, unknown> = {
   accounts: [{ id: "acct-1", masked_details: "UPI •••3210" }],
   payouts: [
     { id: "po1", amount_paise: 1000000, status: "PAID", utr: "UTR998877", created_at: "2026-11-05T05:00:00Z", settled_at: "2026-11-05T05:10:00Z", origin: "AUTO" },
-    { id: "po2", amount_paise: 250000, status: "REVIEW", hold_reason: "NEW_ACCOUNT", created_at: "2026-11-20T05:00:00Z" },
+    { id: "po2", amount_paise: 250000, status: "REVIEW", hold_reason: "NOT_ELIGIBLE", created_at: "2026-11-20T05:00:00Z" },
   ],
 };
 vi.mock("@/lib/hooks/use-api", () => ({
@@ -86,7 +85,7 @@ describe("partner portal", () => {
     expect(text).toContain("5th of every month");
     expect(text).toContain("UTR998877");
     expect(text).toContain("Being reviewed");
-    expect(text).toContain("UPI ID was added recently");
+    expect(text).toContain("reviewing your account");
     expect(text).toContain("Request ₹4,250.50");
   });
 });
