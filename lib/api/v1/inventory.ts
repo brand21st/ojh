@@ -371,6 +371,11 @@ export async function handleInventoryRoutes(
   if (slugs[0] === "inventory" && slugs[1] === "storefront" && (slugs[2] === "builder" || slugs[2] === "versions" || slugs[2] === "analytics")) {
     const builder = await import("@/modules/storefront/builder");
     if (key === "GET inventory/storefront/builder") return builder.getStoreBuilderState(supabase, ctx);
+    if (key === "GET inventory/storefront/builder/ai" || key === "POST inventory/storefront/builder/ai") {
+      const ai = await import("@/modules/storefront/ai-site");
+      if (method === "GET") return ai.siteBuilderAiStatus(supabase, ctx);
+      return ai.generateAiSite(supabase, ctx, ai.aiSiteRequestSchema.parse(await request.json()));
+    }
     if (key === "GET inventory/storefront/builder/product-summaries") {
       const ids = z.array(z.string().uuid()).max(100).parse((request.nextUrl.searchParams.get("ids") ?? "").split(",").filter(Boolean));
       const { loadFeaturedProductSummaries } = await import("@/modules/storefront/service");

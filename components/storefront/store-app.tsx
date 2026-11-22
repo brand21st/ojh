@@ -510,7 +510,7 @@ function StoreAppInner({
             seenCovers.current.add(slideId);
           }
           trackEvent(type, { slideId });
-        }} detail={product ? <MarketplaceProduct key={product.id} product={product} quantity={cart.find((line) => line.product.id === product.id)?.quantity ?? 0} cartQuantity={(id) => cart.find((line) => line.product.id === id)?.quantity ?? 0} related={related} categories={store.categories} workspace={isPreview ? undefined : workspaceKey} linkRef={apiRef} preview={isPreview} onBack={closeProduct} onAdd={addToCart} onDecrease={decrease} onOpenProduct={openProduct} onBuyNow={buyNow} /> : undefined} /> : <StoreHome
+        }} detail={product ? <MarketplaceProduct key={product.id} product={product} quantity={cart.find((line) => line.product.id === product.id)?.quantity ?? 0} cartQuantity={(id) => cart.find((line) => line.product.id === id)?.quantity ?? 0} related={related} categories={store.categories} pageConfig={store.layout?.productPage} workspace={isPreview ? undefined : workspaceKey} linkRef={apiRef} preview={isPreview} onBack={closeProduct} onAdd={addToCart} onDecrease={decrease} onOpenProduct={openProduct} onBuyNow={buyNow} /> : undefined} /> : <StoreHome
         store={store}
         cart={cart}
         query={query}

@@ -92,8 +92,8 @@ export const SECTION_SETTINGS = {
     title: title("Shop by category"),
     eyebrow: text(40).default(""),
     categoryIds: z.array(z.string().uuid()).max(12).catch([]).default([]),
-    /** tiles: square tiles; mosaic: one large + smaller photo tiles; photo: photos with captions; rows: banner tile + products per category. */
-    style: z.enum(["tiles", "mosaic", "photo", "rows"]).catch("tiles").default("tiles"),
+    /** tiles: square tiles; round: circular photos in a swipeable row; mosaic: one large + smaller photo tiles; photo: photos with captions; rows: banner tile + products per category. */
+    style: z.enum(["tiles", "round", "mosaic", "photo", "rows"]).catch("tiles").default("tiles"),
   }),
   featured_products: z.object({ title: title("Featured picks") }),
   collection: z.object({ title: title("Collection"), categoryId: z.string().uuid().nullable().catch(null).default(null), limit: z.number().int().min(2).max(12).catch(8).default(8) }),
@@ -105,7 +105,12 @@ export const SECTION_SETTINGS = {
     imageUrl: href.default(""),
     tone: z.enum(["accent", "dark", "light"]).catch("accent").default("accent"),
   }),
-  video_shopping: z.object({ title: title("Watch and shop"), videos: z.array(videoSchema).max(6).catch([]).default([]) }),
+  video_shopping: z.object({
+    title: title("Watch and shop"),
+    /** grid: 16:9 players; reels: vertical 9:16 cards with the product pinned under each video. */
+    layout: z.enum(["grid", "reels"]).catch("grid").default("grid"),
+    videos: z.array(videoSchema).max(8).catch([]).default([]),
+  }),
   bundles: z.object({ title: title("Better together") }),
   upsell: z.object({ title: title("You may also like") }),
   best_sellers: z.object({ title: title("Best sellers") }),
@@ -222,6 +227,14 @@ export const whatsappButtonSchema = z.object({
   message: text(200).default("Hi, I have a question about your products."),
 });
 
+/** Product page extras shown on every product: short selling points, a guarantee line, the related-products heading. */
+export const productPageSchema = z.object({
+  highlights: z.array(z.object({ title: z.string().trim().min(1).max(40), body: text(90).default("") })).max(4).catch([]).default([]),
+  guarantee: text(160).default(""),
+  relatedTitle: title("You may also like"),
+});
+export type ProductPageConfig = z.infer<typeof productPageSchema>;
+
 export const storeLayoutSchema = z.object({
   version: z.literal(1).catch(1).default(1),
   themeId: z.string().trim().max(40).catch("classic").default("classic"),
@@ -229,6 +242,7 @@ export const storeLayoutSchema = z.object({
   header: layoutHeaderSchema.catch(layoutHeaderSchema.parse({})).default(layoutHeaderSchema.parse({})),
   sections: z.unknown().transform(normalizeSections),
   whatsappButton: whatsappButtonSchema.catch(whatsappButtonSchema.parse({})).default(whatsappButtonSchema.parse({})),
+  productPage: productPageSchema.catch(productPageSchema.parse({})).default(productPageSchema.parse({})),
 });
 export type StoreLayout = z.infer<typeof storeLayoutSchema>;
 

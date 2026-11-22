@@ -7,7 +7,7 @@ import { findTheme, installTheme } from "@/modules/storefront/layout/themes";
 export const dynamic = "force-dynamic";
 
 /** Dev-only. `?theme=<id>` renders the Store Builder layout for that theme with sample section content. */
-export default async function MarketplaceFixturePage({ searchParams }: { searchParams: Promise<{ empty?: string; theme?: string }> }) {
+export default async function MarketplaceFixturePage({ searchParams }: { searchParams: Promise<{ empty?: string; theme?: string; cats?: string; videos?: string }> }) {
   if (process.env.NODE_ENV === "production") notFound();
   const params = await searchParams;
   const empty = params.empty === "1";
@@ -23,16 +23,28 @@ export default async function MarketplaceFixturePage({ searchParams }: { searchP
       menu: [{ label: "All products", kind: "section", value: "catalog" }, { label: "Shipping", kind: "policy", value: "shipping" }],
     },
     whatsappButton: { enabled: true },
+    productPage: { highlights: [{ title: "Handwoven", body: "Made on traditional looms" }, { title: "Pure cotton", body: "Soft and breathable" }], guarantee: "Packed with care and shipped within 24 hours.", relatedTitle: "Complete the look" },
     sections: [
       makeSection("promo_banner", "promo", { title: "Festive sale is live", body: "Flat 15% off on prepaid orders this week.", ctaLabel: "Shop the sale", ctaHref: "#all-products" }),
       makeSection("testimonials", "reviews", { items: [{ name: "Asha", quote: "Beautiful quality and it reached in 4 days.", rating: 5, location: "Kochi" }, { name: "Ravi", quote: "COD made it easy to try.", rating: 4, location: "Pune" }] }),
-      makeSection("video_shopping", "videos", { videos: [{ url: "https://youtu.be/dQw4w9WgXcQ", caption: "How it’s made", productIds: [] }] }),
+      makeSection("video_shopping", "videos", {
+        layout: params.videos === "grid" ? "grid" : "reels",
+        videos: [
+          { url: "https://youtube.com/shorts/dQw4w9WgXcQ", caption: "How it’s made", productIds: [] },
+          { url: "https://youtube.com/shorts/dQw4w9WgXcQ", caption: "Styling ideas", productIds: [] },
+          { url: "https://youtube.com/shorts/dQw4w9WgXcQ", caption: "Unboxing", productIds: [] },
+        ],
+      }),
       makeSection("countdown", "drop", { title: "Ends soon", body: "Reserve the pieces before they disappear.", endsAt: new Date(Date.now() + 2 * 86_400_000).toISOString() }),
       makeSection("rich_text", "story", { title: "Our story", body: "Handmade in small batches by artisans we know by name." }),
       makeSection("catalog", "catalog"),
     ],
   });
-  const layout = installTheme(sample, theme, { applyLayout: true });
+  const installed = installTheme(sample, theme, { applyLayout: true });
+  const catStyle = ["tiles", "round", "mosaic", "photo", "rows"].includes(params.cats ?? "") ? params.cats : null;
+  const layout = catStyle
+    ? { ...installed, sections: installed.sections.map((s) => (s.type === "category_grid" ? { ...s, settings: { ...s.settings, style: catStyle } } : s)) as typeof installed.sections }
+    : installed;
   // Show the sample sections the theme would otherwise keep hidden.
   // Fixture product ids aren't UUIDs (the schema rightly drops them), so attach them after parsing.
   const videoIds = base.products.items.slice(0, 2).map((p) => p.id);

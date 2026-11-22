@@ -42,16 +42,17 @@ import type { StoreDraft } from "@/modules/storefront/builder";
 import type { Paginated, ProductRecord } from "@/types/api";
 import { StorefrontFooterForm } from "./storefront-footer-form";
 import { StorefrontPreviewPane } from "./parts";
-import { HeaderForm, SectionSettingsForm, ThemeTokensForm, WhatsAppButtonForm } from "./section-editors";
+import { HeaderForm, ProductPageForm, SectionSettingsForm, ThemeTokensForm, WhatsAppButtonForm } from "./section-editors";
 import { VersionHistoryDialog } from "./version-history";
 import styles from "./store-builder.module.css";
 import { useBuilderMutations, useCanEditStore, useStoreBuilder, useStorefront } from "./use-store-builder";
 
-type Panel = "sections" | "theme" | "header" | "footer" | "whatsapp";
+type Panel = "sections" | "theme" | "header" | "product" | "footer" | "whatsapp";
 const PANELS: Array<{ id: Panel; label: string }> = [
   { id: "sections", label: "Sections" },
   { id: "theme", label: "Theme" },
   { id: "header", label: "Header" },
+  { id: "product", label: "Product page" },
   { id: "footer", label: "Footer" },
   { id: "whatsapp", label: "WhatsApp" },
 ];
@@ -352,6 +353,13 @@ export function StoreCustomizer() {
               <section aria-label="Header and navigation">
                 <HeaderForm header={draft.layout.header} sections={sections} categories={editorCategories} onChange={(header) => update({ header })} />
                 <p className="mt-3 text-xs text-muted">Store name and logo are in <Link href="/dashboard/store-builder/settings" className="text-brand underline">Settings</Link> and update right away.</p>
+              </section>
+            ) : null}
+
+            {panel === "product" ? (
+              <section aria-label="Product page">
+                <ProductPageForm value={draft.layout.productPage} onChange={(productPage) => update({ productPage })} />
+                <p className="mt-3 text-xs text-muted">Open any product in the preview to see it.</p>
               </section>
             ) : null}
 

@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Banknote, Check, ChevronLeft, ChevronRight, Minus, Plus, RotateCcw, Share2, Truck } from "lucide-react";
+import { BadgeCheck, Banknote, Check, ChevronLeft, ChevronRight, Minus, Plus, RotateCcw, Share2, ShieldCheck, Truck } from "lucide-react";
 import { StoreImage } from "@/components/storefront/store-image";
 import { StorePincodeLookup } from "@/components/storefront/store-pincode-lookup";
+import type { ProductPageConfig } from "@/modules/storefront/layout/schema";
 import type { StoreCategory, StoreProduct } from "@/components/storefront/store-types";
 import { formatStorePrice } from "@/modules/storefront/pricing";
 import { ProductTile, Rail, savingsPercent, stockNote } from "./marketplace-tile";
@@ -115,11 +116,14 @@ export function MarketplaceProduct({
   onOpenProduct,
   onBuyNow,
   cartQuantity,
+  pageConfig,
 }: {
   product: StoreProduct;
   quantity: number;
   related: StoreProduct[];
   categories?: StoreCategory[];
+  /** Store Builder product page extras (selling points, guarantee, related heading). */
+  pageConfig?: ProductPageConfig | null;
   workspace?: string;
   linkRef?: StoreRef;
   preview?: boolean;
@@ -200,7 +204,11 @@ export function MarketplaceProduct({
             <li><Truck size={17} aria-hidden /><span><strong>Delivery</strong>Shipped by India Post with a tracking number.</span></li>
             {payment ? <li><Banknote size={17} aria-hidden /><span><strong>Payment</strong>{payment}.</span></li> : null}
             <li><RotateCcw size={17} aria-hidden /><span><strong>Returns</strong>{product.returnAvailable === false ? "This item can't be returned." : "This item can be returned. See the store's return policy."}</span></li>
+            {pageConfig?.highlights.map((item) => (
+              <li key={item.title}><BadgeCheck size={17} aria-hidden /><span><strong>{item.title}</strong>{item.body}</span></li>
+            ))}
           </ul>
+          {pageConfig?.guarantee ? <p className={s.guarantee}><ShieldCheck size={16} aria-hidden />{pageConfig.guarantee}</p> : null}
           <DeliveryCheck linkRef={linkRef} preview={preview} />
           {description ? (
             <section className={s.description} aria-labelledby="about-head">
@@ -238,8 +246,8 @@ export function MarketplaceProduct({
       </div>
       {recommendations.length ? (
         <section className={s.section} aria-labelledby="also-head">
-          <div className={s.sectionHead}><h2 id="also-head">You may also like</h2></div>
-          <Rail label="You may also like">
+          <div className={s.sectionHead}><h2 id="also-head">{pageConfig?.relatedTitle || "You may also like"}</h2></div>
+          <Rail label={pageConfig?.relatedTitle || "You may also like"}>
             {recommendations.map((item) => (
               <ProductTile key={item.id} product={item} href={hrefFor(item)} quantity={cartQuantity?.(item.id) ?? 0} onOpen={() => onOpenProduct(item)} onAdd={() => onAdd(item)} onDecrease={() => onDecrease(item.id)} />
             ))}

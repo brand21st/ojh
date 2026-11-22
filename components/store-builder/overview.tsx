@@ -17,6 +17,7 @@ import { useStoreBuilder } from "./use-store-builder";
 
 
 const SECTION_BLURBS: Record<string, string> = {
+  "/dashboard/store-builder/ai": "Describe your brand; AI designs the whole store.",
   "/dashboard/store-builder/themes": "Pick a design made for what you sell.",
   "/dashboard/store-builder/customize": "Sections, colours, header, footer and WhatsApp.",
   "/dashboard/store-builder/products": "Collections, bundles and what’s in the store.",
@@ -83,7 +84,8 @@ export function StoreOverview() {
                   <div className="flex justify-between gap-2"><dt className="text-muted">Draft</dt><dd className="font-medium">{state?.hasUnpublishedChanges ? "Unpublished changes" : "Up to date"}</dd></div>
                 </dl>
                 <div className="mt-auto flex flex-wrap gap-2 pt-4">
-                  <Link href="/dashboard/store-builder/customize" className={buttonVariants({ size: "xs" })}>Customize store</Link>
+                  <Link href="/dashboard/store-builder/ai" className={buttonVariants({ size: "xs" })}>Design with AI</Link>
+                  <Link href="/dashboard/store-builder/customize" className={buttonVariants({ size: "xs", variant: "secondary" })}>Customize store</Link>
                   <Link href="/dashboard/store-builder/themes" className={buttonVariants({ size: "xs", variant: "secondary" })}>Browse themes</Link>
                 </div>
               </section>

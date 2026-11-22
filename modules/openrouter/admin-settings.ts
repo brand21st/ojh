@@ -6,6 +6,8 @@ import { encryptSecret } from "@/lib/security/crypto";
 import { writeBillingAudit } from "@/modules/billing/audit";
 import type { createAdminClient } from "@/lib/supabase/admin";
 import { getImageStudioConfig } from "@/modules/ai-image/config";
+import { fetchGeminiSiteModels, mergeSiteModels, sanitizeSiteBuilderModel } from "@/modules/openrouter/site-models";
+import { getSiteBuilderAiConfig } from "@/modules/storefront/ai-site";
 import { OPENROUTER_IMAGE_MODELS, sanitizeOpenRouterImageModel } from "@/modules/ai-image/models";
 import {
   fetchOpenRouterChatGptModels,
@@ -32,6 +34,8 @@ const saveSchema = z.object({
   imageCreditCost: z.number().int().min(1).max(500).optional(),
   coverCreditCost: z.number().int().min(1).max(500).optional(),
   imageMaxVariations: z.number().int().min(1).max(3).optional(),
+  siteModel: z.string().optional().nullable(),
+  siteCreditCost: z.number().int().min(1).max(500).optional(),
 });
 
 function ip(request: NextRequest) {
@@ -42,6 +46,7 @@ export async function loadOpenRouterSettings() {
   const config = await getPlatformOpenRouterConfig();
   const live = await fetchOpenRouterChatGptModels(config.apiKey);
   const studio = await getImageStudioConfig();
+  const [site, liveSite] = await Promise.all([getSiteBuilderAiConfig(), fetchGeminiSiteModels(config.apiKey)]);
   return {
     ...publicOpenRouterStatus(config),
     models: mergeChatGptModels(live, config.model),
@@ -51,6 +56,9 @@ export async function loadOpenRouterSettings() {
     coverCreditCost: studio.coverCreditCost,
     imageMaxVariations: studio.maxVariations,
     imageModels: [...OPENROUTER_IMAGE_MODELS],
+    siteModel: site.model,
+    siteCreditCost: site.creditCost,
+    siteModels: mergeSiteModels(liveSite, site.model),
   };
 }
 
@@ -82,6 +90,8 @@ export async function saveOpenRouterSettings(
   if (body.imageCreditCost != null) patch.ai_image_credit_cost = body.imageCreditCost;
   if (body.coverCreditCost != null) patch.ai_cover_credit_cost = body.coverCreditCost;
   if (body.imageMaxVariations != null) patch.ai_image_max_variations = body.imageMaxVariations;
+  if (body.siteModel != null) patch.openrouter_site_model = sanitizeSiteBuilderModel(body.siteModel);
+  if (body.siteCreditCost != null) patch.ai_site_credit_cost = body.siteCreditCost;
   if (body.clearKey) {
     patch.encrypted_openrouter_api_key = null;
     patch.openrouter_enabled = false;

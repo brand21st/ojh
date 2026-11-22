@@ -79,13 +79,13 @@ export function TrustBadgesSection({ items, fallback }: { items: Array<{ title: 
 }
 
 /** Click-to-load embeds: no third-party iframe (or cookies) until the shopper asks to play. */
-function VideoCard({ url, caption }: { url: string; caption: string }) {
+function VideoCard({ url, caption, vertical = false }: { url: string; caption: string; vertical?: boolean }) {
   const [playing, setPlaying] = useState(false);
   const embed = videoEmbed(url);
   if (!embed) return null;
   return (
     <figure className={s.video}>
-      <div className={s.videoFrame}>
+      <div className={vertical ? `${s.videoFrame} ${s.videoFrameVertical}` : s.videoFrame}>
         {playing ? (
           <iframe src={`${embed.embedUrl}&autoplay=1`} title={caption || "Product video"} allow="autoplay; encrypted-media; picture-in-picture" allowFullScreen loading="lazy" />
         ) : (
@@ -103,9 +103,25 @@ function VideoCard({ url, caption }: { url: string; caption: string }) {
   );
 }
 
-export function VideoShoppingSection({ section, renderProducts }: { section: LayoutSection<"video_shopping">; renderProducts: (ids: string[]) => ReactNode }) {
+export function VideoShoppingSection({ section, renderProducts, renderChip }: { section: LayoutSection<"video_shopping">; renderProducts: (ids: string[]) => ReactNode; renderChip?: (id: string) => ReactNode }) {
   const videos = section.settings.videos.filter((video) => videoEmbed(video.url));
   if (!videos.length) return null;
+  if (section.settings.layout === "reels") {
+    return (
+      <section id={`section-${section.id}`} className={s.section} aria-labelledby={`video-${section.id}`}>
+        <SectionHead id={`video-${section.id}`} title={section.settings.title} />
+        <ul className={s.reels}>
+          {videos.map((video, index) => (
+            <li key={`${video.url}-${index}`} className={s.reel}>
+              <VideoCard url={video.url} caption="" vertical />
+              {video.caption ? <p className={s.reelCaption}>{video.caption}</p> : null}
+              {video.productIds[0] && renderChip ? <div className={s.reelProduct}>{renderChip(video.productIds[0])}</div> : null}
+            </li>
+          ))}
+        </ul>
+      </section>
+    );
+  }
   return (
     <section id={`section-${section.id}`} className={s.section} aria-labelledby={`video-${section.id}`}>
       <SectionHead id={`video-${section.id}`} title={section.settings.title} />

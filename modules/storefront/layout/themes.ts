@@ -236,7 +236,7 @@ export function isRecommended(theme: StoreThemeDefinition, category: string | nu
 }
 
 /** Sections a merchant filled in themselves; installing a theme must never drop them. */
-function hasMerchantContent(section: LayoutSection) {
+export function hasMerchantContent(section: LayoutSection) {
   const settings = section.settings as Record<string, unknown>;
   switch (section.type) {
     case "testimonials":
@@ -291,7 +291,7 @@ export function installTheme(
 }
 
 /** Applies a theme's presentation choices (layout styles only; never merchant text, products or dates). */
-function withPresentation(section: LayoutSection, theme: StoreThemeDefinition): LayoutSection {
+export function withPresentation(section: LayoutSection, theme: StoreThemeDefinition): LayoutSection {
   const look = theme.presentation;
   if (!look) return section;
   if (section.type === "hero" && look.hero) return { ...section, settings: { ...section.settings, style: look.hero } as LayoutSection["settings"] };
@@ -307,7 +307,7 @@ function withPresentation(section: LayoutSection, theme: StoreThemeDefinition): 
   return section;
 }
 
-function themedHeader(base: StoreLayout, theme: StoreThemeDefinition, sections: LayoutSection[]): StoreLayout["header"] {
+export function themedHeader(base: StoreLayout, theme: StoreThemeDefinition, sections: LayoutSection[]): StoreLayout["header"] {
   const header = { ...base.header, announcement: { ...base.header.announcement } };
   if (theme.presentation?.announcement) header.announcement.style = theme.presentation.announcement;
   if (theme.starterMenu && !header.menu.length) {

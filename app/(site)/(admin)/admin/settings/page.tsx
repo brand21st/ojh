@@ -100,6 +100,9 @@ type OpenRouterSettings = {
   coverCreditCost?: number;
   imageMaxVariations?: number;
   imageModels?: Array<{ id: string; name: string }>;
+  siteModel?: string;
+  siteCreditCost?: number;
+  siteModels?: Array<{ id: string; name: string }>;
 };
 
 type VachatLogRow = {
@@ -171,6 +174,8 @@ export default function AdminSettingsPage() {
   const [imageModel, setImageModel] = useState("");
   const [imageCreditCost, setImageCreditCost] = useState("");
   const [coverCreditCost, setCoverCreditCost] = useState("");
+  const [siteModel, setSiteModel] = useState("");
+  const [siteCreditCost, setSiteCreditCost] = useState("");
   const [vachatKey, setVachatKey] = useState("");
   const [vachatUrl, setVachatUrl] = useState("");
   const [vachatEnabled, setVachatEnabled] = useState<boolean | null>(null);
@@ -193,6 +198,8 @@ export default function AdminSettingsPage() {
   const resolvedImageModel = imageModel || openrouter?.imageModel || "google/gemini-2.5-flash-image";
   const resolvedImageCreditCost = imageCreditCost || String(openrouter?.imageCreditCost ?? 10);
   const resolvedCoverCreditCost = coverCreditCost || String(openrouter?.coverCreditCost ?? openrouter?.imageCreditCost ?? 10);
+  const resolvedSiteModel = siteModel || openrouter?.siteModel || "google/gemini-2.5-flash";
+  const resolvedSiteCreditCost = siteCreditCost || String(openrouter?.siteCreditCost ?? 20);
   const resolvedVachatEnabled = vachatEnabled ?? vachat?.enabled ?? false;
   const resolvedTestPhone = vachatTestPhone || vachat?.lastTestPhone || "";
   const templateCol: Record<VachatEventKey, string> = {
@@ -263,6 +270,8 @@ export default function AdminSettingsPage() {
           imageModel: resolvedImageModel,
           imageCreditCost: Number(resolvedImageCreditCost) || 10,
           coverCreditCost: Number(resolvedCoverCreditCost) || 10,
+          siteModel: resolvedSiteModel,
+          siteCreditCost: Number(resolvedSiteCreditCost) || 20,
         }),
       }),
     onSuccess: () => {
@@ -615,6 +624,22 @@ export default function AdminSettingsPage() {
               value={resolvedCoverCreditCost}
               onChange={(event) => setCoverCreditCost(event.target.value)}
             />
+          </div>
+          <div className="space-y-2 border-t border-border pt-3">
+            <Label htmlFor="openrouter-site-model">AI Website Builder model</Label>
+            <Combobox
+              id="openrouter-site-model"
+              placeholder="Select a Gemini model"
+              emptyText="No Gemini models"
+              value={resolvedSiteModel}
+              onChange={(value) => setSiteModel(value)}
+              options={(openrouter?.siteModels ?? [{ id: resolvedSiteModel, name: resolvedSiteModel }]).map((item) => ({ value: item.id, label: `${item.name} · ${item.id}` }))}
+            />
+            <p className="text-xs text-muted">Designs merchant stores from a prompt in Store Builder → AI Builder. Gemini 2.5 Flash is fast and low cost; Pro gives richer copy.</p>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="site-credit-cost">Credits per AI website generation</Label>
+            <Input id="site-credit-cost" type="number" min={1} max={500} value={resolvedSiteCreditCost} onChange={(event) => setSiteCreditCost(event.target.value)} />
           </div>
           <p className="text-xs text-muted">
             Package prices live on{" "}

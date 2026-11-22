@@ -14,11 +14,13 @@ import {
   Palette,
   Settings,
   ShoppingCart,
+  Sparkles,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export const BUILDER_SECTIONS = [
   { href: "/dashboard/store-builder", label: "Overview", icon: LayoutDashboard },
+  { href: "/dashboard/store-builder/ai", label: "AI Builder", icon: Sparkles },
   { href: "/dashboard/store-builder/themes", label: "Themes", icon: Palette },
   { href: "/dashboard/store-builder/customize", label: "Customize", icon: Paintbrush },
   { href: "/dashboard/store-builder/products", label: "Products & Collections", icon: Package },

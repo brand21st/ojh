@@ -166,10 +166,10 @@ export function MarketplaceHome({ store, cart, query, categoryId, searching, fil
         const { style, title, eyebrow } = grid.settings;
         const picked = grid.settings.categoryIds.length ? grid.settings.categoryIds.map((id) => store.categories.find((c) => c.id === id)).filter((c): c is StoreCategory => Boolean(c)) : store.categories;
         if (grid.settings.categoryIds.length ? !picked.length : !categoryTiles) return null;
-        const head = style === "tiles" && !eyebrow ? <SectionHead id="cat-head" title={title} /> : (
+        const head = (style === "tiles" || style === "round") && !eyebrow ? <SectionHead id="cat-head" title={title} /> : (
           <div className={s.sectionHead}>
             <div>{eyebrow ? <p className={s.eyebrow}>{eyebrow}</p> : null}{title ? <h2 id="cat-head">{title}</h2> : null}</div>
-            {style !== "tiles" ? <ViewAllPill label="All products" onClick={scrollToCatalog} /> : null}
+            {style !== "tiles" && style !== "round" ? <ViewAllPill label="All products" onClick={scrollToCatalog} /> : null}
           </div>
         );
         const art = (c: StoreCategory, sizes: string) => c.imageUrl ? <StoreImage src={c.imageUrl} alt="" sizes={sizes} /> : <span aria-hidden>{c.name.trim().charAt(0).toUpperCase()}</span>;
@@ -194,7 +194,7 @@ export function MarketplaceHome({ store, cart, query, categoryId, searching, fil
         }
         return <section className={s.section} id="shop-by-category" aria-labelledby={title ? "cat-head" : undefined} aria-label={title ? undefined : "Shop by category"}>
           {head}
-          <div className={style === "mosaic" ? s.categoryMosaic : style === "photo" ? s.categoryPhotos : s.categoryGrid}>{picked.slice(0, style === "mosaic" ? 5 : 12).map((c) => (
+          <div className={style === "mosaic" ? s.categoryMosaic : style === "photo" ? s.categoryPhotos : style === "round" ? s.categoryRound : s.categoryGrid}>{picked.slice(0, style === "mosaic" ? 5 : 12).map((c) => (
             <button type="button" key={c.id} className={style === "tiles" ? s.categoryTile : s.categoryCard} onClick={() => pickCategory(c.id)}>
               <span className={style === "tiles" ? s.categoryArt : s.categoryCardArt}>{art(c, style === "mosaic" ? "(max-width: 599px) 90vw, 560px" : "(max-width: 599px) 45vw, 280px")}</span>
               <span className={style === "tiles" ? s.categoryName : s.categoryCardName}>{c.name}</span>
@@ -221,7 +221,18 @@ export function MarketplaceHome({ store, cart, query, categoryId, searching, fil
       case "promo_banner":
         return <PromoBannerSection section={section as LayoutSection<"promo_banner">} storeHref={linkFor} />;
       case "video_shopping":
-        return <VideoShoppingSection section={section as LayoutSection<"video_shopping">} renderProducts={(ids) => sectionProducts(ids).map(card)} />;
+        return <VideoShoppingSection section={section as LayoutSection<"video_shopping">} renderProducts={(ids) => sectionProducts(ids).map(card)} renderChip={(id) => {
+          const product = sectionProducts([id])[0];
+          if (!product) return null;
+          const qty = quantities.get(product.id) ?? 0;
+          return <div className={s.reelChip}>
+            <button type="button" className={s.reelChipInfo} onClick={() => onOpenProduct(product)}>
+              <span className={s.reelChipImage}>{product.imageUrls[0] ? <StoreImage src={product.imageUrls[0]} alt="" sizes="40px" /> : null}</span>
+              <span className="min-w-0"><span className={s.reelChipName}>{product.name}</span><span className={s.reelChipPrice}>{formatStorePrice(product.price)}</span></span>
+            </button>
+            <button type="button" className={s.reelChipAdd} disabled={!product.inStock} aria-label={qty ? `${product.name}: ${qty} in cart, add one more` : `Add ${product.name} to cart`} onClick={() => onAdd(product)}>{qty ? qty : <Plus size={16} />}</button>
+          </div>;
+        }} />;
       case "bundles": {
         const title = (section as LayoutSection<"bundles">).settings.title;
         return store.bundles?.length ? <section className={s.section} aria-labelledby="bundle-head"><SectionHead id="bundle-head" title={title} aside="Save when you buy these as a set" /><Rail label="Bundle offers" wide>{store.bundles.map((bundle) => (

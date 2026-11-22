@@ -134,6 +134,7 @@ export function SectionSettingsForm({
         <>
           <Choice id={`${key}-cstyle`} label="Layout" value={s.style} onChange={(style) => set({ style })} options={[
             { value: "tiles", label: "Tiles" },
+            { value: "round", label: "Round circles (swipeable)" },
             { value: "mosaic", label: "Photo mosaic" },
             { value: "photo", label: "Photo grid with captions" },
             { value: "rows", label: "Product row per category" },
@@ -204,6 +205,11 @@ export function SectionSettingsForm({
       body = (
         <>
           {titleField("Watch and shop")}
+          <Choice id={`${key}-vlayout`} label="Layout" value={s.layout} onChange={(layout) => set({ layout })} options={[
+            { value: "reels", label: "Reels: vertical videos with the product pinned below" },
+            { value: "grid", label: "Grid: wide videos with product cards" },
+          ]} />
+          {s.layout === "reels" ? <p className="text-xs text-muted">YouTube Shorts links look best here. The first product you pick is pinned under each video.</p> : null}
           {s.videos.map((video, index) => {
             const invalid = Boolean(video.url) && !videoEmbed(video.url);
             const update = (patch: Partial<typeof video>) => set({ videos: s.videos.map((v, i) => (i === index ? { ...v, ...patch } : v)) });
@@ -221,7 +227,7 @@ export function SectionSettingsForm({
               </div>
             );
           })}
-          {s.videos.length < 6 ? <Button type="button" size="xs" variant="secondary" onClick={() => set({ videos: [...s.videos, { url: "", caption: "", productIds: [] }] })}><Plus />Add video</Button> : null}
+          {s.videos.length < 8 ? <Button type="button" size="xs" variant="secondary" onClick={() => set({ videos: [...s.videos, { url: "", caption: "", productIds: [] }] })}><Plus />Add video</Button> : null}
           <p className="text-xs text-muted">Videos load only when a shopper taps play, so they don’t slow your store down.</p>
         </>
       );
@@ -438,6 +444,29 @@ export function HeaderForm({ header, sections, categories, onChange }: { header:
           </Button>
         ) : null}
       </section>
+    </div>
+  );
+}
+
+export function ProductPageForm({ value, onChange }: { value: StoreLayout["productPage"]; onChange: Patch<StoreLayout["productPage"]> }) {
+  const set = (patch: Partial<StoreLayout["productPage"]>) => onChange({ ...value, ...patch });
+  return (
+    <div className="grid gap-3">
+      <p className="text-xs text-muted">Shown on every product page, under delivery, payment and returns.</p>
+      {value.highlights.map((item, index) => {
+        const update = (patch: Partial<typeof item>) => set({ highlights: value.highlights.map((it, i) => (i === index ? { ...it, ...patch } : it)) });
+        return (
+          <div key={index} className="grid gap-2 rounded-lg border border-border p-2">
+            <div className="flex items-center justify-between"><span className="text-xs font-medium">Selling point {index + 1}</span>
+              <Button type="button" size="icon-xs" variant="ghost" aria-label={`Remove selling point ${index + 1}`} onClick={() => set({ highlights: value.highlights.filter((_, i) => i !== index) })}><Trash2 /></Button></div>
+            <TextField id={`pp-h${index}t`} label="Title" value={item.title} max={40} onChange={(title) => update({ title })} />
+            <TextField id={`pp-h${index}b`} label="Detail" value={item.body} max={90} onChange={(body) => update({ body })} />
+          </div>
+        );
+      })}
+      {value.highlights.length < 4 ? <Button type="button" size="xs" variant="secondary" className="justify-self-start" onClick={() => set({ highlights: [...value.highlights, { title: "Handpicked quality", body: "Checked before it ships" }] })}><Plus />Add selling point</Button> : null}
+      <AreaField id="pp-guarantee" label="Reassurance line" value={value.guarantee} max={160} placeholder="Packed with care and shipped within 24 hours." onChange={(guarantee) => set({ guarantee })} />
+      <TextField id="pp-related" label="Related products heading" value={value.relatedTitle} max={80} onChange={(relatedTitle) => set({ relatedTitle })} />
     </div>
   );
 }
