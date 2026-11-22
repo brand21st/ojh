@@ -18,7 +18,7 @@ import {
 } from "@/modules/print/manual-idempotency";
 import { orIlike } from "@/lib/api/filters";
 import { indiaPostDisplayShipmentStatus } from "@/modules/india-post/booking-status";
-import { getAnalytics } from "@/modules/dashboard/analytics";
+import { getAnalytics, parseAnalyticsFocus } from "@/modules/dashboard/analytics";
 import { getKpis, getPipeline } from "@/modules/dashboard/service";
 import { bulkUpdateOrderStatus } from "@/modules/orders/bulk-status";
 import { bulkOrderStatusSchema, confirmShopifyPaymentSchema, createOrderSchema, orderListQuery, updateOrderAddressSchema, updateOrderCodSchema, updateOrderWeightsSchema } from "@/modules/orders/schema";
@@ -133,7 +133,7 @@ export async function handleCommerceRoutes(
   }
 
   if (key === "GET dashboard/analytics") {
-    return getAnalytics(supabase, ctx);
+    return getAnalytics(supabase, ctx, new Date(), parseAnalyticsFocus(request.nextUrl.searchParams));
   }
 
   if (key === "GET orders") {

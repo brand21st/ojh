@@ -1,13 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
   aggregateAnalytics,
+  analyticsFetchSince,
   asAmount,
   emptyPeriod,
+  inclusiveCalendarDays,
   isActiveOrder,
   isCodOrder,
   isIndiaPostBooked,
   isCodShipment,
+  istDayStartIso,
   istParts,
+  parseAnalyticsFocus,
   shipmentOrderAmount,
   startOfIstYearIso,
   type AnalyticsOrderRow,
@@ -204,5 +208,109 @@ describe("aggregateAnalytics", () => {
     expect(result.series.today[2]?.indiaPostBooked).toBe(1);
     expect(result.series.today[2]?.indiaPostCodAmount).toBe(800);
     expect(result.series.today[3]?.indiaPostPrepaidAmount).toBe(450);
+  });
+
+  it("keeps yesterday separate from today, including the previous year", () => {
+    const newYear = new Date("2026-01-01T10:00:00+05:30");
+    const result = aggregateAnalytics(
+      [
+        order("2025-12-31T22:00:00+05:30", { total_amount: 40 }),
+        order("2026-01-01T09:00:00+05:30", { total_amount: 10 }),
+      ],
+      [],
+      newYear,
+      false,
+      { id: "yesterday" }
+    );
+
+    expect(result.today.orders).toBe(1);
+    expect(result.today.revenue).toBe(10);
+    expect(result.year.orders).toBe(1);
+    expect(result.focus.id).toBe("yesterday");
+    expect(result.focus.label).toBe("Yesterday");
+    expect(result.focus.period.orders).toBe(1);
+    expect(result.focus.period.revenue).toBe(40);
+    expect(result.focus.series).toHaveLength(24);
+    expect(result.focus.series[22]?.orders).toBe(1);
+  });
+
+  it("buckets a custom day by hour and a short span by day", () => {
+    const single = aggregateAnalytics(
+      [order("2026-09-18T04:00:00+05:30", { total_amount: 75, source: "MANUAL" })],
+      [],
+      NOW,
+      false,
+      { id: "custom", from: "2026-09-18", to: "2026-09-18" }
+    );
+    expect(single.focus.series).toHaveLength(24);
+    expect(single.focus.series[4]?.revenue).toBe(75);
+    expect(single.focus.period.orders).toBe(1);
+    expect(single.today.orders).toBe(0);
+    expect(single.focus.sources[0]?.source).toBe("MANUAL");
+
+    const span = aggregateAnalytics(
+      [
+        order("2026-09-18T04:00:00+05:30", { total_amount: 75 }),
+        order("2026-09-20T01:15:00+05:30", { total_amount: 25 }),
+      ],
+      [],
+      NOW,
+      false,
+      { id: "custom", from: "2026-09-18", to: "2026-09-20" }
+    );
+    expect(span.focus.series).toHaveLength(3);
+    expect(span.focus.series[0]?.revenue).toBe(75);
+    expect(span.focus.series[2]?.revenue).toBe(25);
+    expect(span.focus.period.revenue).toBe(100);
+    expect(span.today.revenue).toBe(25);
+  });
+
+  it("rolls a long custom range into months", () => {
+    const result = aggregateAnalytics(
+      [
+        order("2026-07-02T10:00:00+05:30", { total_amount: 30 }),
+        order("2026-09-05T10:00:00+05:30", { total_amount: 70 }),
+      ],
+      [],
+      NOW,
+      false,
+      { id: "custom", from: "2026-07-01", to: "2026-09-08" }
+    );
+
+    expect(inclusiveCalendarDays("2026-07-01", "2026-09-08")).toBe(70);
+    expect(result.focus.series.map((point) => point.key)).toEqual(["2026-07", "2026-08", "2026-09"]);
+    expect(result.focus.series[0]?.revenue).toBe(30);
+    expect(result.focus.series[2]?.revenue).toBe(70);
+    expect(result.focus.period.orders).toBe(2);
+  });
+});
+
+describe("analytics focus query", () => {
+  it("defaults to today and rejects invalid custom ranges", () => {
+    expect(parseAnalyticsFocus(new URLSearchParams(), NOW)).toEqual({ id: "today" });
+    expect(parseAnalyticsFocus(new URLSearchParams("range=yesterday"), NOW)).toEqual({ id: "yesterday" });
+    expect(parseAnalyticsFocus(new URLSearchParams("range=custom&from=2026-09-01&to=2026-09-20"), NOW)).toEqual({
+      id: "custom",
+      from: "2026-09-01",
+      to: "2026-09-20",
+    });
+    expect(() => parseAnalyticsFocus(new URLSearchParams("range=custom&from=2026-09-20&to=2026-09-01"), NOW)).toThrow(
+      /start is after/
+    );
+    expect(() => parseAnalyticsFocus(new URLSearchParams("range=custom&from=2026-09-21&to=2026-09-21"), NOW)).toThrow(
+      /future/
+    );
+    expect(() => parseAnalyticsFocus(new URLSearchParams("range=custom&from=2026-02-31&to=2026-03-01"), NOW)).toThrow(
+      /YYYY-MM-DD/
+    );
+    expect(() => parseAnalyticsFocus(new URLSearchParams("range=custom&from=2025-09-01&to=2026-09-20"), NOW)).toThrow(
+      /365/
+    );
+  });
+
+  it("fetches from the start of yesterday when that day is in the previous year", () => {
+    const newYear = new Date("2026-01-01T10:00:00+05:30");
+    expect(analyticsFetchSince(newYear, { id: "yesterday" })).toBe(istDayStartIso("2025-12-31"));
+    expect(analyticsFetchSince(NOW, { id: "today" })).toBe(startOfIstYearIso(NOW));
   });
 });

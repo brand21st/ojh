@@ -106,6 +106,18 @@ export type DashboardPipeline = {
 
 export type AnalyticsRange = "today" | "month" | "year";
 
+export type AnalyticsFocusId = AnalyticsRange | "yesterday" | "custom";
+
+export type AnalyticsFocus = {
+  id: AnalyticsFocusId;
+  label: string;
+  from: string;
+  to: string;
+  period: AnalyticsPeriodKpi;
+  sources: AnalyticsSourceShare[];
+  series: AnalyticsSeriesPoint[];
+};
+
 export type AnalyticsPeriodKpi = {
   shipments: number;
   revenue: number;
@@ -153,6 +165,7 @@ export type DashboardAnalytics = {
   topSource: AnalyticsSourceShare | null;
   sources: Record<AnalyticsRange, AnalyticsSourceShare[]>;
   series: Record<AnalyticsRange, AnalyticsSeriesPoint[]>;
+  focus: AnalyticsFocus;
 };
 
 export type CustomerSummary = {

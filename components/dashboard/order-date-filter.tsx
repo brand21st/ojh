@@ -1,28 +1,12 @@
 "use client";
 
-import { useMemo, useState, type ButtonHTMLAttributes } from "react";
-import {
-  addMonths,
-  eachDayOfInterval,
-  format,
-  isSameDay,
-  isSameMonth,
-  isWithinInterval,
-  startOfDay,
-  startOfMonth,
-  startOfWeek,
-} from "date-fns";
-import { CalendarDays, Check, ChevronLeft, ChevronRight, X } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { cn } from "@/lib/utils";
+import { useState } from "react";
+import { format } from "date-fns";
+import { CalendarDays, X } from "lucide-react";
+import { DatePresetChip } from "@/components/dashboard/date-preset-chip";
+import { DateRangeCalendarDialog, localDayRange } from "@/components/dashboard/date-range-calendar-dialog";
+
+export { nextDraftRange } from "@/components/dashboard/date-range-calendar-dialog";
 
 export type OrderDateFilterValue =
   | { kind: "all" }
@@ -40,16 +24,6 @@ type Props = {
   onChange: (value: OrderDateFilterValue) => void;
 };
 
-const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-
-function localDayRange(date: Date) {
-  const from = new Date(date);
-  from.setHours(0, 0, 0, 0);
-  const to = new Date(date);
-  to.setHours(23, 59, 59, 999);
-  return { from, to };
-}
-
 export function todayOrderRange(now = new Date()) {
   return localDayRange(now);
 }
@@ -60,110 +34,31 @@ export function yesterdayOrderRange(now = new Date()) {
   return localDayRange(yesterday);
 }
 
-export function nextDraftRange(
-  draftStart: Date | null,
-  draftEnd: Date | null,
-  date: Date
-): { start: Date; end: Date } {
-  const completeRange = Boolean(draftStart && draftEnd && !isSameDay(draftStart, draftEnd));
-  if (!draftStart || completeRange) {
-    return { start: date, end: date };
-  }
-  if (isSameDay(date, draftStart)) {
-    return { start: draftStart, end: date };
-  }
-  if (date.getTime() < startOfDay(draftStart).getTime()) {
-    return { start: date, end: draftStart };
-  }
-  return { start: draftStart, end: date };
-}
-
 export function OrderDateFilter({ value, counts, onChange }: Props) {
   const [open, setOpen] = useState(false);
-  const [visibleMonth, setVisibleMonth] = useState(() =>
-    startOfMonth(value.kind === "custom" ? value.from : new Date())
-  );
-  const [draftStart, setDraftStart] = useState<Date | null>(
-    value.kind === "custom" ? value.from : null
-  );
-  const [draftEnd, setDraftEnd] = useState<Date | null>(
-    value.kind === "custom" ? value.to : null
-  );
-
-  const calendarSyncKey = `${open}:${value.kind}:${value.kind === "custom" ? `${value.from.getTime()}:${value.to.getTime()}` : ""}`;
-  const [seenCalendarSync, setSeenCalendarSync] = useState(calendarSyncKey);
-  if (open && calendarSyncKey !== seenCalendarSync) {
-    setSeenCalendarSync(calendarSyncKey);
-    const initial = value.kind === "custom" ? value.from : new Date();
-    setVisibleMonth(startOfMonth(initial));
-    setDraftStart(value.kind === "custom" ? value.from : null);
-    setDraftEnd(value.kind === "custom" ? value.to : null);
-  }
-  if (!open && calendarSyncKey !== seenCalendarSync) {
-    setSeenCalendarSync(calendarSyncKey);
-  }
-
-  const calendarDays = useMemo(() => {
-    const monthStart = startOfMonth(visibleMonth);
-    const firstDay = startOfWeek(monthStart, { weekStartsOn: 1 });
-    return eachDayOfInterval({
-      start: firstDay,
-      end: new Date(firstDay.getFullYear(), firstDay.getMonth(), firstDay.getDate() + 41),
-    });
-  }, [visibleMonth]);
-
-  function chooseDate(date: Date) {
-    const next = nextDraftRange(draftStart, draftEnd, date);
-    setDraftStart(next.start);
-    setDraftEnd(next.end);
-  }
-
-  function apply() {
-    if (!draftStart) return;
-    const end = draftEnd ?? draftStart;
-    onChange({
-      kind: "custom",
-      from: localDayRange(draftStart).from,
-      to: localDayRange(end).to,
-    });
-    setOpen(false);
-  }
-
   const selectedLabel =
-    value.kind === "custom"
-      ? `${format(value.from, "MMM d")} – ${format(value.to, "MMM d")}`
-      : null;
-  const draftLabel = draftStart
-    ? draftEnd && !isSameDay(draftStart, draftEnd)
-      ? `${format(draftStart, "d MMM")} → ${format(draftEnd, "d MMM")}`
-      : format(draftStart, "d MMM yyyy")
-    : "Select a date";
+    value.kind === "custom" ? `${format(value.from, "MMM d")} – ${format(value.to, "MMM d")}` : null;
 
   return (
     <>
-      <div
-        className="flex min-w-0 flex-wrap gap-1.5"
-        role="group"
-        aria-label="Filter orders by date"
-      >
-        <DatePresetButton
-          active={value.kind === "all"}
-          onClick={() => onChange({ kind: "all" })}
-        >
+      <div className="flex min-w-0 flex-wrap gap-1.5" role="group" aria-label="Filter orders by date">
+        <DatePresetChip size="sm" active={value.kind === "all"} onClick={() => onChange({ kind: "all" })}>
           All Orders ({counts.all ?? "—"})
-        </DatePresetButton>
-        <DatePresetButton
+        </DatePresetChip>
+        <DatePresetChip
+          size="sm"
           active={value.kind === "today"}
           onClick={() => onChange({ kind: "today", ...todayOrderRange() })}
         >
           Today ({counts.today ?? "—"})
-        </DatePresetButton>
-        <DatePresetButton
+        </DatePresetChip>
+        <DatePresetChip
+          size="sm"
           active={value.kind === "yesterday"}
           onClick={() => onChange({ kind: "yesterday", ...yesterdayOrderRange() })}
         >
           Yesterday ({counts.yesterday ?? "—"})
-        </DatePresetButton>
+        </DatePresetChip>
         {selectedLabel ? (
           <div
             className="inline-flex h-8 shrink-0 items-center overflow-hidden rounded-full border border-brand bg-brand/10 text-xs font-semibold text-brand"
@@ -171,161 +66,36 @@ export function OrderDateFilter({ value, counts, onChange }: Props) {
           >
             <button
               type="button"
-              className="inline-flex h-full items-center gap-2 pl-4 pr-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+              className="inline-flex h-full items-center gap-2 whitespace-nowrap pl-4 pr-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
               onClick={() => setOpen(true)}
             >
-              <CalendarDays className="size-4" />
+              <CalendarDays className="size-4" aria-hidden />
               {selectedLabel}
             </button>
             <button
               type="button"
-              className="mr-1 inline-flex size-8 items-center justify-center rounded-full transition-colors hover:bg-brand/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+              className="mr-1 inline-flex size-8 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-brand/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
               aria-label="Clear custom date range"
               onClick={() => onChange({ kind: "all" })}
             >
-              <X className="size-4" />
+              <X className="size-4" aria-hidden />
             </button>
           </div>
         ) : (
-          <DatePresetButton active={false} onClick={() => setOpen(true)}>
-            <CalendarDays className="size-4" />
+          <DatePresetChip size="sm" active={false} onClick={() => setOpen(true)}>
+            <CalendarDays className="size-4" aria-hidden />
             Custom Date
-          </DatePresetButton>
+          </DatePresetChip>
         )}
       </div>
 
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="!bottom-0 !left-0 !top-auto !w-full !max-w-none !translate-x-0 !translate-y-0 !rounded-b-none p-0 sm:!bottom-auto sm:!left-1/2 sm:!top-1/2 sm:!max-w-xl sm:!-translate-x-1/2 sm:!-translate-y-1/2 sm:!rounded-2xl">
-          <div className="border-b border-border px-5 py-5 sm:px-7">
-            <DialogHeader>
-              <DialogTitle>Select dates</DialogTitle>
-              <DialogDescription>
-                Choose one day, or a start date and then an end date. Each day uses the full local day.
-              </DialogDescription>
-            </DialogHeader>
-            <p
-              className="mt-4 text-lg font-semibold text-ink"
-              aria-live="polite"
-              aria-atomic="true"
-            >
-              {draftLabel}
-            </p>
-          </div>
-
-          <div className="px-4 py-5 sm:px-7">
-            <div className="mb-5 flex items-center justify-between">
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                aria-label="Previous month"
-                onClick={() => setVisibleMonth((month) => addMonths(month, -1))}
-              >
-                <ChevronLeft />
-              </Button>
-              <h3 className="text-base font-semibold text-ink">
-                {format(visibleMonth, "MMMM yyyy")}
-              </h3>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                aria-label="Next month"
-                onClick={() => setVisibleMonth((month) => addMonths(month, 1))}
-              >
-                <ChevronRight />
-              </Button>
-            </div>
-
-            <div className="grid grid-cols-7 text-center">
-              {WEEKDAYS.map((weekday) => (
-                <div key={weekday} className="pb-2 text-xs font-semibold text-muted">
-                  {weekday}
-                </div>
-              ))}
-              {calendarDays.map((date) => {
-                const inMonth = isSameMonth(date, visibleMonth);
-                const start = Boolean(draftStart && isSameDay(date, draftStart));
-                const end = Boolean(draftEnd && isSameDay(date, draftEnd));
-                const inRange = Boolean(
-                  draftStart &&
-                    draftEnd &&
-                    isWithinInterval(date, { start: draftStart, end: draftEnd })
-                );
-                const today = isSameDay(date, new Date());
-                return (
-                  <div
-                    key={date.toISOString()}
-                    className={cn(
-                      "my-0.5 flex h-11 items-center justify-center",
-                      inRange && "bg-brand/10",
-                      start && "rounded-l-full",
-                      end && "rounded-r-full",
-                      start && end && "rounded-full"
-                    )}
-                  >
-                    <button
-                      type="button"
-                      tabIndex={inMonth ? 0 : -1}
-                      disabled={!inMonth}
-                      aria-label={format(date, "EEEE, d MMMM yyyy")}
-                      aria-pressed={start || end}
-                      className={cn(
-                        "relative flex size-11 items-center justify-center rounded-full text-sm font-medium transition-all focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2",
-                        inMonth ? "hover:bg-surface-soft" : "invisible",
-                        today && !start && !end && "border border-brand/40 text-brand",
-                        (start || end) && "bg-brand text-white shadow-sm hover:bg-brand-dark"
-                      )}
-                      onClick={() => chooseDate(date)}
-                    >
-                      {format(date, "d")}
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          <DialogFooter className="!flex-row !justify-between border-t border-border px-5 py-4 sm:px-7">
-            <Button
-              type="button"
-              variant="ghost"
-              className="sm:mr-auto"
-              onClick={() => {
-                setDraftStart(null);
-                setDraftEnd(null);
-              }}
-            >
-              Clear dates
-            </Button>
-            <Button type="button" disabled={!draftStart} onClick={apply}>
-              <Check className="size-4" />
-              Apply
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <DateRangeCalendarDialog
+        open={open}
+        onOpenChange={setOpen}
+        initialStart={value.kind === "custom" ? value.from : null}
+        initialEnd={value.kind === "custom" ? value.to : null}
+        onApply={(range) => onChange({ kind: "custom", from: range.from, to: range.to })}
+      />
     </>
-  );
-}
-
-function DatePresetButton({
-  active,
-  className,
-  ...props
-}: ButtonHTMLAttributes<HTMLButtonElement> & { active: boolean }) {
-  return (
-    <button
-      type="button"
-      aria-pressed={active}
-      className={cn(
-        "inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-full border px-3 text-xs font-semibold transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2",
-        active
-          ? "border-brand bg-brand text-white shadow-sm"
-          : "border-border bg-card text-foreground hover:border-zinc-300 hover:bg-surface-soft",
-        className
-      )}
-      {...props}
-    />
   );
 }

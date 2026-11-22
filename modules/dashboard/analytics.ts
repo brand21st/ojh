@@ -2,12 +2,18 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { AppError, ERROR_CODES } from "@/lib/api/errors";
 import type { TenantContext } from "@/lib/api/context";
 import type {
+  AnalyticsFocus,
+  AnalyticsFocusId,
   AnalyticsPeriodKpi,
   AnalyticsRange,
   AnalyticsSeriesPoint,
   AnalyticsSourceShare,
   DashboardAnalytics,
 } from "@/types/api";
+
+export type AnalyticsFocusRequest =
+  | { id: Exclude<AnalyticsFocusId, "custom"> }
+  | { id: "custom"; from: string; to: string };
 
 export const ANALYTICS_TIMEZONE = "Asia/Kolkata";
 export const ANALYTICS_PAGE_SIZE = 1000;
@@ -165,12 +171,182 @@ function monthLabel(month: number) {
   return new Date(Date.UTC(2026, month - 1, 1)).toLocaleString("en-IN", { month: "short" });
 }
 
-function inRange(parts: IstParts, now: IstParts, range: AnalyticsRange) {
-  if (parts.year !== now.year) return false;
-  if (range === "year") return true;
-  if (parts.month !== now.month) return false;
-  if (range === "month") return true;
-  return parts.day === now.day;
+const DATE_KEY = /^\d{4}-\d{2}-\d{2}$/;
+const FOCUS_PRESETS = new Set<AnalyticsFocusId>(["today", "yesterday", "month", "year"]);
+
+function pad(value: number) {
+  return String(value).padStart(2, "0");
+}
+
+export function addCalendarDays(dateKey: string, days: number) {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  const shifted = new Date(Date.UTC(year, month - 1, day + days));
+  return `${shifted.getUTCFullYear()}-${pad(shifted.getUTCMonth() + 1)}-${pad(shifted.getUTCDate())}`;
+}
+
+export function inclusiveCalendarDays(from: string, to: string) {
+  const [fromYear, fromMonth, fromDay] = from.split("-").map(Number);
+  const [toYear, toMonth, toDay] = to.split("-").map(Number);
+  const start = Date.UTC(fromYear, fromMonth - 1, fromDay);
+  const end = Date.UTC(toYear, toMonth - 1, toDay);
+  return Math.round((end - start) / 86_400_000) + 1;
+}
+
+function isCalendarDate(value: string) {
+  if (!DATE_KEY.test(value)) return false;
+  const [year, month, day] = value.split("-").map(Number);
+  const utc = new Date(Date.UTC(year, month - 1, day));
+  return utc.getUTCFullYear() === year && utc.getUTCMonth() === month - 1 && utc.getUTCDate() === day;
+}
+
+export function istDayStartIso(dateKey: string) {
+  return new Date(`${dateKey}T00:00:00+05:30`).toISOString();
+}
+
+export function istDayEndIso(dateKey: string) {
+  return new Date(`${dateKey}T23:59:59.999+05:30`).toISOString();
+}
+
+function formatCalendarDay(dateKey: string, withYear: boolean) {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  return new Intl.DateTimeFormat("en-IN", {
+    day: "numeric",
+    month: "short",
+    year: withYear ? "numeric" : undefined,
+    timeZone: "UTC",
+  }).format(new Date(Date.UTC(year, month - 1, day)));
+}
+
+export function customRangeLabel(from: string, to: string) {
+  if (from === to) return formatCalendarDay(from, true);
+  const sameYear = from.slice(0, 4) === to.slice(0, 4);
+  if (sameYear) return `${formatCalendarDay(from, false)} – ${formatCalendarDay(to, false)}`;
+  return `${formatCalendarDay(from, true)} – ${formatCalendarDay(to, true)}`;
+}
+
+export function parseAnalyticsFocus(params: URLSearchParams, now = new Date()): AnalyticsFocusRequest {
+  const raw = params.get("range") ?? "today";
+  if (FOCUS_PRESETS.has(raw as AnalyticsFocusId)) return { id: raw as Exclude<AnalyticsFocusId, "custom"> };
+  if (raw !== "custom") throw new AppError(ERROR_CODES.VALIDATION_ERROR, "Unknown analytics range.");
+  const from = params.get("from") ?? "";
+  const to = params.get("to") ?? "";
+  if (!isCalendarDate(from) || !isCalendarDate(to)) {
+    throw new AppError(ERROR_CODES.VALIDATION_ERROR, "Custom range needs from and to as YYYY-MM-DD.");
+  }
+  if (from > to) throw new AppError(ERROR_CODES.VALIDATION_ERROR, "Custom range start is after the end.");
+  const todayKey = istParts(now).dateKey;
+  if (from > todayKey || to > todayKey) {
+    throw new AppError(ERROR_CODES.VALIDATION_ERROR, "Custom range cannot include future dates.");
+  }
+  if (inclusiveCalendarDays(from, to) > 365) {
+    throw new AppError(ERROR_CODES.VALIDATION_ERROR, "Custom range cannot be longer than 365 days.");
+  }
+  return { id: "custom", from, to };
+}
+
+export function analyticsFetchSince(now: Date, focus: AnalyticsFocusRequest = { id: "today" }) {
+  const yearStart = startOfIstYearIso(now);
+  const todayKey = istParts(now).dateKey;
+  const rangeStart =
+    focus.id === "yesterday"
+      ? istDayStartIso(addCalendarDays(todayKey, -1))
+      : focus.id === "custom"
+        ? istDayStartIso(focus.from)
+        : yearStart;
+  return rangeStart < yearStart ? rangeStart : yearStart;
+}
+
+function hourSeries(): AnalyticsSeriesPoint[] {
+  return Array.from({ length: 24 }, (_, hour) =>
+    emptySeriesPoint(pad(hour), `${pad(hour)}:00`)
+  );
+}
+
+function eachDateKey(from: string, to: string) {
+  const keys: string[] = [];
+  const total = inclusiveCalendarDays(from, to);
+  for (let offset = 0; offset < total; offset += 1) keys.push(addCalendarDays(from, offset));
+  return keys;
+}
+
+function monthKeysBetween(from: string, to: string) {
+  const keys: string[] = [];
+  let year = Number(from.slice(0, 4));
+  let month = Number(from.slice(5, 7));
+  const endYear = Number(to.slice(0, 4));
+  const endMonth = Number(to.slice(5, 7));
+  while (year < endYear || (year === endYear && month <= endMonth)) {
+    keys.push(`${year}-${pad(month)}`);
+    month += 1;
+    if (month > 12) {
+      month = 1;
+      year += 1;
+    }
+  }
+  return keys;
+}
+
+type BucketWindow = {
+  period: AnalyticsPeriodKpi;
+  series: AnalyticsSeriesPoint[];
+  sources: Map<string, AnalyticsSourceShare>;
+  indexFor: (parts: IstParts) => number;
+};
+
+function buildCustomWindow(from: string, to: string): BucketWindow {
+  const span = inclusiveCalendarDays(from, to);
+  if (span <= 1) {
+    return {
+      period: emptyPeriod(),
+      series: hourSeries(),
+      sources: new Map(),
+      indexFor: (parts) => (parts.dateKey === from ? parts.hour : -1),
+    };
+  }
+  if (span <= 62) {
+    const keys = eachDateKey(from, to);
+    const lookup = new Map(keys.map((key, index) => [key, index]));
+    return {
+      period: emptyPeriod(),
+      series: keys.map((key) => emptySeriesPoint(key, formatCalendarDay(key, false))),
+      sources: new Map(),
+      indexFor: (parts) => lookup.get(parts.dateKey) ?? -1,
+    };
+  }
+  const keys = monthKeysBetween(from, to);
+  const lookup = new Map(keys.map((key, index) => [key, index]));
+  return {
+    period: emptyPeriod(),
+    series: keys.map((key) => {
+      const [year, month] = key.split("-").map(Number);
+      const sameYear = from.slice(0, 4) === to.slice(0, 4);
+      return emptySeriesPoint(key, sameYear ? monthLabel(month) : `${monthLabel(month)} ${year}`);
+    }),
+    sources: new Map(),
+    indexFor: (parts) => lookup.get(parts.monthKey) ?? -1,
+  };
+}
+
+function focusMeta(focus: AnalyticsFocusRequest, now: IstParts): Pick<AnalyticsFocus, "label" | "from" | "to"> {
+  if (focus.id === "custom") {
+    return {
+      label: customRangeLabel(focus.from, focus.to),
+      from: istDayStartIso(focus.from),
+      to: istDayEndIso(focus.to),
+    };
+  }
+  if (focus.id === "yesterday") {
+    const key = addCalendarDays(now.dateKey, -1);
+    return { label: "Yesterday", from: istDayStartIso(key), to: istDayEndIso(key) };
+  }
+  if (focus.id === "month") {
+    const start = `${now.year}-${pad(now.month)}-01`;
+    return { label: "This month", from: istDayStartIso(start), to: istDayEndIso(now.dateKey) };
+  }
+  if (focus.id === "year") {
+    return { label: "This year", from: istDayStartIso(`${now.year}-01-01`), to: istDayEndIso(now.dateKey) };
+  }
+  return { label: "Today", from: istDayStartIso(now.dateKey), to: istDayEndIso(now.dateKey) };
 }
 
 function buildSeries(now: IstParts): Record<AnalyticsRange, AnalyticsSeriesPoint[]> {
@@ -191,28 +367,7 @@ function buildSeries(now: IstParts): Record<AnalyticsRange, AnalyticsSeriesPoint
   return { today, month, year };
 }
 
-function seriesIndex(range: AnalyticsRange, parts: IstParts, now: IstParts) {
-  if (!inRange(parts, now, range)) return -1;
-  if (range === "today") return parts.hour;
-  if (range === "month") return parts.day - 1;
-  return parts.month - 1;
-}
-
-function emptySources(): Record<AnalyticsRange, Map<string, AnalyticsSourceShare>> {
-  return {
-    today: new Map(),
-    month: new Map(),
-    year: new Map(),
-  };
-}
-
-function bumpSource(
-  maps: Record<AnalyticsRange, Map<string, AnalyticsSourceShare>>,
-  range: AnalyticsRange,
-  source: string,
-  amount: number
-) {
-  const map = maps[range];
+function bumpSource(map: Map<string, AnalyticsSourceShare>, source: string, amount: number) {
   const current = map.get(source) ?? {
     source,
     label: sourceLabel(source),
@@ -240,40 +395,64 @@ export function aggregateAnalytics(
   orders: AnalyticsOrderRow[],
   shipments: AnalyticsShipmentRow[],
   nowInput: Date = new Date(),
-  truncated = false
+  truncated = false,
+  focus: AnalyticsFocusRequest = { id: "today" }
 ): DashboardAnalytics {
   const now = istParts(nowInput);
   const series = buildSeries(now);
-  const periods = {
-    today: emptyPeriod(),
-    month: emptyPeriod(),
-    year: emptyPeriod(),
-  };
-  const sources = emptySources();
-  const ranges: AnalyticsRange[] = ["today", "month", "year"];
+  const yesterdayKey = addCalendarDays(now.dateKey, -1);
+  const windows = {
+    today: {
+      period: emptyPeriod(),
+      series: series.today,
+      sources: new Map<string, AnalyticsSourceShare>(),
+      indexFor: (parts: IstParts) => (parts.dateKey === now.dateKey ? parts.hour : -1),
+    },
+    month: {
+      period: emptyPeriod(),
+      series: series.month,
+      sources: new Map<string, AnalyticsSourceShare>(),
+      indexFor: (parts: IstParts) =>
+        parts.year === now.year && parts.month === now.month ? parts.day - 1 : -1,
+    },
+    year: {
+      period: emptyPeriod(),
+      series: series.year,
+      sources: new Map<string, AnalyticsSourceShare>(),
+      indexFor: (parts: IstParts) => (parts.year === now.year ? parts.month - 1 : -1),
+    },
+    yesterday: {
+      period: emptyPeriod(),
+      series: hourSeries(),
+      sources: new Map<string, AnalyticsSourceShare>(),
+      indexFor: (parts: IstParts) => (parts.dateKey === yesterdayKey ? parts.hour : -1),
+    },
+  } satisfies Record<Exclude<AnalyticsFocusId, "custom">, BucketWindow>;
+  const custom = focus.id === "custom" ? buildCustomWindow(focus.from, focus.to) : null;
+  const active: BucketWindow[] = [windows.today, windows.month, windows.year, windows.yesterday];
+  if (custom) active.push(custom);
 
   for (const order of orders) {
     if (!isActiveOrder(order)) continue;
     const parts = istParts(order.created_at);
-    if (parts.year !== now.year) continue;
     const amount = asAmount(order.total_amount);
     const source = (order.source || "MANUAL").toUpperCase();
     const cod = isCodOrder(order);
 
-    for (const range of ranges) {
-      if (!inRange(parts, now, range)) continue;
-      periods[range].orders += 1;
-      periods[range].revenue += amount;
+    for (const window of active) {
+      const index = window.indexFor(parts);
+      if (index < 0) continue;
+      window.period.orders += 1;
+      window.period.revenue += amount;
       if (cod) {
-        periods[range].codOrders += 1;
-        periods[range].codAmount += amount;
+        window.period.codOrders += 1;
+        window.period.codAmount += amount;
       } else {
-        periods[range].prepaidOrders += 1;
-        periods[range].prepaidAmount += amount;
+        window.period.prepaidOrders += 1;
+        window.period.prepaidAmount += amount;
       }
-      bumpSource(sources, range, source, amount);
-      const index = seriesIndex(range, parts, now);
-      const point = series[range][index];
+      bumpSource(window.sources, source, amount);
+      const point = window.series[index];
       if (!point) continue;
       point.orders += 1;
       point.revenue += amount;
@@ -285,34 +464,31 @@ export function aggregateAnalytics(
   for (const shipment of shipments) {
     if (!isActiveShipment(shipment)) continue;
     const parts = istParts(shipment.created_at);
-    if (parts.year === now.year) {
-      for (const range of ranges) {
-        if (!inRange(parts, now, range)) continue;
-        periods[range].shipments += 1;
-        const index = seriesIndex(range, parts, now);
-        const point = series[range][index];
-        if (point) point.shipments += 1;
-      }
+    for (const window of active) {
+      const index = window.indexFor(parts);
+      if (index < 0) continue;
+      window.period.shipments += 1;
+      const point = window.series[index];
+      if (point) point.shipments += 1;
     }
 
     if (!isIndiaPostBooked(shipment) || !shipment.booked_at) continue;
     const bookedParts = istParts(shipment.booked_at);
-    if (bookedParts.year !== now.year) continue;
     const cod = isCodShipment(shipment);
     const amount = cod ? asAmount(shipment.cod_amount) : shipmentOrderAmount(shipment);
-    for (const range of ranges) {
-      if (!inRange(bookedParts, now, range)) continue;
-      periods[range].indiaPostBooked += 1;
-      periods[range].indiaPostBookedAmount += amount;
+    for (const window of active) {
+      const index = window.indexFor(bookedParts);
+      if (index < 0) continue;
+      window.period.indiaPostBooked += 1;
+      window.period.indiaPostBookedAmount += amount;
       if (cod) {
-        periods[range].indiaPostCodBooked += 1;
-        periods[range].indiaPostCodAmount += amount;
+        window.period.indiaPostCodBooked += 1;
+        window.period.indiaPostCodAmount += amount;
       } else {
-        periods[range].indiaPostPrepaidBooked += 1;
-        periods[range].indiaPostPrepaidAmount += amount;
+        window.period.indiaPostPrepaidBooked += 1;
+        window.period.indiaPostPrepaidAmount += amount;
       }
-      const index = seriesIndex(range, bookedParts, now);
-      const point = series[range][index];
+      const point = window.series[index];
       if (!point) continue;
       point.indiaPostBooked += 1;
       if (cod) point.indiaPostCodAmount += amount;
@@ -320,22 +496,34 @@ export function aggregateAnalytics(
     }
   }
 
-  const yearSources = finalizeSources(sources.year);
+  const yearSources = finalizeSources(windows.year.sources);
+  const focusWindow: BucketWindow =
+    focus.id === "custom" ? (custom ?? windows.today) : windows[focus.id];
+  const meta = focusMeta(focus, now);
 
   return {
     timezone: ANALYTICS_TIMEZONE,
     generatedAt: nowInput.toISOString(),
     truncated,
-    today: periods.today,
-    month: periods.month,
-    year: periods.year,
+    today: windows.today.period,
+    month: windows.month.period,
+    year: windows.year.period,
     topSource: yearSources[0] ?? null,
     sources: {
-      today: finalizeSources(sources.today),
-      month: finalizeSources(sources.month),
+      today: finalizeSources(windows.today.sources),
+      month: finalizeSources(windows.month.sources),
       year: yearSources,
     },
     series,
+    focus: {
+      id: focus.id,
+      label: meta.label,
+      from: meta.from,
+      to: meta.to,
+      period: focusWindow.period,
+      sources: finalizeSources(focusWindow.sources),
+      series: focusWindow.series,
+    },
   };
 }
 
@@ -356,8 +544,13 @@ async function fetchPaged<T>(
   return { rows, truncated: rows.length >= ANALYTICS_MAX_ROWS };
 }
 
-export async function getAnalytics(supabase: SupabaseClient, ctx: TenantContext, now = new Date()) {
-  const since = startOfIstYearIso(now);
+export async function getAnalytics(
+  supabase: SupabaseClient,
+  ctx: TenantContext,
+  now = new Date(),
+  focus: AnalyticsFocusRequest = { id: "today" }
+) {
+  const since = analyticsFetchSince(now, focus);
   const [orders, shipments] = await Promise.all([
     fetchPaged<AnalyticsOrderRow>((from, to) =>
       supabase
@@ -379,5 +572,5 @@ export async function getAnalytics(supabase: SupabaseClient, ctx: TenantContext,
     ),
   ]);
 
-  return aggregateAnalytics(orders.rows, shipments.rows, now, orders.truncated || shipments.truncated);
+  return aggregateAnalytics(orders.rows, shipments.rows, now, orders.truncated || shipments.truncated, focus);
 }

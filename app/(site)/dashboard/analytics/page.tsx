@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import {
-  CalendarDays,
   CircleDollarSign,
   Package,
   Radio,
@@ -17,6 +16,11 @@ import {
   ShipmentsHistogram,
   SourceMixChart,
 } from "@/components/dashboard/analytics-charts";
+import {
+  AnalyticsDateFilter,
+  formatAnalyticsCustomLabel,
+  type AnalyticsDateFilterValue,
+} from "@/components/dashboard/analytics-date-filter";
 import { PageHeader } from "@/components/dashboard/page-header";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -31,13 +35,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { formatCurrency, formatNumber } from "@/lib/format";
 import { useAnalytics } from "@/lib/hooks/use-analytics";
 import { cn } from "@/lib/utils";
-import type { AnalyticsPeriodKpi, AnalyticsRange, AnalyticsSeriesPoint } from "@/types/api";
-
-const RANGES: { id: AnalyticsRange; label: string }[] = [
-  { id: "today", label: "Today" },
-  { id: "month", label: "This month" },
-  { id: "year", label: "This year" },
-];
+import type { AnalyticsFocus, AnalyticsPeriodKpi, AnalyticsSeriesPoint } from "@/types/api";
 
 type PayFilter = "all" | "COD" | "PREPAID";
 
@@ -56,63 +54,45 @@ function liveLabel(updatedAt: number, now: number) {
   return `Live · updated ${minutes}m ago`;
 }
 
-function PeriodCard({
+function istDateKey(iso: string) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date(iso));
+}
+
+function focusMatches(focus: AnalyticsFocus | undefined, filter: AnalyticsDateFilterValue) {
+  if (!focus || focus.id !== filter.kind) return false;
+  if (filter.kind !== "custom") return true;
+  return istDateKey(focus.from) === filter.from && istDateKey(focus.to) === filter.to;
+}
+
+function MetricCard({
   label,
-  period,
-  active,
+  value,
+  hint,
   loading,
 }: {
   label: string;
-  period?: AnalyticsPeriodKpi;
-  active: boolean;
+  value: string;
+  hint: string;
   loading: boolean;
 }) {
   return (
-    <Card
-      className={cn(
-        "relative overflow-hidden transition-colors",
-        active && "border-brand/30 bg-brand/[0.025]"
-      )}
-    >
-      <div
-        aria-hidden
-        className={cn(
-          "absolute inset-x-0 top-0 h-0.5 bg-transparent",
-          active && "bg-brand"
-        )}
-      />
+    <Card className="relative overflow-hidden">
+      <div aria-hidden className="absolute inset-x-0 top-0 h-0.5 bg-brand" />
       <CardHeader className="gap-3 p-5 sm:p-6">
-        <div className="flex items-center justify-between gap-3">
-          <CardDescription className="font-medium text-foreground">{label}</CardDescription>
-          <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-surface-soft text-muted">
-            <CalendarDays className="size-4" />
-          </span>
-        </div>
+        <CardDescription className="font-medium text-foreground">{label}</CardDescription>
         {loading ? (
           <Skeleton className="h-8 w-36" />
         ) : (
-          <CardTitle className="truncate text-2xl tabular-nums sm:text-[1.7rem]">
-            {formatCurrency(period?.revenue)}
-          </CardTitle>
+          <CardTitle className="truncate text-2xl tabular-nums sm:text-[1.7rem]">{value}</CardTitle>
         )}
-        <p className="text-xs text-muted">Revenue · non-cancelled orders</p>
+        <p className="text-xs text-muted">{hint}</p>
       </CardHeader>
-      <CardContent className="grid grid-cols-2 gap-2 border-t border-border p-4 sm:grid-cols-4 sm:px-6">
-        <MiniMetric label="Shipments" value={formatNumber(period?.shipments)} />
-        <MiniMetric label="Orders" value={formatNumber(period?.orders)} />
-        <MiniMetric label="COD" value={formatNumber(period?.codOrders)} />
-        <MiniMetric label="Prepaid" value={formatNumber(period?.prepaidOrders)} />
-      </CardContent>
     </Card>
-  );
-}
-
-function MiniMetric({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="min-w-0">
-      <p className="truncate text-[10px] font-medium uppercase text-muted">{label}</p>
-      <p className="mt-1 truncate text-base font-semibold tabular-nums text-ink">{value}</p>
-    </div>
   );
 }
 
@@ -201,9 +181,20 @@ function seriesForPayFilter(series: AnalyticsSeriesPoint[], payFilter: PayFilter
   );
 }
 
+const PRESET_LABELS: Record<Exclude<AnalyticsDateFilterValue["kind"], "custom">, string> = {
+  today: "Today",
+  yesterday: "Yesterday",
+  month: "This month",
+  year: "This year",
+};
+
 export default function AnalyticsPage() {
-  const analytics = useAnalytics();
-  const [range, setRange] = useState<AnalyticsRange>("today");
+  const [dateFilter, setDateFilter] = useState<AnalyticsDateFilterValue>({ kind: "today" });
+  const analytics = useAnalytics(
+    dateFilter.kind === "custom"
+      ? { range: "custom", from: dateFilter.from, to: dateFilter.to }
+      : { range: dateFilter.kind }
+  );
   const [payFilter, setPayFilter] = useState<PayFilter>("all");
   const [now, setNow] = useState(() => Date.now());
 
@@ -213,9 +204,10 @@ export default function AnalyticsPage() {
   }, []);
 
   const data = analytics.data;
-  const period = data?.[range];
-  const series = seriesForPayFilter(data?.series[range] ?? [], payFilter);
-  const sources = data?.sources[range] ?? [];
+  const rangeReady = focusMatches(data?.focus, dateFilter);
+  const period = rangeReady ? data?.focus.period : undefined;
+  const series = seriesForPayFilter(rangeReady ? (data?.focus.series ?? []) : [], payFilter);
+  const sources = rangeReady ? (data?.focus.sources ?? []) : [];
   const prepaidOrders =
     payFilter === "COD" ? 0 : (period?.prepaidOrders ?? Math.max(0, (period?.orders ?? 0) - (period?.codOrders ?? 0)));
   const codOrders = payFilter === "PREPAID" ? 0 : (period?.codOrders ?? 0);
@@ -223,9 +215,24 @@ export default function AnalyticsPage() {
   const prepaidAmount = payFilter === "COD" ? 0 : (period?.prepaidAmount ?? 0);
   const indiaPost = indiaPostForFilter(period, payFilter);
   const hasActivity = Boolean(
-    data && (data.year.orders > 0 || data.year.shipments > 0 || data.year.indiaPostBooked > 0)
+    data &&
+      (data.year.orders > 0 ||
+        data.year.shipments > 0 ||
+        data.year.indiaPostBooked > 0 ||
+        data.focus.period.orders > 0 ||
+        data.focus.period.shipments > 0 ||
+        data.focus.period.indiaPostBooked > 0)
   );
-  const selectedRangeLabel = RANGES.find((item) => item.id === range)?.label ?? "Selected period";
+  const selectedRangeLabel =
+    dateFilter.kind === "custom"
+      ? formatAnalyticsCustomLabel(dateFilter.from, dateFilter.to)
+      : PRESET_LABELS[dateFilter.kind];
+  const paymentAmount = (source: AnalyticsPeriodKpi | undefined) =>
+    payFilter === "COD" ? source?.codAmount : payFilter === "PREPAID" ? source?.prepaidAmount : source?.revenue;
+  const currentRevenue = paymentAmount(period);
+  const totalRevenue = paymentAmount(data?.year);
+  const orders =
+    payFilter === "COD" ? period?.codOrders : payFilter === "PREPAID" ? period?.prepaidOrders : period?.orders;
   const showCodInsight = payFilter !== "PREPAID";
   const showPrepaidInsight = payFilter !== "COD";
 
@@ -236,7 +243,7 @@ export default function AnalyticsPage() {
         description="Live revenue, India Post booked amounts, sources, and COD vs prepaid for this workspace."
         className="gap-5"
         actions={
-          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
+          <div className="flex w-full min-w-0 flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
             <span
               className={cn(
                 "inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-border bg-card px-3 text-xs font-medium text-muted sm:justify-start"
@@ -248,20 +255,9 @@ export default function AnalyticsPage() {
               </span>
               {analytics.isError ? "Live feed paused" : liveLabel(analytics.dataUpdatedAt, now)}
             </span>
-            <Select value={range} onValueChange={(value) => setRange(value as AnalyticsRange)}>
-              <SelectTrigger className="w-full bg-card sm:w-[170px]">
-                <SelectValue placeholder="Range" />
-              </SelectTrigger>
-              <SelectContent>
-                {RANGES.map((item) => (
-                  <SelectItem key={item.id} value={item.id}>
-                    {item.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <AnalyticsDateFilter value={dateFilter} onChange={setDateFilter} />
             <Select value={payFilter} onValueChange={(value) => setPayFilter(value as PayFilter)}>
-              <SelectTrigger className="w-full bg-card sm:w-[170px]">
+              <SelectTrigger aria-label="Payment" className="w-full bg-card sm:w-[170px]">
                 <SelectValue placeholder="Payment" />
               </SelectTrigger>
               <SelectContent>
@@ -291,29 +287,35 @@ export default function AnalyticsPage() {
                   Performance
                 </p>
                 <h2 id="performance-heading" className="mt-1 text-lg font-semibold text-ink">
-                  Revenue overview
+                  {selectedRangeLabel}
                 </h2>
               </div>
               <p className="hidden text-sm text-muted sm:block">All times in Asia/Kolkata</p>
             </div>
-            <div className="grid gap-4 md:grid-cols-3">
-              <PeriodCard
-                label="Today"
-                period={data?.today}
-                active={range === "today"}
-                loading={analytics.isLoading && !data}
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              <MetricCard
+                label="Current revenue"
+                value={formatCurrency(currentRevenue)}
+                hint={`${selectedRangeLabel} · non-cancelled`}
+                loading={!rangeReady}
               />
-              <PeriodCard
-                label="This month"
-                period={data?.month}
-                active={range === "month"}
-                loading={analytics.isLoading && !data}
+              <MetricCard
+                label="Total revenue"
+                value={formatCurrency(totalRevenue)}
+                hint="This year · non-cancelled"
+                loading={!data}
               />
-              <PeriodCard
-                label="This year"
-                period={data?.year}
-                active={range === "year"}
-                loading={analytics.isLoading && !data}
+              <MetricCard
+                label="Orders"
+                value={formatNumber(orders)}
+                hint={payFilter === "all" ? "All payments" : payFilter === "COD" ? "Cash on delivery" : "Prepaid"}
+                loading={!rangeReady}
+              />
+              <MetricCard
+                label="Shipments"
+                value={formatNumber(period?.shipments)}
+                hint="Created in this range"
+                loading={!rangeReady}
               />
             </div>
           </section>
@@ -326,7 +328,7 @@ export default function AnalyticsPage() {
               </h2>
             </div>
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-              {analytics.isLoading && !data
+              {!rangeReady
                 ? Array.from({ length: 3 }, (_, index) => (
                     <Card key={index}>
                       <CardContent className="p-6">
@@ -341,7 +343,7 @@ export default function AnalyticsPage() {
                       label="India Post booked"
                       value={formatNumber(indiaPost.booked)}
                       hint={`${formatCurrency(indiaPost.amount)} booked order value`}
-                      loading={analytics.isLoading && !data}
+                      loading={!rangeReady}
                     />
                     {showCodInsight ? (
                       <InsightCard
@@ -350,7 +352,7 @@ export default function AnalyticsPage() {
                         value={formatNumber(indiaPost.codBooked)}
                         hint={`${formatCurrency(indiaPost.codAmount)} cash-on-delivery collect`}
                         tone="warning"
-                        loading={analytics.isLoading && !data}
+                        loading={!rangeReady}
                       />
                     ) : null}
                     {showPrepaidInsight ? (
@@ -359,7 +361,7 @@ export default function AnalyticsPage() {
                         label="Prepaid booked"
                         value={formatNumber(indiaPost.prepaidBooked)}
                         hint={`${formatCurrency(indiaPost.prepaidAmount)} prepaid order value`}
-                        loading={analytics.isLoading && !data}
+                        loading={!rangeReady}
                       />
                     ) : null}
                   </>
@@ -368,7 +370,7 @@ export default function AnalyticsPage() {
           </section>
 
           <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            {analytics.isLoading && !data
+            {!rangeReady
               ? Array.from({ length: 3 }, (_, index) => (
                   <Card key={index}>
                     <CardContent className="p-6">
@@ -385,7 +387,7 @@ export default function AnalyticsPage() {
                       value={formatNumber(codOrders)}
                       hint={`${formatCurrency(codAmount)} cash-on-delivery order value`}
                       tone="warning"
-                      loading={analytics.isLoading && !data}
+                      loading={!rangeReady}
                     />
                   ) : null}
                   {showPrepaidInsight ? (
@@ -394,7 +396,7 @@ export default function AnalyticsPage() {
                       label={`Prepaid orders · ${selectedRangeLabel}`}
                       value={formatNumber(prepaidOrders)}
                       hint={`${formatCurrency(prepaidAmount)} prepaid order value`}
-                      loading={analytics.isLoading && !data}
+                      loading={!rangeReady}
                     />
                   ) : null}
                   <InsightCard
@@ -406,13 +408,13 @@ export default function AnalyticsPage() {
                         ? `${formatNumber(Math.round(data.topSource.share))}% of orders · ${formatNumber(data.topSource.orders)} total`
                         : "No source data available yet"
                     }
-                    loading={analytics.isLoading && !data}
+                    loading={!rangeReady}
                   />
                 </>
               )}
           </section>
 
-          {analytics.isLoading && !data ? (
+          {!rangeReady ? (
             <section className="grid gap-4 xl:grid-cols-2">
               {Array.from({ length: 4 }, (_, index) => (
                 <Card key={index}>
