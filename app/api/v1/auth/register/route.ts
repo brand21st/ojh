@@ -30,6 +30,7 @@ export async function POST(request: NextRequest) {
           whatsapp_number: values.whatsapp,
           pincode: values.pincode,
           city: values.city,
+          india_post_contractual_customer: values.indiaPostContractualCustomer,
         },
         emailRedirectTo: authCallbackUrl("/dashboard"),
       },
@@ -75,6 +76,7 @@ export async function POST(request: NextRequest) {
           whatsapp_number: values.whatsapp,
           pincode: values.pincode,
           city: values.city,
+          india_post_contractual_customer: values.indiaPostContractualCustomer,
         })
         .eq("id", data.user.id);
       if (profileError) {

@@ -432,7 +432,7 @@ async function listAccountSignups(
   const range = listPageRange(page, pageSize, total);
   let query = supabase
     .from("profiles")
-    .select("id, email, full_name, whatsapp_number, pincode, city, created_at, last_active_at, active_organization_id")
+    .select("id, email, full_name, whatsapp_number, pincode, city, india_post_contractual_customer, created_at, last_active_at, active_organization_id")
     .order("created_at", { ascending: false })
     .range(range.from, range.to);
   const filter = signupSearchFilter(q);
@@ -476,6 +476,7 @@ async function listAccountSignups(
       whatsappNumber: profile.whatsapp_number ?? null,
       pincode: profile.pincode ?? null,
       city: profile.city ?? null,
+      indiaPostContractualCustomer: profile.india_post_contractual_customer ?? null,
       createdAt: profile.created_at,
       lastActiveAt: profile.last_active_at ?? null,
       organization: orgByUser.get(profile.id) ?? null,
@@ -494,7 +495,7 @@ async function listAbandonedSignups(
   const range = listPageRange(page, pageSize, total);
   let query = supabase
     .from("admin_abandoned_signups")
-    .select("id, email, full_name, whatsapp_number, pincode, city, created_at")
+    .select("id, email, full_name, whatsapp_number, pincode, city, india_post_contractual_customer, created_at")
     .order("created_at", { ascending: false })
     .range(range.from, range.to);
   const filter = signupSearchFilter(q);
@@ -510,6 +511,7 @@ async function listAbandonedSignups(
       whatsappNumber: row.whatsapp_number ?? null,
       pincode: row.pincode ?? null,
       city: row.city ?? null,
+      indiaPostContractualCustomer: row.india_post_contractual_customer ?? null,
       createdAt: row.created_at,
       lastActiveAt: null,
       organization: null,
@@ -561,8 +563,8 @@ async function attachWorkspaceExportFields(
   if (membersError) throw new AppError(ERROR_CODES.VALIDATION_ERROR, membersError.message);
   const userIds = [...new Set((members ?? []).map((row) => row.user_id))];
   const { data: profiles, error: profilesError } = userIds.length
-    ? await supabase.from("profiles").select("id, full_name, email, whatsapp_number, last_active_at").in("id", userIds)
-    : { data: [] as { id: string; full_name: string | null; email: string | null; whatsapp_number: string | null; last_active_at: string | null }[], error: null };
+    ? await supabase.from("profiles").select("id, full_name, email, whatsapp_number, india_post_contractual_customer, last_active_at").in("id", userIds)
+    : { data: [] as { id: string; full_name: string | null; email: string | null; whatsapp_number: string | null; india_post_contractual_customer: boolean | null; last_active_at: string | null }[], error: null };
   if (profilesError) throw new AppError(ERROR_CODES.VALIDATION_ERROR, profilesError.message);
 
   const profileById = new Map((profiles ?? []).map((row) => [row.id, row]));
@@ -598,6 +600,7 @@ async function attachWorkspaceExportFields(
       ownerName: ownerProfile?.full_name ?? null,
       ownerEmail: ownerProfile?.email ?? null,
       ownerWhatsapp: ownerProfile?.whatsapp_number ?? null,
+      ownerIndiaPostContractualCustomer: ownerProfile?.india_post_contractual_customer ?? null,
     };
   });
 }
@@ -633,7 +636,7 @@ async function listAbandonedForExport(supabase: AdminClient, q: string) {
   for (;;) {
     let query = supabase
       .from("admin_abandoned_signups")
-      .select("id, email, full_name, whatsapp_number, pincode, city, created_at")
+      .select("id, email, full_name, whatsapp_number, pincode, city, india_post_contractual_customer, created_at")
       .order("created_at", { ascending: false });
     const filter = signupSearchFilter(q);
     if (filter) query = query.or(filter);
@@ -648,6 +651,7 @@ async function listAbandonedForExport(supabase: AdminClient, q: string) {
         whatsapp_number: row.whatsapp_number ?? null,
         pincode: row.pincode ?? null,
         city: row.city ?? null,
+        india_post_contractual_customer: row.india_post_contractual_customer ?? null,
         created_at: row.created_at,
       }))
     );
@@ -806,7 +810,7 @@ async function handleAccounts(
       .limit(50);
     const { data: members } = await supabase
       .from("organization_members")
-      .select("user_id, role, profiles(email, full_name)")
+      .select("user_id, role, profiles(email, full_name, india_post_contractual_customer)")
       .eq("organization_id", orgId);
     return { account: org, subscription, payments: payments ?? [], usage: usage ?? [], history: history ?? [], members: members ?? [] };
   }

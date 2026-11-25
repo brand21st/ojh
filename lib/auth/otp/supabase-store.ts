@@ -13,13 +13,24 @@ type ChallengeDb = {
   last_sent_at: string;
   verified_at: string | null;
   status: OtpChallengeRow["status"];
-  signup_payload: { name?: string; business_name?: string; email?: string } | null;
+  signup_payload: {
+    name?: string;
+    business_name?: string;
+    email?: string;
+    india_post_contractual_customer?: boolean | string;
+  } | null;
   created_at: string;
 };
 
 function payloadFromDb(value: ChallengeDb["signup_payload"]): SignupPayload | null {
   if (!value?.name || !value.business_name || !value.email) return null;
-  return { name: value.name, businessName: value.business_name, email: value.email };
+  const contractual = value.india_post_contractual_customer;
+  return {
+    name: value.name,
+    businessName: value.business_name,
+    email: value.email,
+    indiaPostContractualCustomer: contractual === true || contractual === "true" || contractual === "yes",
+  };
 }
 
 function rowFromDb(row: ChallengeDb): OtpChallengeRow {
@@ -55,6 +66,7 @@ export function createSupabaseOtpStore(admin: SupabaseClient): OtpStore {
               name: input.signupPayload.name,
               business_name: input.signupPayload.businessName,
               email: input.signupPayload.email,
+              india_post_contractual_customer: input.signupPayload.indiaPostContractualCustomer,
             }
           : null,
         p_ip_hash: input.ipHash,
@@ -120,6 +132,7 @@ export function createSupabaseOtpStore(admin: SupabaseClient): OtpStore {
               name: row.signupPayload.name,
               business_name: row.signupPayload.businessName,
               email: row.signupPayload.email,
+              india_post_contractual_customer: row.signupPayload.indiaPostContractualCustomer,
             }
           : null,
         ip_hash: meta.ipHash,
@@ -172,6 +185,7 @@ export function createSupabaseOtpStore(admin: SupabaseClient): OtpStore {
             name: payload.name,
             business_name: payload.businessName,
             email: payload.email,
+            india_post_contractual_customer: payload.indiaPostContractualCustomer,
           },
         })
         .eq("id", id)

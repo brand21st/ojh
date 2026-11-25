@@ -18,6 +18,7 @@ import {
   type RegisterAccountValues,
 } from "@/lib/auth/register-schema";
 import { ApiError, api } from "@/lib/hooks/use-api";
+import { cn } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
 import {
   AUTH_INPUT_CLASS,
@@ -120,11 +121,20 @@ function PasswordRegister() {
   const form = useForm<RegisterAccountInput, unknown, RegisterAccountValues>({
     resolver: zodResolver(registerAccountSchema),
     mode: "onTouched",
-    defaultValues: { name: "", email: "", password: "", whatsapp: "", pincode: "", city: "" },
+    defaultValues: {
+      name: "",
+      email: "",
+      password: "",
+      whatsapp: "",
+      pincode: "",
+      city: "",
+      indiaPostContractualCustomer: undefined,
+    },
   });
   const errors = form.formState.errors;
   const pincodeValue = form.watch("pincode");
   const cityValue = form.watch("city");
+  const contractualChoice = form.watch("indiaPostContractualCustomer");
   const lookingUpCity = /^[1-9][0-9]{5}$/.test(String(pincodeValue ?? "")) && !String(cityValue ?? "").trim();
 
   async function onSubmit(values: RegisterAccountValues) {
@@ -242,6 +252,39 @@ function PasswordRegister() {
           <RegisterPincodeLookup form={form} />
         </div>
       </div>
+      <fieldset className="space-y-2">
+        <legend className="text-sm font-medium leading-none">Are you an India Post contractual customer?</legend>
+        <div className="grid grid-cols-2 gap-2">
+          {(
+            [
+              { value: "yes", label: "Yes" },
+              { value: "no", label: "No" },
+            ] as const
+          ).map((option) => {
+            const selected = contractualChoice === option.value;
+            return (
+              <label
+                key={option.value}
+                className={cn(
+                  "flex h-11 cursor-pointer items-center justify-center rounded-xl border text-sm font-medium transition-colors",
+                  selected
+                    ? "border-brand bg-brand/10 text-ink"
+                    : "border-border bg-white text-muted hover:border-ink/20 hover:text-ink dark:bg-card"
+                )}
+              >
+                <input
+                  type="radio"
+                  value={option.value}
+                  className="sr-only"
+                  {...form.register("indiaPostContractualCustomer")}
+                />
+                {option.label}
+              </label>
+            );
+          })}
+        </div>
+        <FieldError id="indiaPostContractualCustomer" message={errors.indiaPostContractualCustomer?.message} />
+      </fieldset>
       <div className="space-y-2">
         <Label htmlFor="password">Create a password</Label>
         <PasswordInput
@@ -283,6 +326,7 @@ function WhatsappRegister() {
   const [businessName, setBusinessName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
+  const [indiaPostContractualCustomer, setIndiaPostContractualCustomer] = useState<"yes" | "no" | "">("");
   const [challengeId, setChallengeId] = useState("");
   const [otp, setOtp] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -294,6 +338,10 @@ function WhatsappRegister() {
     setError(null);
     setBusy(true);
     try {
+      if (indiaPostContractualCustomer !== "yes" && indiaPostContractualCustomer !== "no") {
+        setError("Choose Yes or No.");
+        return;
+      }
       const result = await api<OtpSent>("/api/auth/otp/request", {
         method: "POST",
         body: JSON.stringify({
@@ -302,6 +350,7 @@ function WhatsappRegister() {
           name,
           business_name: businessName,
           email,
+          india_post_contractual_customer: indiaPostContractualCustomer,
         }),
       });
       setChallengeId(result.challengeId);
@@ -386,6 +435,31 @@ function WhatsappRegister() {
         <Label htmlFor="whatsapp">WhatsApp number</Label>
         <IndiaMobileInput id="whatsapp" value={phone} onChange={setPhone} />
       </div>
+      <fieldset className="space-y-2">
+        <legend className="text-sm font-medium leading-none">Are you an India Post contractual customer?</legend>
+        <div className="grid grid-cols-2 gap-2">
+          {(
+            [
+              { value: "yes", label: "Yes" },
+              { value: "no", label: "No" },
+            ] as const
+          ).map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              className={cn(
+                "flex h-11 items-center justify-center rounded-xl border text-sm font-medium transition-colors",
+                indiaPostContractualCustomer === option.value
+                  ? "border-brand bg-brand/10 text-ink"
+                  : "border-border bg-white text-muted hover:border-ink/20 hover:text-ink dark:bg-card"
+              )}
+              onClick={() => setIndiaPostContractualCustomer(option.value)}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      </fieldset>
       <SubmitButton pending={busy} pendingLabel="Sending code…" disabled={phone.length < 10}>
         Send OTP
       </SubmitButton>

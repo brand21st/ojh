@@ -9,6 +9,7 @@ import { StatusBadge } from "@/components/dashboard/status-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { api } from "@/lib/hooks/use-api";
+import { indiaPostContractualLabel } from "@/lib/auth/register-schema";
 import { formatDate, formatPaise } from "@/lib/format";
 
 export default function AdminAccountDetailPage() {
@@ -27,6 +28,16 @@ export default function AdminAccountDetailPage() {
     onError: (error: Error) => toast.error(error.message),
   });
   const account = query.data?.account as { name?: string; account_status?: string; slug?: string } | undefined;
+  const members = (query.data?.members as Array<{
+    role?: string;
+    profiles?:
+      | { india_post_contractual_customer?: boolean | null }
+      | { india_post_contractual_customer?: boolean | null }[]
+      | null;
+  }>) ?? [];
+  const ownerMember = members.find((row) => row.role === "OWNER") ?? members[0];
+  const ownerProfile = Array.isArray(ownerMember?.profiles) ? ownerMember?.profiles[0] : ownerMember?.profiles;
+  const indiaPostContractualCustomer = ownerProfile?.india_post_contractual_customer ?? null;
   const subscription = query.data?.subscription as {
     status?: string;
     billing_cycle?: string;
@@ -65,6 +76,10 @@ export default function AdminAccountDetailPage() {
           </CardHeader>
           <CardContent>
             <StatusBadge value={account?.account_status} />
+            <div className="mt-3 text-sm">
+              <div className="text-muted">India Post contractual customer</div>
+              <div className="font-medium text-ink">{indiaPostContractualLabel(indiaPostContractualCustomer)}</div>
+            </div>
           </CardContent>
         </Card>
         <Card>

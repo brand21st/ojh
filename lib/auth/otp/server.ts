@@ -35,6 +35,7 @@ function deps(): OtpDeps {
           email: input.email,
           phoneE164: input.phone,
           fullName: input.name,
+          indiaPostContractualCustomer: input.indiaPostContractualCustomer,
         });
       } catch (error) {
         if (error instanceof Error && error.message === "EMAIL_TAKEN") throw error;

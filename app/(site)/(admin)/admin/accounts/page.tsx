@@ -15,6 +15,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ADMIN_ACCOUNT_PAGE_SIZE } from "@/lib/admin/account-list";
 import { isUserOnline } from "@/lib/admin/user-presence";
 import { api } from "@/lib/hooks/use-api";
+import { indiaPostContractualLabel } from "@/lib/auth/register-schema";
 import { formatDate, formatNumber, formatRelative, initials } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -40,6 +41,7 @@ type SignupRow = {
   whatsappNumber: string | null;
   pincode: string | null;
   city: string | null;
+  indiaPostContractualCustomer?: boolean | null;
   createdAt: string;
   lastActiveAt?: string | null;
   organization: { id: string; name: string; slug: string } | null;
@@ -392,6 +394,7 @@ export default function AdminAccountsPage() {
                     <th className="hidden px-3 py-2 sm:table-cell">WhatsApp</th>
                     <th className="hidden px-3 py-2 sm:table-cell">PIN</th>
                     <th className="hidden px-3 py-2 sm:table-cell">City</th>
+                    <th className="hidden px-3 py-2 lg:table-cell">India Post contractual</th>
                     <th className="px-3 py-2">Workspace</th>
                     <th className="hidden px-3 py-2 md:table-cell">Created</th>
                   </tr>
@@ -419,6 +422,9 @@ export default function AdminAccountsPage() {
                       </td>
                       <td className="hidden px-3 py-2 text-muted sm:table-cell">
                         {signup.city || "—"}
+                      </td>
+                      <td className="hidden whitespace-nowrap px-3 py-2 text-muted lg:table-cell">
+                        {indiaPostContractualLabel(signup.indiaPostContractualCustomer)}
                       </td>
                       <td className="px-3 py-2">
                         {signup.organization ? (

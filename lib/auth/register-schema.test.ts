@@ -8,11 +8,13 @@ describe("registerAccountSchema", () => {
     password: "shipfast1",
     pincode: "560001",
     city: "Bengaluru",
+    indiaPostContractualCustomer: "yes" as const,
   };
 
   it("stores WhatsApp as +91 E.164 from 10 digits", () => {
     const parsed = registerAccountSchema.parse({ ...base, whatsapp: "9876543210" });
     expect(parsed.whatsapp).toBe("+919876543210");
+    expect(parsed.indiaPostContractualCustomer).toBe(true);
   });
 
   it("accepts formatted Indian numbers", () => {
@@ -51,5 +53,13 @@ describe("registerAccountSchema", () => {
   it("rejects a missing or too-short city", () => {
     expect(() => registerAccountSchema.parse({ ...base, whatsapp: "9876543210", city: "A" })).toThrow();
     expect(() => registerAccountSchema.parse({ ...base, whatsapp: "9876543210", city: "  " })).toThrow();
+  });
+
+  it("requires Yes or No for India Post contractual customer", () => {
+    expect(() =>
+      registerAccountSchema.parse({ ...base, whatsapp: "9876543210", indiaPostContractualCustomer: undefined })
+    ).toThrow();
+    expect(registerAccountSchema.parse({ ...base, whatsapp: "9876543210", indiaPostContractualCustomer: "no" }).indiaPostContractualCustomer).toBe(false);
+    expect(registerAccountSchema.parse({ ...base, whatsapp: "9876543210", indiaPostContractualCustomer: true }).indiaPostContractualCustomer).toBe(true);
   });
 });

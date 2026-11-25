@@ -70,6 +70,7 @@ export async function handleSessionRoutes(
         fullName: profile?.full_name,
         avatarUrl: profile?.avatar_url,
         whatsappNumber: profile?.whatsapp_number ?? null,
+        indiaPostContractualCustomer: profile?.india_post_contractual_customer ?? null,
         indiaPostOnboardingDismissedAt: profile?.india_post_onboarding_dismissed_at ?? null,
       },
       organization,

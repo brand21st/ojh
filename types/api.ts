@@ -16,6 +16,7 @@ export type MeUser = {
   fullName: string | null;
   avatarUrl: string | null;
   whatsappNumber?: string | null;
+  indiaPostContractualCustomer?: boolean | null;
   indiaPostOnboardingDismissedAt?: string | null;
   indiaPostBookingGuideHiddenAt?: string | null;
 };

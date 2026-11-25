@@ -40,6 +40,7 @@ describe("workspaceExportRows", () => {
       "Asha",
       "asha@example.com",
       "919876543210",
+      "",
       "2026-11-12T02:00:00.000Z",
       "2026-11-01T04:30:00.000Z",
       "org-1",
@@ -66,7 +67,7 @@ describe("workspaceExportRows", () => {
           ownerWhatsapp: null,
         },
       ])[1]
-    ).toEqual(["", "", "", "", "", "", "", "", "", "", "", "", "org-2"]);
+    ).toEqual(["", "", "", "", "", "", "", "", "", "", "", "", "", "org-2"]);
   });
 });
 
@@ -80,6 +81,7 @@ describe("abandonedExportRows", () => {
         whatsapp_number: "919800000000",
         pincode: "560001",
         city: "Bengaluru",
+        india_post_contractual_customer: true,
         created_at: "2026-10-02T10:00:00.000Z",
       },
       {
@@ -100,10 +102,11 @@ describe("abandonedExportRows", () => {
       "919800000000",
       "560001",
       "Bengaluru",
+      "Yes",
       "2026-10-02T10:00:00.000Z",
       "user-1",
     ]);
-    expect(rows[2]).toEqual(["", "", "", "", "", "", "user-2"]);
+    expect(rows[2]).toEqual(["", "", "", "", "", "", "", "user-2"]);
   });
 });
 

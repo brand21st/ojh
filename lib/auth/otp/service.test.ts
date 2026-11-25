@@ -84,7 +84,11 @@ function harness(now = { value: 1_700_000_000_000 }) {
   };
 }
 
-async function issuedCode(box: ReturnType<typeof harness>, purpose: "LOGIN" | "SIGNUP" = "LOGIN", signup?: { name: string; businessName: string; email: string }) {
+async function issuedCode(
+  box: ReturnType<typeof harness>,
+  purpose: "LOGIN" | "SIGNUP" = "LOGIN",
+  signup?: { name: string; businessName: string; email: string; indiaPostContractualCustomer: boolean }
+) {
   const result = await requestOtp(box.deps, {
     phone: PHONE,
     purpose,
@@ -154,6 +158,7 @@ describe("otp requests and verification", () => {
     const signup = await issuedCode(second, "SIGNUP", {
       name: "Priya",
       businessName: "Priya Stores",
+      indiaPostContractualCustomer: true,
       email: "priya@example.com",
     });
     expect(login.status).toBe("sent");
@@ -275,6 +280,7 @@ describe("otp requests and verification", () => {
     const signup = await issuedCode(existing, "SIGNUP", {
       name: "Other",
       businessName: "Other Stores",
+      indiaPostContractualCustomer: true,
       email: "other@example.com",
     });
     const signedIn = await verifyOtp(existing.deps, {
@@ -282,7 +288,7 @@ describe("otp requests and verification", () => {
       phone: PHONE,
       purpose: "SIGNUP",
       otp: signup.otp,
-      profile: { name: "Swapped", businessName: "Swapped", email: "swapped@example.com" },
+      profile: { name: "Swapped", businessName: "Swapped", email: "swapped@example.com", indiaPostContractualCustomer: true },
       ip: "203.0.113.8",
       userAgent: "vitest",
     });
@@ -298,6 +304,7 @@ describe("otp requests and verification", () => {
       const issued = await issuedCode(box, "SIGNUP", {
         name: "Priya",
         businessName: "Priya Stores",
+      indiaPostContractualCustomer: true,
         email: "priya@example.com",
       });
       await expect(
@@ -321,6 +328,7 @@ describe("otp requests and verification", () => {
     const issued = await issuedCode(box, "SIGNUP", {
       name: "Priya",
       businessName: "Priya Stores",
+      indiaPostContractualCustomer: true,
       email: "priya@example.com",
     });
     await expect(
@@ -329,7 +337,7 @@ describe("otp requests and verification", () => {
         phone: PHONE,
         purpose: "SIGNUP",
         otp: issued.otp,
-        profile: { name: "Nope", businessName: "Nope", email: "nope@example.com" },
+        profile: { name: "Nope", businessName: "Nope", email: "nope@example.com", indiaPostContractualCustomer: false },
         ip: "203.0.113.8",
         userAgent: "vitest",
       })
@@ -364,6 +372,7 @@ describe("otp requests and verification", () => {
     const issued = await issuedCode(box, "SIGNUP", {
       name: "Priya",
       businessName: "Priya Stores",
+      indiaPostContractualCustomer: true,
       email: "priya@example.com",
     });
     await expect(

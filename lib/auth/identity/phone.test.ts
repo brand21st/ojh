@@ -121,7 +121,7 @@ describe("duplicate phone verify", () => {
     const sent = await requestOtp(deps, {
       phone: "9876543210",
       purpose: "SIGNUP",
-      signup: { name: "Priya", businessName: "Priya Stores", email: "priya@example.com" },
+      signup: { name: "Priya", businessName: "Priya Stores", email: "priya@example.com", indiaPostContractualCustomer: true },
       ip: "203.0.113.8",
       userAgent: "vitest",
     });

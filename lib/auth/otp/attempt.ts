@@ -6,6 +6,7 @@ export type SignupPayload = {
   name: string;
   businessName: string;
   email: string;
+  indiaPostContractualCustomer?: boolean;
 };
 
 export type OtpChallengeRow = {

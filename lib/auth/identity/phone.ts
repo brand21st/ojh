@@ -2,7 +2,12 @@ import { randomBytes } from "crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { PhoneIdentity } from "@/lib/auth/otp/service";
 
-export function whatsappAuthUserPayload(input: { email: string; phoneE164: string; fullName: string }) {
+export function whatsappAuthUserPayload(input: {
+  email: string;
+  phoneE164: string;
+  fullName: string;
+  indiaPostContractualCustomer?: boolean;
+}) {
   return {
     email: input.email.trim().toLowerCase(),
     password: randomBytes(32).toString("base64url"),
@@ -12,6 +17,7 @@ export function whatsappAuthUserPayload(input: { email: string; phoneE164: strin
     user_metadata: {
       full_name: input.fullName.trim(),
       whatsapp_number: input.phoneE164,
+      india_post_contractual_customer: input.indiaPostContractualCustomer ?? null,
     },
   };
 }
@@ -66,7 +72,7 @@ export async function linkPhoneIdentity(admin: SupabaseClient, phone: string, us
 
 export async function createWhatsappAuthUser(
   admin: SupabaseClient,
-  input: { email: string; phoneE164: string; fullName: string }
+  input: { email: string; phoneE164: string; fullName: string; indiaPostContractualCustomer?: boolean }
 ) {
   const payload = whatsappAuthUserPayload(input);
   const { data, error } = await admin.auth.admin.createUser(payload);
@@ -80,6 +86,7 @@ export async function createWhatsappAuthUser(
       full_name: input.fullName.trim(),
       whatsapp_number: input.phoneE164,
       email: payload.email,
+      india_post_contractual_customer: input.indiaPostContractualCustomer ?? null,
     })
     .eq("id", data.user.id);
   if (profile.error) throw new Error(profile.error.message);

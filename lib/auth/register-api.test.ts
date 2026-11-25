@@ -31,6 +31,7 @@ const validBody = {
   whatsapp: "9876543210",
   pincode: "560001",
   city: "Bengaluru",
+  indiaPostContractualCustomer: "yes",
 };
 
 function post(body: unknown) {
@@ -90,6 +91,7 @@ describe("POST /api/v1/auth/register", () => {
             whatsapp_number: "+919876543210",
             pincode: "560001",
             city: "Bengaluru",
+            india_post_contractual_customer: true,
           },
           emailRedirectTo: expect.stringMatching(/\/auth\/callback\?next=%2Fdashboard$/),
         }),

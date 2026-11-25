@@ -11,6 +11,7 @@ export const WORKSPACE_EXPORT_HEADERS = [
   "Owner name",
   "Owner email",
   "Owner WhatsApp",
+  "India Post contractual",
   "Last active",
   "Created",
   "Organization ID",
@@ -22,6 +23,7 @@ export const ABANDONED_EXPORT_HEADERS = [
   "WhatsApp",
   "PIN",
   "City",
+  "India Post contractual",
   "Created",
   "User ID",
 ] as const;
@@ -42,6 +44,7 @@ export type WorkspaceExportSource = {
   ownerName?: string | null;
   ownerEmail?: string | null;
   ownerWhatsapp?: string | null;
+  ownerIndiaPostContractualCustomer?: boolean | null;
 };
 
 export type AbandonedExportSource = {
@@ -51,8 +54,15 @@ export type AbandonedExportSource = {
   whatsapp_number: string | null;
   pincode: string | null;
   city: string | null;
+  india_post_contractual_customer?: boolean | null;
   created_at: string | null;
 };
+
+function yesNo(value: boolean | null | undefined): SheetCell {
+  if (value === true) return "Yes";
+  if (value === false) return "No";
+  return "";
+}
 
 function cell(value: string | number | null | undefined): SheetCell {
   if (value == null) return "";
@@ -79,6 +89,7 @@ export function workspaceExportRows(rows: WorkspaceExportSource[]): SheetCell[][
       cell(row.ownerName),
       cell(row.ownerEmail),
       cell(row.ownerWhatsapp),
+      yesNo(row.ownerIndiaPostContractualCustomer),
       cell(row.lastActiveAt),
       cell(row.created_at),
       row.id,
@@ -95,6 +106,7 @@ export function abandonedExportRows(rows: AbandonedExportSource[]): SheetCell[][
       cell(row.whatsapp_number),
       cell(row.pincode),
       cell(row.city),
+      yesNo(row.india_post_contractual_customer),
       cell(row.created_at),
       row.id,
     ]),

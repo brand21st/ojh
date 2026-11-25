@@ -1,6 +1,20 @@
 import { z } from "zod";
 import { isIndiaWhatsappInput, toIndiaWhatsappE164 } from "@/lib/phone/india-whatsapp";
 
+export const indiaPostContractualChoiceSchema = z.enum(["yes", "no"], {
+  message: "Choose Yes or No.",
+});
+
+export function indiaPostContractualToBoolean(value: "yes" | "no" | boolean) {
+  return value === true || value === "yes";
+}
+
+export function indiaPostContractualLabel(value: boolean | null | undefined) {
+  if (value === true) return "Yes";
+  if (value === false) return "No";
+  return "—";
+}
+
 export const registerAccountSchema = z.object({
   name: z.string().trim().min(2, "Enter your name."),
   // Phone keyboards and autofill often leave a trailing space; Supabase stores emails lowercased.
@@ -17,6 +31,9 @@ export const registerAccountSchema = z.object({
     .trim()
     .regex(/^[1-9][0-9]{5}$/, "Enter a valid 6-digit PIN code."),
   city: z.string().trim().min(2, "Enter your city.").max(80, "Enter your city."),
+  indiaPostContractualCustomer: z
+    .union([z.boolean(), indiaPostContractualChoiceSchema])
+    .transform((value) => indiaPostContractualToBoolean(value)),
 });
 
 export type RegisterAccountInput = z.input<typeof registerAccountSchema>;
