@@ -12,7 +12,7 @@ import { loadHistoryForKey, loadOrderComposition } from "@/modules/autopack/hist
 import type { PackageOption, ResolvedShipmentDimensions } from "@/modules/shopify/dimensions";
 import { DEFAULT_INDIA_POST_SERVICE } from "@/types/domain";
 
-/** Merchant opt-in. Missing column or row reads as off. */
+/** Default on. Explicit false turns it off. Read errors stay off. */
 export async function isAutoPackageSelectionEnabled(supabase: SupabaseClient, organizationId: string) {
   try {
     const { data, error } = await supabase
@@ -21,7 +21,9 @@ export async function isAutoPackageSelectionEnabled(supabase: SupabaseClient, or
       .eq("organization_id", organizationId)
       .maybeSingle();
     if (error) return false;
-    return (data as { auto_package_selection?: boolean } | null)?.auto_package_selection === true;
+    const value = (data as { auto_package_selection?: boolean } | null)?.auto_package_selection;
+    if (value === false) return false;
+    return true;
   } catch {
     return false;
   }

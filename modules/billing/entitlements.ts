@@ -123,6 +123,8 @@ export function showsStarterOfficialIndiaPostLabel(input?: { slug?: string | nul
 }
 
 export function automationToggleLock(camel: string, allows: (feature: string) => boolean): string | null {
+  // AutoPack is on for every workspace. Do not hide the switch behind Pro or Shopify.
+  if (camel === "autoPackageSelection") return null;
   if (!allows(FEATURE.automation)) return FEATURE.automation;
   if (camel.startsWith("autoWati") && !allows(FEATURE.wati)) return FEATURE.wati;
   if (camel === "autoManifest" && !allows(FEATURE.manifests)) return FEATURE.manifests;

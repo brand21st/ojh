@@ -144,7 +144,7 @@ describe("packaging history capture", () => {
 describe("evaluateAutoPack", () => {
   const composition = buildShipmentComposition([{ variantId: "111", quantity: 2 }]);
 
-  it("auto-applies verified history only when the merchant opted in", async () => {
+  it("auto-applies verified history when AutoPack is on (default)", async () => {
     const db = setup();
     await recordMerchantBox(db.client, base({ measured: true }));
     const on = await evaluateAutoPack(db.client, { organizationId: ORG, orderId: "order-2", composition, presets: [] });
@@ -154,6 +154,14 @@ describe("evaluateAutoPack", () => {
     const off = await evaluateAutoPack(db.client, { organizationId: ORG, orderId: "order-2", composition, presets: [] });
     expect(off.autoChoice).toBeNull();
     expect(off.decision).toMatchObject({ kind: "CUSTOM_DIMENSIONS", autoApplicable: true });
+  });
+
+  it("treats a missing settings row as AutoPack on", async () => {
+    const db = setup();
+    db.rows("automation_settings").splice(0);
+    await recordMerchantBox(db.client, base({ measured: true }));
+    const result = await evaluateAutoPack(db.client, { organizationId: ORG, orderId: "order-2", composition, presets: [] });
+    expect(result.autoChoice).toMatchObject({ source: "autopack_history", lengthCm: 30, widthCm: 25, heightCm: 15 });
   });
 
   it("confirmed-only history is suggested, never auto-applied", async () => {

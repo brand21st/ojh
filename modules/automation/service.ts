@@ -80,7 +80,6 @@ export type AutomationRow = {
   auto_wati_in_transit?: boolean;
   auto_wati_delivered?: boolean;
   auto_label_printing?: boolean;
-  /** Not in AUTOMATION_DEFAULTS: the column default (false) applies, so inserts work before the migration. */
   auto_package_selection?: boolean;
   auto_ai_address_check?: boolean;
 };
@@ -102,6 +101,7 @@ export const AUTOMATION_DEFAULTS: Omit<AutomationRow, "organization_id"> = {
   auto_wati_in_transit: true,
   auto_wati_delivered: true,
   auto_label_printing: false,
+  auto_package_selection: true,
   auto_ai_address_check: false,
 };
 
@@ -140,8 +140,8 @@ export function mapAutomationSettings(row: AutomationRow): AutomationSettings {
     auto_wati_delivered: row.auto_wati_delivered ?? true,
     autoLabelPrinting: row.auto_label_printing ?? false,
     auto_label_printing: row.auto_label_printing ?? false,
-    autoPackageSelection: row.auto_package_selection ?? false,
-    auto_package_selection: row.auto_package_selection ?? false,
+    autoPackageSelection: row.auto_package_selection ?? true,
+    auto_package_selection: row.auto_package_selection ?? true,
     autoAiAddressCheck: row.auto_ai_address_check ?? false,
     auto_ai_address_check: row.auto_ai_address_check ?? false,
   };

@@ -40,6 +40,8 @@ beforeAll(async () => {
   await db.exec(migration("20261101130000_autopack_custom_sizes.sql"));
   // Re-running must be safe (deploy retries).
   await db.exec(migration("20261101130000_autopack_custom_sizes.sql"));
+  await db.exec(migration("20261125081925_autopack_on_for_all.sql"));
+  await db.exec(migration("20261125081925_autopack_on_for_all.sql"));
 
   org = (await db.query<{ id: string }>("insert into public.organizations default values returning id")).rows[0].id;
   order = (await db.query<{ id: string }>("insert into public.orders (organization_id) values ($1) returning id", [org])).rows[0].id;
@@ -78,20 +80,20 @@ async function insertHistory(overrides: Record<string, unknown> = {}) {
 }
 
 describe("AutoPack migration", () => {
-  it("adds variant columns, the opt-in flag (default off) and the history table", async () => {
+  it("adds variant columns, the AutoPack flag (default on) and the history table", async () => {
     const columns = await db.query<{ table_name: string; column_name: string; column_default: string | null }>(
       `select table_name, column_name, column_default from information_schema.columns
         where (table_name = 'order_line_items' and column_name in ('shopify_variant_id', 'shopify_product_id'))
            or (table_name = 'automation_settings' and column_name = 'auto_package_selection')`
     );
     expect(columns.rows).toHaveLength(3);
-    expect(columns.rows.find((row) => row.column_name === "auto_package_selection")?.column_default).toBe("false");
+    expect(columns.rows.find((row) => row.column_name === "auto_package_selection")?.column_default).toBe("true");
     await db.query("insert into public.automation_settings (organization_id) values ($1)", [org]);
     const flag = await db.query<{ auto_package_selection: boolean }>(
       "select auto_package_selection from public.automation_settings where organization_id = $1",
       [org]
     );
-    expect(flag.rows[0].auto_package_selection).toBe(false);
+    expect(flag.rows[0].auto_package_selection).toBe(true);
   });
 
   it("stores an entered custom box with defaults", async () => {

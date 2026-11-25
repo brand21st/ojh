@@ -93,6 +93,8 @@ describe("automation settings", () => {
     expect(mapped.auto_shopify_processing).toBe(false);
     expect(mapped.autoAiAddressCheck).toBe(false);
     expect(mapped.auto_ai_address_check).toBe(false);
+    expect(mapped.autoPackageSelection).toBe(true);
+    expect(mapped.auto_package_selection).toBe(true);
   });
 
   it("creates a row with service defaults when none exists", async () => {
@@ -107,6 +109,8 @@ describe("automation settings", () => {
     expect(AUTOMATION_DEFAULTS.auto_shopify_processing).toBe(false);
     expect(settings.autoAiAddressCheck).toBe(false);
     expect(AUTOMATION_DEFAULTS.auto_ai_address_check).toBe(false);
+    expect(settings.autoPackageSelection).toBe(true);
+    expect(AUTOMATION_DEFAULTS.auto_package_selection).toBe(true);
   });
 
   it("accepts camelCase and snake_case patches", async () => {
