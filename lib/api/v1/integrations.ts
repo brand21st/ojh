@@ -31,6 +31,8 @@ import {
   createShopifyOAuthState,
   exchangeShopifyToken,
   hasStoredClientSecret,
+  mergeShopifyScopes,
+  REQUIRED_SHOPIFY_OMS_SCOPES,
   normalizeShopDomain,
   oauthStateMatches,
   parseShopifyOAuthState,
@@ -457,7 +459,12 @@ export async function handleIntegrationRoutes(
       organization_id: ctx.organizationId,
       shop_domain: shopDomain,
       client_id: clientId,
-      requested_scopes: body.requestedScopes ?? body.requested_scopes ?? existing?.requested_scopes ?? env.shopifyScopes,
+      requested_scopes: mergeShopifyScopes(
+        body.requestedScopes ?? body.requested_scopes,
+        existing?.requested_scopes,
+        env.shopifyScopes,
+        REQUIRED_SHOPIFY_OMS_SCOPES
+      ),
       status: disconnectStore ? "DISCONNECTED" : existing?.status ?? "NOT_CONNECTED",
     };
     if (incomingSecret) {

@@ -11,7 +11,7 @@ embedded = true
 automatically_update_urls_on_dev = false
 
 [access_scopes]
-scopes = "read_orders,write_orders,read_products,read_fulfillments,write_fulfillments,read_merchant_managed_fulfillment_orders,write_merchant_managed_fulfillment_orders,read_locations"
+scopes = "read_orders,write_orders,read_products,read_fulfillments,write_fulfillments,read_merchant_managed_fulfillment_orders,write_merchant_managed_fulfillment_orders,read_third_party_fulfillment_orders,write_third_party_fulfillment_orders,read_locations"
 # Shopify managed install + token exchange; no OAuth redirect dance.
 use_legacy_install_flow = false
 

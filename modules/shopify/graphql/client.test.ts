@@ -73,6 +73,18 @@ describe("shopifyAdminGraphql", () => {
     await expect(shopifyAdminGraphql("demo.myshopify.com", "tok", "q", {}, d)).rejects.toThrow("Field 'nope' doesn't exist");
   });
 
+  it("keeps order data when Shopify only denies a nested field", async () => {
+    const d = deps([
+      json({
+        data: { order: { id: "gid://shopify/Order/1", fulfillmentOrders: { nodes: [] } } },
+        errors: [{ message: "Access denied for fulfillmentOrders field.", extensions: { code: "ACCESS_DENIED" } }],
+      }),
+    ]);
+    await expect(shopifyAdminGraphql("demo.myshopify.com", "tok", "q", {}, d)).resolves.toMatchObject({
+      data: { order: { id: "gid://shopify/Order/1" } },
+    });
+  });
+
   it("caps throttle waits", () => {
     expect(throttleWaitMs(cost(0, 1000, 1))).toBe(10_000);
     expect(throttleWaitMs(undefined)).toBe(0);

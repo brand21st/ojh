@@ -28,7 +28,7 @@ export const env = {
   shopifyApiSecret: optional(process.env.SHOPIFY_API_SECRET),
   shopifyScopes:
     optional(process.env.SHOPIFY_SCOPES) ||
-    "read_orders,write_orders,read_products,read_fulfillments,write_fulfillments,read_merchant_managed_fulfillment_orders,write_merchant_managed_fulfillment_orders,read_locations",
+    "read_orders,write_orders,read_products,read_fulfillments,write_fulfillments,read_merchant_managed_fulfillment_orders,write_merchant_managed_fulfillment_orders,read_third_party_fulfillment_orders,write_third_party_fulfillment_orders,read_locations",
   shopifyAppUrl: optional(process.env.SHOPIFY_APP_URL),
   // Distinct public Partner app. Never reuse SHOPIFY_API_KEY/SECRET (BYO connector).
   shopifyEmbeddedAppEnabled: optional(process.env.SHOPIFY_EMBEDDED_APP_ENABLED).toLowerCase() === "true",
@@ -37,7 +37,7 @@ export const env = {
   shopifyPublicAppApiVersion: optional(process.env.SHOPIFY_PUBLIC_APP_API_VERSION) || "2026-04",
   shopifyPublicAppScopes:
     optional(process.env.SHOPIFY_PUBLIC_APP_SCOPES) ||
-    "read_orders,write_orders,read_products,read_fulfillments,write_fulfillments,read_merchant_managed_fulfillment_orders,write_merchant_managed_fulfillment_orders,read_locations",
+    "read_orders,write_orders,read_products,read_fulfillments,write_fulfillments,read_merchant_managed_fulfillment_orders,write_merchant_managed_fulfillment_orders,read_third_party_fulfillment_orders,write_third_party_fulfillment_orders,read_locations",
   // Live CEPT defaults apply only outside POSTBUS_ENV=staging. Staging must set both URLs explicitly.
   indiaPostUatBaseUrl: isPostbusStagingRuntime()
     ? optional(process.env.INDIA_POST_UAT_BASE_URL)

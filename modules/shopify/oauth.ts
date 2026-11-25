@@ -39,10 +39,24 @@ export function hasStoredClientSecret(row?: ShopifyCredentialRow | null) {
   return Boolean(row?.encrypted_client_secret || row?.encrypted_api_secret);
 }
 
+export const REQUIRED_SHOPIFY_OMS_SCOPES =
+  "read_orders,write_orders,read_products,read_fulfillments,write_fulfillments,read_merchant_managed_fulfillment_orders,write_merchant_managed_fulfillment_orders,read_third_party_fulfillment_orders,write_third_party_fulfillment_orders,read_locations";
+
+export function mergeShopifyScopes(...lists: Array<string | null | undefined>) {
+  const seen = new Set<string>();
+  for (const list of lists) {
+    for (const scope of String(list ?? "").split(",")) {
+      const value = scope.trim();
+      if (value) seen.add(value);
+    }
+  }
+  return [...seen].join(",");
+}
+
 export function resolveShopifyAppCredentials(row?: ShopifyCredentialRow | null): ShopifyAppCredentials | null {
   const clientId = storedClientId(row) || env.shopifyApiKey;
   const clientSecret = storedClientSecret(row) || env.shopifyApiSecret;
-  const scopes = row?.requested_scopes?.trim() || env.shopifyScopes;
+  const scopes = mergeShopifyScopes(row?.requested_scopes, env.shopifyScopes, REQUIRED_SHOPIFY_OMS_SCOPES);
   if (!clientId || !clientSecret) return null;
   return { clientId, clientSecret, scopes };
 }

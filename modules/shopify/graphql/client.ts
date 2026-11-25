@@ -1,5 +1,6 @@
 import { env } from "@/lib/env";
 import { fetchWithShopifyTimeout, shopifyHttpError, type ShopifyHttpError } from "@/modules/shopify/http";
+import { normalizeShopDomain } from "@/modules/shopify/oauth";
 
 export type ShopifyGraphqlCost = {
   requestedQueryCost?: number;
@@ -47,6 +48,10 @@ function errorList(errors: GraphqlResponse<unknown>["errors"]): GraphqlError[] {
   return Array.isArray(errors) ? errors : [errors];
 }
 
+function isFieldAccessDenied(error: GraphqlError) {
+  return String(error.extensions?.code ?? "").toUpperCase() === "ACCESS_DENIED";
+}
+
 /**
  * Admin GraphQL call for the public app. Retries THROTTLED/429 with the bucket's restore rate and
  * paces itself when the bucket runs low, so paginated syncs never hammer a shop.
@@ -58,7 +63,7 @@ export async function shopifyAdminGraphql<T>(
   variables: Record<string, unknown> = {},
   deps: ShopifyGraphqlDeps = defaultDeps
 ): Promise<{ data: T; cost?: ShopifyGraphqlCost }> {
-  const url = `https://${shop}/admin/api/${shopifyGraphqlApiVersion()}/graphql.json`;
+  const url = `https://${normalizeShopDomain(shop)}/admin/api/${shopifyGraphqlApiVersion()}/graphql.json`;
   let lastError: ShopifyHttpError | null = null;
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
@@ -94,8 +99,9 @@ export async function shopifyAdminGraphql<T>(
     if (!response.ok) {
       throw shopifyHttpError(`Shopify GraphQL failed (${response.status}).`, response.status);
     }
-    if (errors.length || !json.data) {
-      throw shopifyHttpError(errors[0]?.message || "Shopify GraphQL returned no data.", 502, "GRAPHQL_ERROR");
+    const fatal = errors.filter((error) => !isFieldAccessDenied(error));
+    if (fatal.length || !json.data) {
+      throw shopifyHttpError(fatal[0]?.message || errors[0]?.message || "Shopify GraphQL returned no data.", 502, "GRAPHQL_ERROR");
     }
 
     // Pace the next call instead of waiting to be throttled.

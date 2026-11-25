@@ -3,6 +3,7 @@ import { createHmac } from "crypto";
 import { encryptSecret } from "@/lib/security/crypto";
 import {
   createShopifyOAuthState,
+  mergeShopifyScopes,
   normalizeShopDomain,
   oauthStateMatches,
   parseShopifyOAuthState,
@@ -125,11 +126,14 @@ describe("shopify credential helpers", () => {
       encrypted_client_secret: encryptSecret("org-secret"),
       requested_scopes: "read_orders,write_orders",
     };
-    expect(resolveShopifyAppCredentials(row)).toEqual({
-      clientId: "org-client-id",
-      clientSecret: "org-secret",
-      scopes: "read_orders,write_orders",
-    });
+    const creds = resolveShopifyAppCredentials(row);
+    expect(creds?.clientId).toBe("org-client-id");
+    expect(creds?.clientSecret).toBe("org-secret");
+    expect(creds?.scopes).toContain("read_orders");
+    expect(creds?.scopes).toContain("write_orders");
+    expect(creds?.scopes).toContain("read_merchant_managed_fulfillment_orders");
+    expect(creds?.scopes).toContain("read_third_party_fulfillment_orders");
+    expect(creds?.scopes).toContain("write_third_party_fulfillment_orders");
     expect(resolveShopifyWebhookSecrets(row)).toContain("org-secret");
     expect(shopifyAppConfiguredFor(row)).toBe(true);
   });
@@ -143,6 +147,12 @@ describe("shopify credential helpers", () => {
       clientId: "legacy-id",
       clientSecret: "legacy-secret",
     });
+  });
+
+  it("unions stored OAuth scopes with current OMS fulfillment-order scopes", () => {
+    expect(
+      mergeShopifyScopes("read_orders,write_orders", "read_orders,read_third_party_fulfillment_orders")
+    ).toBe("read_orders,write_orders,read_third_party_fulfillment_orders");
   });
 
   it("builds an install URL from passed credentials", () => {

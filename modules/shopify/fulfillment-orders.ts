@@ -5,6 +5,10 @@ import {
   shopifyLineItemGid,
   type ShopifyEligibilityFulfillmentOrder,
 } from "@/modules/shopify/eligibility";
+import { fetchWithShopifyTimeout } from "@/modules/shopify/http";
+import { normalizeShopDomain } from "@/modules/shopify/oauth";
+import { SHOPIFY_API_VERSION } from "@/modules/shopify/orders";
+import { isGraphqlOnlyShop } from "@/modules/shopify/token-source";
 
 export const SHOPIFY_ORDER_BOOKING_FULFILLMENT_ORDERS = `
   query PostBusOrderBookingFulfillmentOrders($id: ID!) {
@@ -112,6 +116,33 @@ export function mapRestFulfillmentOrders(payload: unknown): ShopifyEligibilityFu
   });
 }
 
+function shopifyNumericOrderId(orderId: string) {
+  const raw = String(orderId).trim();
+  const fromGid = raw.match(/\/(\d+)\s*$/);
+  const value = fromGid ? Number(fromGid[1]) : Number(raw);
+  return Number.isFinite(value) && value > 0 ? String(value) : raw.replace(/^gid:\/\/shopify\/Order\//, "");
+}
+
+async function fetchRestFulfillmentOrders(
+  shop: string,
+  token: string,
+  orderId: string,
+  deps?: ShopifyGraphqlDeps
+): Promise<ShopifyEligibilityFulfillmentOrder[]> {
+  const host = normalizeShopDomain(shop);
+  if (isGraphqlOnlyShop(host)) return [];
+  const numericId = shopifyNumericOrderId(orderId);
+  const url = `https://${host}/admin/api/${SHOPIFY_API_VERSION}/orders/${encodeURIComponent(numericId)}/fulfillment_orders.json`;
+  const fetchImpl = deps?.fetch ?? ((href, init) => fetchWithShopifyTimeout(href, init));
+  const response = await fetchImpl(url, {
+    method: "GET",
+    headers: { "X-Shopify-Access-Token": token, "Content-Type": "application/json" },
+  });
+  if (!response.ok) return [];
+  const json = (await response.json().catch(() => ({}))) as unknown;
+  return mapRestFulfillmentOrders(json);
+}
+
 export async function fetchShopifyOrderFulfillmentOrders(
   shop: string,
   token: string,
@@ -133,10 +164,14 @@ export async function fetchShopifyOrderFulfillmentOrders(
       code: "SHOPIFY_ORDER_MISSING",
     });
   }
+  let fulfillmentOrders = mapGraphqlFulfillmentOrders(order.fulfillmentOrders?.nodes);
+  if (!fulfillmentOrders.length) {
+    fulfillmentOrders = await fetchRestFulfillmentOrders(shop, token, orderId, deps);
+  }
   return {
     orderGid: order.id ?? gid,
     cancelledAt: order.cancelledAt ?? null,
     displayFulfillmentStatus: order.displayFulfillmentStatus ?? null,
-    fulfillmentOrders: mapGraphqlFulfillmentOrders(order.fulfillmentOrders?.nodes),
+    fulfillmentOrders,
   };
 }
