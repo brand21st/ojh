@@ -169,7 +169,8 @@ async function officesOrEmpty(provider: OfficeLookup, pin: string) {
 
 /**
  * Label PDFs are requested after India Post has already booked the article.
- * Use the saved booking office. A destination pincode-search must not fail the label.
+ * Use the saved booking office. A receiver in that same pincode is a local article
+ * and still prints. A destination pincode-search must not fail the label.
  */
 export async function resolveIndiaPostLabelOrigin(
   provider: OfficeLookup,
@@ -180,7 +181,7 @@ export async function resolveIndiaPostLabelOrigin(
 ) {
   const officeId = indiaPostBookingOfficeId(pickupOrDropoff, connection, pickup);
   const originPin = indiaPostOriginPincode(pickupOrDropoff, connection, pickup);
-  const dest = indiaPostSixDigitPin(destPin);
+  void destPin;
   if (!officeId) {
     throw Object.assign(
       new Error(
@@ -217,14 +218,6 @@ export async function resolveIndiaPostLabelOrigin(
     throw Object.assign(new Error("Unable to fetch India Post offices. Please try again."), {
       code: "TEMPORARY_PROVIDER_FAILURE",
     });
-  }
-  if (originPin === dest) {
-    throw Object.assign(
-      new Error(
-        `India Post origin pin ${originPin} matched the receiver pin. Set the booking office pincode to the origin office, not the receiver.`
-      ),
-      { code: "VALIDATION_ERROR" }
-    );
   }
   return {
     officeId,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { indiaPostBookingOfficeId, resolveIndiaPostOrigin } from "@/modules/india-post/origin";
+import { indiaPostBookingOfficeId, resolveIndiaPostLabelOrigin, resolveIndiaPostOrigin } from "@/modules/india-post/origin";
 
 describe("indiaPostBookingOfficeId", () => {
   it("uses the drop-off office for DROPOFF bookings", () => {
@@ -144,6 +144,62 @@ describe("resolveIndiaPostOrigin", () => {
       "683565"
     );
     expect(origin.pincode).toBe("682311");
+  });
+
+  it("allows a receiver in the same pincode as the booking office", async () => {
+    const origin = await resolveIndiaPostOrigin(
+      {
+        async searchPostOffices() {
+          return [
+            {
+              office_id: "22661397",
+              office_name: "Kuttippuram SO",
+              pincode: "679571",
+              city_name: "MALAPPURAM",
+              state_name: "Kerala",
+            },
+          ];
+        },
+      },
+      {
+        pickup_dropoff_office_id: "22661397",
+        pickup_dropoff_office_pincode: "679571",
+        pickup_dropoff_office_name: "Kuttippuram SO",
+      },
+      { pincode: "679571", city: "Malappuram", state: "Kerala" },
+      "679571"
+    );
+    expect(origin.officeId).toBe("22661397");
+    expect(origin.pincode).toBe("679571");
+    expect(origin.name).toBe("Kuttippuram SO");
+  });
+
+  it("prints a label when the receiver shares the booking office pincode", async () => {
+    const origin = await resolveIndiaPostLabelOrigin(
+      {
+        async searchPostOffices() {
+          return [
+            {
+              office_id: "22661397",
+              office_name: "Kuttippuram SO",
+              pincode: "679571",
+              city_name: "MALAPPURAM",
+              state_name: "Kerala",
+            },
+          ];
+        },
+      },
+      {
+        pickup_dropoff_office_id: "22661397",
+        pickup_dropoff_office_pincode: "679571",
+        pickup_dropoff_office_name: "Kuttippuram SO",
+      },
+      { pincode: "679571", city: "Malappuram", state: "Kerala" },
+      "679571"
+    );
+    expect(origin.officeId).toBe("22661397");
+    expect(origin.pincode).toBe("679571");
+    expect(origin.name).toBe("Kuttippuram SO");
   });
 
   it("throws the exact missing drop-off office error", async () => {
