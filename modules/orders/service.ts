@@ -1038,7 +1038,15 @@ export async function exportOrdersCsv(
   const { data, error } = await builder;
   if (error) throw new AppError(ERROR_CODES.VALIDATION_ERROR, error.message);
   const header = "order_number,source,status,total_amount,payment_status,customer,created_at";
-  const lines = (data ?? []).map((row) => {
+  const lines = ((data ?? []) as Array<{
+    order_number: string;
+    source: string;
+    status: string;
+    total_amount: number | string | null;
+    payment_status: string;
+    created_at: string;
+    customers: { name?: string } | null;
+  }>).map((row) => {
     const customer = row.customers as { name?: string } | null;
     return [
       row.order_number,
