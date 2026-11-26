@@ -170,7 +170,7 @@ export type DashboardAnalytics = {
   topSource: AnalyticsSourceShare | null;
   sources: Record<AnalyticsRange, AnalyticsSourceShare[]>;
   series: Record<AnalyticsRange, AnalyticsSeriesPoint[]>;
-  focus: AnalyticsFocus;
+  focus?: AnalyticsFocus;
 };
 
 export type CustomerSummary = {
