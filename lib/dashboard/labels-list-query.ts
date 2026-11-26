@@ -5,8 +5,10 @@ import {
 } from "@/modules/labels/date-range";
 import { parseOrdersPageParam, parseOrdersSortParam } from "@/lib/dashboard/orders-list-query";
 import type { OrderListSort } from "@/modules/orders/schema";
+import { ORDER_SOURCES, type OrderSource } from "@/types/domain";
 
 export type LabelKindUrlFilter = "ALL" | "COMPLETE" | "INCOMPLETE";
+export type LabelDownloadedFilter = "all" | "yes" | "no";
 
 export type LabelsListQueryState = {
   page: number;
@@ -17,12 +19,25 @@ export type LabelsListQueryState = {
   from: string | null;
   to: string | null;
   sort?: OrderListSort;
+  source: OrderSource | "all";
+  downloaded: LabelDownloadedFilter;
 };
 
 export function parseLabelKindParam(value?: string | null): LabelKindUrlFilter {
   const kind = String(value || "ALL").toUpperCase();
   if (kind === "COMPLETE" || kind === "INCOMPLETE") return kind;
   return "ALL";
+}
+
+export function parseLabelSourceParam(value?: string | null): OrderSource | "all" {
+  const source = String(value || "").toUpperCase();
+  return (ORDER_SOURCES as readonly string[]).includes(source) ? (source as OrderSource) : "all";
+}
+
+export function parseLabelDownloadedParam(value?: string | null): LabelDownloadedFilter {
+  const downloaded = String(value || "").toLowerCase();
+  if (downloaded === "yes" || downloaded === "no") return downloaded;
+  return "all";
 }
 
 export function parseLabelsListSearchParams(params: URLSearchParams | string): LabelsListQueryState {
@@ -40,6 +55,8 @@ export function parseLabelsListSearchParams(params: URLSearchParams | string): L
     from: date === "range" && from && to ? (from <= to ? from : to) : date === "range" ? from : null,
     to: date === "range" && from && to ? (from <= to ? to : from) : date === "range" ? to : null,
     sort: parseOrdersSortParam(search.get("sort")),
+    source: parseLabelSourceParam(search.get("source")),
+    downloaded: parseLabelDownloadedParam(search.get("downloaded")),
   };
 }
 
@@ -55,6 +72,8 @@ export function serializeLabelsListSearchParams(state: LabelsListQueryState): st
   }
   if (state.page > 1) next.set("page", String(state.page));
   if (state.sort) next.set("sort", state.sort);
+  if (state.source !== "all") next.set("source", state.source);
+  if (state.downloaded !== "all") next.set("downloaded", state.downloaded);
   return next.toString();
 }
 
@@ -77,5 +96,7 @@ export function labelsApiSearchParams(state: LabelsListQueryState, pageSize = 20
     params.set("to", state.to);
   }
   if (state.sort) params.set("sort", state.sort);
+  if (state.source !== "all") params.set("source", state.source);
+  if (state.downloaded !== "all") params.set("downloaded", state.downloaded);
   return params;
 }

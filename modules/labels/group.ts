@@ -32,6 +32,25 @@ function createdMs(row: { createdAt?: unknown; created_at?: unknown }) {
   return Number.isNaN(time) ? 0 : time;
 }
 
+function downloadStamp(row: { downloadedAt?: unknown; downloaded_at?: unknown }) {
+  const raw = row.downloadedAt ?? row.downloaded_at;
+  if (raw == null || raw === "") return null;
+  const time = Date.parse(String(raw));
+  if (Number.isNaN(time)) return null;
+  return { iso: String(raw), time };
+}
+
+function keepLaterDownload(
+  existing: { downloadedAt?: string | null; downloaded_at?: string | null },
+  incoming: { downloadedAt?: unknown; downloaded_at?: unknown }
+) {
+  const current = downloadStamp(existing);
+  const next = downloadStamp(incoming);
+  const winner = !next ? current : !current || next.time > current.time ? next : current;
+  existing.downloadedAt = winner?.iso ?? null;
+  existing.downloaded_at = winner?.iso ?? null;
+}
+
 export function groupLabelsByShipment(rows: ReturnType<typeof mapLabelRow>[]): MappedLabelRow[] {
   const order: string[] = [];
   const groups = new Map<string, MappedLabelRow>();
@@ -72,6 +91,7 @@ export function groupLabelsByShipment(rows: ReturnType<typeof mapLabelRow>[]): M
       if (isMerchant(existing.kind)) {
         const packingId = existing.packingLabelId ?? null;
         const packingStatus = existing.packingStatus ?? null;
+        const priorDownload = downloadStamp(existing);
         Object.assign(existing, row, {
           packingLabelId: packingId,
           packing_label_id: packingId,
@@ -82,7 +102,17 @@ export function groupLabelsByShipment(rows: ReturnType<typeof mapLabelRow>[]): M
           barcodeStatus: String(row.status || ""),
           barcode_status: String(row.status || ""),
         });
+        if (priorDownload) {
+          existing.downloadedAt = priorDownload.iso;
+          existing.downloaded_at = priorDownload.iso;
+        }
       }
+    }
+
+    keepLaterDownload(existing, row);
+    if (!existing.orderSource && row.orderSource) {
+      existing.orderSource = row.orderSource;
+      existing.order_source = row.order_source;
     }
 
     if (createdMs(row) > createdMs(existing)) {

@@ -672,6 +672,10 @@ export type LabelRecord = {
   tracking_number?: string | null;
   orderNumber?: string | null;
   order_number?: string | null;
+  orderSource?: string | null;
+  order_source?: string | null;
+  downloadedAt?: string | null;
+  downloaded_at?: string | null;
   printStatus?: string | null;
   print_status?: string | null;
   printError?: string | null;

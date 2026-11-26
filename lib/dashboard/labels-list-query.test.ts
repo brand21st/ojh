@@ -34,9 +34,24 @@ describe("labels list query", () => {
       on: null,
       from: null,
       to: null,
+      source: "all",
+      downloaded: "all",
     });
     expect(params.get("date")).toBeNull();
     expect(params.get("from")).toBeNull();
+    expect(params.get("source")).toBeNull();
+    expect(params.get("downloaded")).toBeNull();
+  });
+
+  it("round-trips source and downloaded filters", () => {
+    const state = parseLabelsListSearchParams("source=SHOPIFY&downloaded=no");
+    expect(state.source).toBe("SHOPIFY");
+    expect(state.downloaded).toBe("no");
+    expect(serializeLabelsListSearchParams(state)).toBe("source=SHOPIFY&downloaded=no");
+    expect(labelsApiSearchParams(state).get("source")).toBe("SHOPIFY");
+    expect(labelsApiSearchParams(state).get("downloaded")).toBe("no");
+    expect(parseLabelsListSearchParams("source=other&downloaded=maybe").source).toBe("all");
+    expect(parseLabelsListSearchParams("downloaded=maybe").downloaded).toBe("all");
   });
 
   it("writes order-number sort on the labels URL and API query", () => {
@@ -53,6 +68,8 @@ describe("labels list query", () => {
         from: null,
         to: null,
         sort: "-order_number",
+        source: "all",
+        downloaded: "all",
       }).get("sort")
     ).toBe("-order_number");
   });
