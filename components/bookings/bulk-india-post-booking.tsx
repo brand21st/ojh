@@ -2,45 +2,21 @@
 
 import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { FileSpreadsheet, Truck } from "lucide-react";
+import { Truck } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  BookedExportPartsDialog,
+  bookedSelectionMessage,
+  downloadBookedExport,
+  exportRequestBody,
+  type BookedExportPlan,
+} from "@/components/booking-queue/export-booked-dialog";
+import { precheckOrderIds } from "@/components/orders/booking-precheck";
 import { PrebookingReviewDialog } from "@/components/orders/prebooking-review-dialog";
 import { api } from "@/lib/hooks/use-api";
-import type { BulkBookingResult } from "@/types/api";
-
-function Counts({ result }: { result: BulkBookingResult | undefined }) {
-  if (!result) return null;
-  const items = [
-    ["Total", result.total],
-    ["Valid", result.valid],
-    ["Invalid", result.invalid],
-    ["Queued", result.queued],
-    ["Retrying", result.retrying],
-    ["Processing", result.processing],
-    ["Booked", result.booked],
-    ["Failed", result.failed],
-    ["Labels", result.labelsGenerated],
-    ["Manifest eligible", result.manifestEligible],
-  ] as const;
-  return (
-    <dl className="grid grid-cols-3 gap-2 text-sm sm:grid-cols-5">
-      {items.map(([label, value]) => (
-        <div key={label} className="rounded-lg border border-border px-2 py-1.5">
-          <dt className="text-xs text-muted-foreground">{label}</dt>
-          <dd className="font-semibold">{value}</dd>
-        </div>
-      ))}
-    </dl>
-  );
-}
+import { needsContactCorrection } from "@/modules/orders/contact-correction";
+import type { AutomationSettings, BulkBookingResult, PrebookingCheckResult } from "@/types/api";
 
 export function BulkIndiaPostBooking({
   selectedIds,
@@ -53,27 +29,18 @@ export function BulkIndiaPostBooking({
   size?: "default" | "sm" | "xs" | "icon-xs";
   iconOnly?: boolean;
 }) {
-  const [open, setOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
-  const [result, setResult] = useState<BulkBookingResult | null>(null);
-
-  const summary = useQuery({
-    queryKey: ["bookings-summary", selectedIds.join(",")],
-    enabled: open && selectedIds.length > 0,
-    refetchInterval: 4000,
-    queryFn: () =>
-      api<BulkBookingResult>(`/api/v1/bookings/summary?orderIds=${encodeURIComponent(selectedIds.join(","))}`),
+  const [reviewIds, setReviewIds] = useState<string[]>([]);
+  const [reviewSeed, setReviewSeed] = useState<PrebookingCheckResult | null>(null);
+  const [preparing, setPreparing] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [exportPlan, setExportPlan] = useState<BookedExportPlan | null>(null);
+  const [partsOpen, setPartsOpen] = useState(false);
+  const automation = useQuery({
+    queryKey: ["automation"],
+    queryFn: () => api<AutomationSettings>("/api/v1/automation"),
   });
-
-  const validate = useMutation({
-    mutationFn: (orderIds: string[]) =>
-      api<BulkBookingResult>("/api/v1/bookings/validate", {
-        method: "POST",
-        body: JSON.stringify({ orderIds }),
-      }),
-    onSuccess: (data) => setResult(data),
-    onError: (error: Error) => toast.error(error.message),
-  });
+  const allowAi = automation.data?.autoAiAddressCheck ?? automation.data?.auto_ai_address_check ?? false;
 
   const queue = useMutation({
     mutationFn: (orderIds: string[]) =>
@@ -82,41 +49,62 @@ export function BulkIndiaPostBooking({
         body: JSON.stringify({ orderIds }),
       }),
     onSuccess: (data) => {
-      setResult(data);
       toast.success(`${data.queued} articles queued for India Post.`);
       onQueued?.();
     },
     onError: (error: Error) => toast.error(error.message),
   });
 
-  const excel = useMutation({
-    mutationFn: async ({ file, queueJobs }: { file: File; queueJobs: boolean }) => {
-      const body = new FormData();
-      body.append("file", file);
-      if (queueJobs) body.append("queue", "true");
-      return api<BulkBookingResult>("/api/v1/bookings/excel", { method: "POST", body });
-    },
-    onSuccess: (data, variables) => {
-      setResult(data);
-      if (variables.queueJobs) toast.success(`${data.queued} Excel articles queued.`);
-    },
-    onError: (error: Error) => toast.error(error.message),
-  });
-
-  const live = summary.data;
-  const shown = result
-    ? {
-        ...result,
-        queued: live?.queued ?? result.queued,
-        retrying: live?.retrying ?? result.retrying,
-        processing: live?.processing ?? result.processing,
-        booked: live?.booked ?? result.booked,
-        failed: live?.failed ?? result.failed,
-        labelsGenerated: live?.labelsGenerated ?? result.labelsGenerated,
-        manifestEligible: live?.manifestEligible ?? result.manifestEligible,
+  async function startBulk() {
+    setPreparing(true);
+    try {
+      const checked = await precheckOrderIds(selectedIds, () => undefined, { allowAi, forceAi: false });
+      const correctable = checked.orders.filter((order) => needsContactCorrection(order.issues));
+      const ready = checked.orders.filter((order) => order.status === "ready").map((order) => order.orderId);
+      if (ready.length) queue.mutate(ready);
+      if (correctable.length) {
+        setReviewIds(correctable.map((order) => order.orderId));
+        setReviewSeed({ ...checked, orders: correctable });
+        setReviewOpen(true);
+        return;
       }
-    : live;
-  const issues = shown?.issues ?? [];
+      if (!ready.length) {
+        toast.message("No selected orders are ready to book, and none have a mobile number or PIN to correct here.");
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not check the selected orders.");
+    } finally {
+      setPreparing(false);
+    }
+  }
+
+  async function downloadExcel() {
+    const filters = { orderIds: selectedIds };
+    setExporting(true);
+    try {
+      const plan = await api<BookedExportPlan>("/api/v1/booking-queue/export/plan", {
+        method: "POST",
+        body: JSON.stringify(exportRequestBody(filters)),
+      });
+      const skipped = Math.max(0, selectedIds.length - plan.total);
+      if (plan.parts.length <= 1 && plan.parts[0]) {
+        const saved = await downloadBookedExport(filters, plan.parts[0]);
+        if (saved) toast.success(bookedSelectionMessage(selectedIds.length, plan.total));
+        return;
+      }
+      setExportPlan(plan);
+      setPartsOpen(true);
+      if (skipped > 0) {
+        toast.message(
+          `${skipped} selected order${skipped === 1 ? " is" : "s are"} not booked yet and will be left out of the Excel.`
+        );
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not export the India Post Excel.");
+    } finally {
+      setExporting(false);
+    }
+  }
 
   return (
     <>
@@ -124,128 +112,39 @@ export function BulkIndiaPostBooking({
         type="button"
         variant="secondary"
         size={iconOnly ? "icon-xs" : size}
-        disabled={selectedIds.length === 0}
+        disabled={selectedIds.length === 0 || preparing || queue.isPending}
         title="Bulk book"
         aria-label="Bulk book"
-        onClick={() => setReviewOpen(true)}
+        onClick={() => void startBulk()}
       >
         <Truck className="size-4" />
         {iconOnly ? null : "Bulk book"}
       </Button>
       {iconOnly ? null : (
-        <Button type="button" variant="ghost" size={size} disabled={selectedIds.length === 0} onClick={() => { setOpen(true); setResult(null); }}>
-          Excel
+        <Button
+          type="button"
+          variant="ghost"
+          size={size}
+          disabled={selectedIds.length === 0 || exporting}
+          onClick={() => void downloadExcel()}
+        >
+          {exporting ? "Excel…" : "Excel"}
         </Button>
       )}
       <PrebookingReviewDialog
         open={reviewOpen}
         onOpenChange={setReviewOpen}
-        orderIds={selectedIds}
-        onBookReady={(ids) => {
-          queue.mutate(ids);
-          setReviewOpen(false);
-        }}
+        orderIds={reviewIds}
+        seed={reviewSeed}
+        allowAi={allowAi}
       />
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-h-[90vh] max-w-4xl overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>India Post bulk booking</DialogTitle>
-            <DialogDescription>
-              Validate Shopify orders before queueing. Invalid rows stay out of the queue. OTP is not used.
-            </DialogDescription>
-          </DialogHeader>
-          <Counts result={shown} />
-          <div className="flex flex-wrap gap-2">
-            <Button
-              type="button"
-              disabled={selectedIds.length === 0 || validate.isPending}
-              onClick={() => validate.mutate(selectedIds)}
-            >
-              {validate.isPending ? "Validating…" : "Validate selected"}
-            </Button>
-            <Button
-              type="button"
-              disabled={!result || result.valid === 0 || queue.isPending}
-              onClick={() => queue.mutate(selectedIds)}
-            >
-              {queue.isPending ? "Queueing…" : `Queue ${result?.valid ?? 0} valid`}
-            </Button>
-            <label className="inline-flex cursor-pointer items-center gap-2 text-sm">
-              <FileSpreadsheet className="size-4" />
-              Excel
-              <input
-                type="file"
-                accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                className="hidden"
-                onChange={(event) => {
-                  const file = event.target.files?.[0];
-                  if (file) excel.mutate({ file, queueJobs: false });
-                  event.target.value = "";
-                }}
-              />
-            </label>
-            {result && result.valid > 0 && result.rows.some((row) => !row.orderId) ? (
-              <Button
-                type="button"
-                variant="secondary"
-                disabled={excel.isPending}
-                onClick={() => {
-                  toast.message("Re-upload the same workbook and choose Queue Excel.");
-                }}
-              >
-                Queue Excel after a second upload
-              </Button>
-            ) : null}
-            <label className="inline-flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
-              Queue Excel
-              <input
-                type="file"
-                accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                className="hidden"
-                onChange={(event) => {
-                  const file = event.target.files?.[0];
-                  if (file) excel.mutate({ file, queueJobs: true });
-                  event.target.value = "";
-                }}
-              />
-            </label>
-          </div>
-          <div className="overflow-x-auto rounded-lg border">
-            <table className="w-full text-left text-sm">
-              <thead className="bg-muted/40">
-                <tr>
-                  <th className="px-2 py-1.5">Order</th>
-                  <th className="px-2 py-1.5">Barcode</th>
-                  <th className="px-2 py-1.5">Field</th>
-                  <th className="px-2 py-1.5">Value</th>
-                  <th className="px-2 py-1.5">Error</th>
-                  <th className="px-2 py-1.5">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {issues.length ? (
-                  issues.map((issue, index) => (
-                    <tr key={`${issue.orderId}-${issue.field}-${index}`} className="border-t">
-                      <td className="px-2 py-1.5">{issue.orderNumber ?? issue.orderId ?? "—"}</td>
-                      <td className="px-2 py-1.5 font-mono text-xs">{issue.barcode ?? "—"}</td>
-                      <td className="px-2 py-1.5">{issue.field}</td>
-                      <td className="px-2 py-1.5">{issue.value || "—"}</td>
-                      <td className="px-2 py-1.5">{issue.error}</td>
-                      <td className="px-2 py-1.5">{issue.status}</td>
-                    </tr>
-                  ))
-                ) : (
-                  <tr>
-                    <td className="px-2 py-3 text-muted-foreground" colSpan={6}>
-                      {shown?.valid ? "All selected orders passed local validation." : "Run validation to see field errors."}
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <BookedExportPartsDialog
+        open={partsOpen}
+        onOpenChange={setPartsOpen}
+        plan={exportPlan}
+        filters={{ orderIds: selectedIds }}
+        skipped={Math.max(0, selectedIds.length - (exportPlan?.total ?? 0))}
+      />
     </>
   );
 }

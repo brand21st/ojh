@@ -22,6 +22,7 @@ export const BOOKED_EXPORT_MAX = 5000;
 
 export type BookedExportQuery = {
   shipmentIds?: string[];
+  orderIds?: string[];
   search?: string;
   source?: string;
   from?: string;
@@ -108,18 +109,29 @@ export function bookedShipmentRow(shipment: ExportShipment, sender: Sender, send
   return articleDetailsRow({ ...draft, otp: indiaPostRequiresOtp(serviceCode) }, serial);
 }
 
+function uniqueIds(ids: string[] | undefined) {
+  return [...new Set((ids ?? []).map((id) => String(id).trim()).filter(Boolean))];
+}
+
+/** A selection export names shipments or orders. A filter export does not. */
+export function bookedExportIsSelection(query: BookedExportQuery) {
+  return uniqueIds(query.orderIds).length > 0 || uniqueIds(query.shipmentIds).length > 0;
+}
+
 async function loadBookedShipments(supabase: SupabaseClient, ctx: TenantContext, query: BookedExportQuery) {
   let request = supabase
     .from("shipments")
     .select(EXPORT_SELECT)
     .eq("organization_id", ctx.organizationId)
     .not("booked_at", "is", null);
-  const ids = [...new Set((query.shipmentIds ?? []).map((id) => String(id).trim()).filter(Boolean))];
-  if (ids.length) {
+  const orderIds = uniqueIds(query.orderIds);
+  const shipmentIds = uniqueIds(query.shipmentIds);
+  if (orderIds.length || shipmentIds.length) {
+    const ids = orderIds.length ? orderIds : shipmentIds;
     if (ids.length > BOOKED_EXPORT_MAX) {
       throw new AppError(ERROR_CODES.VALIDATION_ERROR, `Export at most ${BOOKED_EXPORT_MAX} shipments at a time.`);
     }
-    request = request.in("id", ids);
+    request = request.in(orderIds.length ? "order_id" : "id", ids);
   } else {
     if (query.from) request = request.gte("booked_at", query.from);
     if (query.to) request = request.lte("booked_at", query.to);
@@ -176,14 +188,14 @@ async function exportContext(supabase: SupabaseClient, organizationId: string) {
   const sender = organizationLabelSender(org, pickup, shop?.shop_name);
   return {
     sender,
-    senderCompany: String(org?.name || pickup?.name || sender.name || ""),
+    senderCompany: sender.company,
     storeName: String(org?.name || shop?.shop_name || "store"),
     limit: normalizeExcelBookingLimit((connection as { excel_booking_limit?: unknown } | null)?.excel_booking_limit),
   };
 }
 
 async function prepareBookedExport(supabase: SupabaseClient, ctx: TenantContext, query: BookedExportQuery) {
-  assertBookingQueueEnabled(ctx);
+  if (!bookedExportIsSelection(query)) assertBookingQueueEnabled(ctx);
   const [shipments, context] = await Promise.all([
     loadBookedShipments(supabase, ctx, query),
     exportContext(supabase, ctx.organizationId),

@@ -7,6 +7,7 @@ import {
   approveAllWaiting,
   approveItems,
   dispatchItems,
+  dispatchOfficeGroup,
   excludeItems,
   QUEUE_ACTION_MAX_ITEMS,
   revalidateItems,
@@ -20,6 +21,7 @@ import {
   getQueueItem,
   listBookingHistory,
   listQueueItems,
+  listReadyOfficeGroups,
   queueSummary,
 } from "@/modules/booking-queue/service";
 
@@ -38,6 +40,7 @@ async function body<T>(request: NextRequest, schema: z.ZodType<T>, message: stri
 
 const exportSchema = z.object({
   shipmentIds: z.array(z.string().uuid()).max(BOOKED_EXPORT_MAX).optional(),
+  orderIds: z.array(z.string().uuid()).max(BOOKED_EXPORT_MAX).optional(),
   q: z.string().max(200).optional(),
   source: z.string().max(40).optional(),
   from: z.string().max(40).optional(),
@@ -77,7 +80,7 @@ function listQuery(request: NextRequest) {
  * POST booking-queue/dispatch   { itemIds, idempotencyKey } book approved orders with India Post
  * GET  booking-queue/settings   automation settings (mode, sources, batch size, maximum wait, paused)
  * PATCH booking-queue/settings  { version, ... } save; owners and admins only
- * POST booking-queue/export/plan  { shipmentIds? | q, source, from, to } files an export would produce
+ * POST booking-queue/export/plan  { shipmentIds? | orderIds? | q, source, from, to } files an export would produce
  * POST booking-queue/export       { ..., part } one India Post ArticleDetails workbook of booked shipments
  * Off unless the workspace is in BOOKING_QUEUE_ORGS: reads report enabled:false, enqueue is refused.
  */
@@ -91,6 +94,14 @@ export async function handleBookingQueueRoutes(
   if (slugs[0] !== "booking-queue") return null;
   if (method === "GET" && slugs.length === 1) return listQueueItems(supabase, ctx, listQuery(request));
   if (method === "GET" && slugs[1] === "summary" && slugs.length === 2) return queueSummary(supabase, ctx);
+  if (slugs[1] === "office-groups" && slugs.length === 2) {
+    if (method === "GET") return listReadyOfficeGroups(supabase, ctx);
+    if (method === "POST") {
+      const parsed = z.object({ officeId: z.string().trim().min(1).max(32) }).safeParse(await request.json().catch(() => ({})));
+      if (!parsed.success) throw new AppError(ERROR_CODES.VALIDATION_ERROR, "Choose a booking office.");
+      return dispatchOfficeGroup(supabase, ctx, parsed.data.officeId);
+    }
+  }
   if (slugs[1] === "settings" && slugs.length === 2) {
     if (method === "GET") return getBookingAutomationSettings(supabase, ctx);
     if (method === "PATCH") return saveBookingAutomationSettings(supabase, ctx, await request.json().catch(() => ({})));
@@ -120,7 +131,14 @@ export async function handleBookingQueueRoutes(
   }
   if (method === "POST" && slugs[1] === "export") {
     const input = await body(request, exportSchema, "Choose the shipments or filters to export.");
-    const query = { shipmentIds: input.shipmentIds, search: input.q, source: input.source, from: input.from, to: input.to };
+    const query = {
+      shipmentIds: input.shipmentIds,
+      orderIds: input.orderIds,
+      search: input.q,
+      source: input.source,
+      from: input.from,
+      to: input.to,
+    };
     if (slugs[2] === "plan" && slugs.length === 3) return bookedArticleDetailsPlan(supabase, ctx, query);
     if (slugs.length === 2) {
       const file = await bookedArticleDetailsExport(supabase, ctx, { ...query, part: input.part });
