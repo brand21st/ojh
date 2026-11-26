@@ -17,7 +17,10 @@ import { createBackgroundJob } from "@/modules/jobs/service";
 import { organizationLabelSender } from "@/modules/organizations/label-sender";
 import { latestManifestEmailStatuses } from "@/modules/manifest-email/list-status";
 import type { DeliveryStatus } from "@/modules/manifest-email/types";
+import { bookingManifestDate, isDraftBookingMismatch, istDate } from "@/lib/dashboard/manifests";
 import { indiaPostServiceLabel } from "@/types/domain";
+
+export { bookingManifestDate, isDraftBookingMismatch, istDate };
 
 export type ManifestRow = {
   id: string;
@@ -95,6 +98,7 @@ export type ManifestTotals = {
   codCount: number;
   codAmount: number;
   tariffAmount: number;
+  tariffQuotedCount: number;
   byService: Array<{ code: string; label: string; count: number; weightGrams: number }>;
 };
 
@@ -129,15 +133,6 @@ const PRE_DISPATCH = new Set<string>(MANIFEST_ELIGIBLE_STATUSES);
 
 const MANIFEST_COLUMNS =
   "id, organization_id, name, status, manifest_number, manifest_date, office_id, office_name, shipment_count, created_at, updated_at, closed_at, reopened_at, handed_over_at, handed_over_to, handover_notes, proof_path";
-
-export function istDate(at: Date | string = new Date()) {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Kolkata",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(typeof at === "string" ? new Date(at) : at);
-}
 
 function text(value: unknown) {
   const out = String(value ?? "").trim();
@@ -203,19 +198,25 @@ export function resolveManifestOffice(bookingOfficeId: string | null | undefined
   const pickupId = text(connection?.pickup_office_id);
   const id = text(bookingOfficeId) ?? dropId ?? pickupId;
   if (!id) return { id: null, name: null };
-  if (id === dropId) return { id, name: text(connection?.pickup_dropoff_office_name) };
+  if (id === dropId) {
+    return {
+      id,
+      name: text(connection?.pickup_dropoff_office_name) ?? (id === pickupId ? text(connection?.pickup_office_name) : null),
+    };
+  }
   if (id === pickupId) return { id, name: text(connection?.pickup_office_name) };
   return { id, name: null };
 }
 
 export function groupForManifests(
-  shipments: Array<{ id: string; booking_office_id?: string | null }>,
+  shipments: Array<{ id: string; booking_office_id?: string | null; booked_at?: string | null }>,
   connection: OfficeConnection,
-  date: string
+  fallbackDate: string
 ) {
   const groups = new Map<string, { date: string; office: Office; shipmentIds: string[] }>();
   for (const shipment of shipments) {
     const office = resolveManifestOffice(shipment.booking_office_id, connection);
+    const date = bookingManifestDate(shipment.booked_at, fallbackDate);
     const key = `${date}|${office.id ?? ""}`;
     const group = groups.get(key) ?? { date, office, shipmentIds: [] };
     group.shipmentIds.push(shipment.id);
@@ -253,8 +254,9 @@ async function audit(
 }
 
 /**
- * Puts shipments on today's open draft for their booking office (creating it if needed).
- * Returns only shipments newly linked by this call, so callers fan out side effects once.
+ * Puts shipments on the open draft for the IST day they were booked and their booking office.
+ * A shipment with no booking time uses today's date. Returns only shipments newly linked by
+ * this call, so callers fan out side effects once.
  */
 export async function assignToDraft(
   supabase: SupabaseClient,
@@ -266,7 +268,7 @@ export async function assignToDraft(
   if (!ids.length) return { added: [] as string[], manifestIds: [] as string[] };
   const { data: rows, error } = await supabase
     .from("shipments")
-    .select("id, booking_office_id")
+    .select("id, booking_office_id, booked_at")
     .eq("organization_id", organizationId)
     .in("id", ids);
   if (error) throw new AppError(ERROR_CODES.VALIDATION_ERROR, error.message);
@@ -358,12 +360,13 @@ async function unmanifestedShipments(
   return ((data ?? []) as EligibleRow[]).filter((row) => !row.manifest_shipments?.length);
 }
 
-/** Moves every labelled shipment that is not on a manifest yet onto today's drafts. */
+/** Moves labelled shipments that are not on a manifest yet onto the draft for the day they were booked. */
 export async function sweepEligible(
   supabase: SupabaseClient,
   organizationId: string,
   options: { userId?: string | null; now?: Date } = {}
 ) {
+  await refileMismatchedDrafts(supabase, organizationId, options);
   const rows = await unmanifestedShipments(supabase, organizationId, MANIFEST_SWEEP_STATUSES, options.now);
   return assignToDraft(
     supabase,
@@ -371,6 +374,57 @@ export async function sweepEligible(
     rows.map((row) => row.id),
     options
   );
+}
+
+type DraftLink = {
+  shipment_id: string;
+  manifest_id: string;
+  manifests:
+    | { status?: string | null; manifest_date?: string | null }
+    | Array<{ status?: string | null; manifest_date?: string | null }>
+    | null;
+  shipments: { booked_at?: string | null } | Array<{ booked_at?: string | null }> | null;
+};
+
+/**
+ * Moves shipments off open drafts when they were booked on a different IST day.
+ * The move is not reported as a new manifest link, so fulfillment is not enqueued again.
+ */
+export async function refileMismatchedDrafts(
+  supabase: SupabaseClient,
+  organizationId: string,
+  options: { userId?: string | null; now?: Date } = {}
+) {
+  const { data, error } = await supabase
+    .from("manifest_shipments")
+    .select("shipment_id, manifest_id, manifests!inner(status, manifest_date), shipments!inner(booked_at)")
+    .eq("organization_id", organizationId)
+    .eq("manifests.status", "DRAFT")
+    .limit(1000);
+  if (error) throw new AppError(ERROR_CODES.VALIDATION_ERROR, error.message);
+
+  const moved: string[] = [];
+  for (const row of (data ?? []) as DraftLink[]) {
+    const manifest = one(row.manifests);
+    const shipment = one(row.shipments);
+    if (
+      !manifest?.manifest_date ||
+      !isDraftBookingMismatch(
+        { status: manifest.status ?? "DRAFT", date: manifest.manifest_date },
+        shipment?.booked_at
+      )
+    ) {
+      continue;
+    }
+    const { error: removeError } = await supabase.rpc("manifest_remove_shipment", {
+      p_manifest: row.manifest_id,
+      p_shipment: row.shipment_id,
+    });
+    if (removeError) rpcError(removeError);
+    moved.push(row.shipment_id);
+  }
+  if (moved.length) await assignToDraft(supabase, organizationId, moved, options);
+  return { moved: moved.length };
 }
 
 export async function listEligible(supabase: SupabaseClient, organizationId: string) {
@@ -438,6 +492,7 @@ async function shipmentsWithEvents(supabase: SupabaseClient, organizationId: str
 }
 
 export async function listManifests(supabase: SupabaseClient, organizationId: string, query: ManifestListQuery) {
+  await refileMismatchedDrafts(supabase, organizationId);
   const from = (query.page - 1) * query.pageSize;
   let builder = supabase
     .from("manifests")
@@ -555,9 +610,13 @@ export function manifestTotals(lines: ManifestLine[]): ManifestTotals {
   let codCount = 0;
   let codAmount = 0;
   let tariffAmount = 0;
+  let tariffQuotedCount = 0;
   for (const line of lines) {
     weightGrams += line.weightGrams;
-    tariffAmount += line.tariffAmount ?? 0;
+    if (line.tariffAmount != null) {
+      tariffQuotedCount += 1;
+      tariffAmount += line.tariffAmount;
+    }
     if (line.codAmount > 0) {
       codCount += 1;
       codAmount += line.codAmount;
@@ -574,6 +633,7 @@ export function manifestTotals(lines: ManifestLine[]): ManifestTotals {
     codCount,
     codAmount: Math.round(codAmount * 100) / 100,
     tariffAmount: Math.round(tariffAmount * 100) / 100,
+    tariffQuotedCount,
     byService: [...byService.values()].sort((a, b) => b.count - a.count),
   };
 }
@@ -679,10 +739,28 @@ export async function addShipments(
   shipmentIds: string[],
   userId?: string | null
 ) {
-  await loadManifestRow(supabase, organizationId, manifestId);
+  const manifest = await loadManifestRow(supabase, organizationId, manifestId);
+  const ids = [...new Set(shipmentIds)].filter((id) => UUID_RE.test(id));
+  const manifestDate = manifest.manifest_date.slice(0, 10);
+  let allowed = ids;
+  if (ids.length) {
+    const { data: shipments, error: loadError } = await supabase
+      .from("shipments")
+      .select("id, booked_at")
+      .eq("organization_id", organizationId)
+      .in("id", ids);
+    if (loadError) throw new AppError(ERROR_CODES.VALIDATION_ERROR, loadError.message);
+    const bookedOnManifestDay = new Set(
+      ((shipments ?? []) as Array<{ id: string; booked_at: string | null }>)
+        .filter((row) => bookingManifestDate(row.booked_at, istDate()) === manifestDate)
+        .map((row) => row.id)
+    );
+    allowed = ids.filter((id) => bookedOnManifestDay.has(id));
+  }
+  if (!allowed.length) return { added: [] as string[], skipped: shipmentIds.length };
   const { data, error } = await supabase.rpc("manifest_add_to", {
     p_manifest: manifestId,
-    p_shipment_ids: shipmentIds,
+    p_shipment_ids: allowed,
     p_user: userId ?? null,
   });
   if (error) rpcError(error);

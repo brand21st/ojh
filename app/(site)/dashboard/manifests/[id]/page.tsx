@@ -32,7 +32,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
-import { manifestOfficeLabel } from "@/lib/dashboard/manifests";
+import { bookingManifestDate, istDate, manifestOfficeLabel } from "@/lib/dashboard/manifests";
 import { ManifestEmailPanel } from "@/components/dashboard/manifest-email-panel";
 import { ManifestWhatsAppPanel } from "@/components/dashboard/manifest-whatsapp-panel";
 import { formatCurrency, formatDate, formatWeightGrams } from "@/lib/format";
@@ -155,6 +155,16 @@ export default function ManifestDetailPage() {
         header: "COD",
         cell: (row) =>
           row.codAmount > 0 ? <span className="whitespace-nowrap tabular-nums">{formatCurrency(row.codAmount)}</span> : "—",
+      },
+      {
+        id: "tariff",
+        header: "Tariff",
+        cell: (row) =>
+          row.tariffAmount == null ? (
+            <span className="whitespace-nowrap text-muted">—</span>
+          ) : (
+            <span className="whitespace-nowrap tabular-nums">{formatCurrency(row.tariffAmount)}</span>
+          ),
       },
       {
         id: "status",
@@ -319,10 +329,16 @@ export default function ManifestDetailPage() {
         }
       />
 
-      <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <Stat label="Articles" value={String(totals.count)} hint={totals.byService.map((s) => `${s.label}: ${s.count}`).join(" · ") || "No articles yet"} />
         <Stat label="Total weight" value={`${(totals.weightGrams / 1000).toFixed(2)} kg`} />
         <Stat label="COD" value={formatCurrency(totals.codAmount)} hint={`${totals.codCount} COD article${totals.codCount === 1 ? "" : "s"}`} />
+        <Stat
+          label="Tariff"
+          value={formatCurrency(totals.tariffAmount)}
+          hint={tariffHint(totals.tariffQuotedCount, totals.count)}
+          warn={totals.count > 0 && totals.tariffQuotedCount < totals.count}
+        />
         {handedOver ? (
           <Stat
             label="Awaiting India Post scan"
@@ -513,6 +529,13 @@ export default function ManifestDetailPage() {
   );
 }
 
+function tariffHint(quoted: number, count: number) {
+  if (!count) return "India Post postage for this manifest.";
+  if (quoted === count) return "India Post postage for every article.";
+  if (!quoted) return "No article has a quoted tariff yet.";
+  return `Quoted on ${quoted} of ${count} articles. Missing amounts are not in this total.`;
+}
+
 function Stat({ label, value, hint, warn }: { label: string; value: string; hint?: string; warn?: boolean }) {
   return (
     <Card className={warn ? "ring-1 ring-amber-300" : undefined}>
@@ -640,7 +663,7 @@ function AddShipmentsDialog({
     onSuccess: (result) => {
       toast.success(
         `${result.added.length} shipment${result.added.length === 1 ? "" : "s"} added${
-          result.skipped ? `, ${result.skipped} skipped (already manifested or not booked)` : ""
+          result.skipped ? `, ${result.skipped} skipped (already manifested, booked on another day, or not booked)` : ""
         }.`
       );
       setSelected(new Set());
@@ -649,7 +672,10 @@ function AddShipmentsDialog({
     onError: (error: Error) => toast.error(error.message),
   });
 
-  const items = eligible.data?.items ?? [];
+  const manifestDate = manifest.date.slice(0, 10);
+  const items = (eligible.data?.items ?? []).filter(
+    (item) => bookingManifestDate(item.bookedAt, istDate()) === manifestDate
+  );
   const toggle = (shipmentId: string, on: boolean) =>
     setSelected((current) => {
       const next = new Set(current);
@@ -664,15 +690,15 @@ function AddShipmentsDialog({
         <DialogHeader>
           <DialogTitle>Add shipments</DialogTitle>
           <DialogDescription>
-            Booked shipments from the last 14 days that are not on any manifest. Shipments booked at another office are
-            marked.
+            Shipments booked on this manifest&apos;s date that are not on any manifest. Shipments booked at another
+            office are marked.
           </DialogDescription>
         </DialogHeader>
         <div className="max-h-[50vh] overflow-y-auto rounded-xl border border-border">
           {eligible.isLoading ? (
             <div className="p-4 text-sm text-muted">Loading…</div>
           ) : !items.length ? (
-            <div className="p-4 text-sm text-muted">No booked shipments are waiting for a manifest.</div>
+            <div className="p-4 text-sm text-muted">No shipments booked on this date are waiting for a manifest.</div>
           ) : (
             <ul className="divide-y divide-border">
               {items.map((item) => {

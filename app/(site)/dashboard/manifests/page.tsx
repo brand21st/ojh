@@ -48,7 +48,7 @@ export default function ManifestsPage() {
     onSuccess: (result) => {
       toast.success(
         result.added
-          ? `${result.added} shipment${result.added === 1 ? "" : "s"} added to today's draft manifest.`
+          ? `${result.added} shipment${result.added === 1 ? "" : "s"} added to the draft for the day they were booked.`
           : "No labelled shipments are waiting for a manifest."
       );
       queryClient.invalidateQueries({ queryKey: ["manifests"] });
