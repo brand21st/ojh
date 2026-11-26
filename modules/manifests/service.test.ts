@@ -6,6 +6,7 @@ import { paginateManifestRows, renderManifestPdf } from "@/modules/manifests/pdf
 import {
   assignToDraft,
   groupForManifests,
+  isDraftBookingMismatch,
   isScanned,
   istDate,
   manifestTotals,
@@ -111,10 +112,32 @@ describe("manifest grouping", () => {
       ["22660001", ["c"]],
     ]);
   });
+
+  it("splits a shared office across the IST days the shipments were booked", () => {
+    const groups = groupForManifests(
+      [
+        { id: "a", booking_office_id: "22660454", booked_at: "2026-10-26T20:00:00Z" },
+        { id: "b", booking_office_id: "22660454", booked_at: "2026-10-25T10:00:00Z" },
+        { id: "c", booking_office_id: "22660454" },
+      ],
+      connection,
+      "2026-10-27"
+    );
+    expect(groups.map((group) => [group.date, group.shipmentIds])).toEqual([
+      ["2026-10-27", ["a", "c"]],
+      ["2026-10-25", ["b"]],
+    ]);
+  });
 });
 
 describe("assignToDraft", () => {
-  function fakeSupabase(rpcRows: Array<{ manifest_id: string; shipment_id: string }>) {
+  function fakeSupabase(
+    rpcRows: Array<{ manifest_id: string; shipment_id: string }>,
+    shipments: Array<{ id: string; booking_office_id: string; booked_at?: string | null }> = [
+      { id: "11111111-1111-4111-8111-111111111111", booking_office_id: "22660454" },
+      { id: "22222222-2222-4222-8222-222222222222", booking_office_id: "22660001" },
+    ]
+  ) {
     const calls: Array<Record<string, unknown>> = [];
     const chain = (data: unknown) => {
       const api: Record<string, unknown> = {};
@@ -127,12 +150,7 @@ describe("assignToDraft", () => {
       calls,
       client: {
         from(table: string) {
-          if (table === "shipments") {
-            return chain([
-              { id: "11111111-1111-4111-8111-111111111111", booking_office_id: "22660454" },
-              { id: "22222222-2222-4222-8222-222222222222", booking_office_id: "22660001" },
-            ]);
-          }
+          if (table === "shipments") return chain(shipments);
           return chain(connection);
         },
         async rpc(name: string, args: Record<string, unknown>) {
@@ -144,7 +162,7 @@ describe("assignToDraft", () => {
     };
   }
 
-  it("calls the RPC once per office for today's IST date and returns only new links", async () => {
+  it("uses today's IST date when booked_at is missing and returns only new links", async () => {
     const fake = fakeSupabase([
       { manifest_id: "m1", shipment_id: "11111111-1111-4111-8111-111111111111" },
     ]);
@@ -160,6 +178,47 @@ describe("assignToDraft", () => {
     ]);
     // The second shipment was already on a manifest: it is not reported as added.
     expect(result).toEqual({ added: ["11111111-1111-4111-8111-111111111111"], manifestIds: ["m1"] });
+  });
+
+  it("calls the RPC with each shipment's IST booking day, not today", async () => {
+    const fake = fakeSupabase(
+      [
+        { manifest_id: "m1", shipment_id: "11111111-1111-4111-8111-111111111111" },
+        { manifest_id: "m2", shipment_id: "22222222-2222-4222-8222-222222222222" },
+      ],
+      [
+        {
+          id: "11111111-1111-4111-8111-111111111111",
+          booking_office_id: "22660454",
+          booked_at: "2026-10-26T20:00:00Z",
+        },
+        {
+          id: "22222222-2222-4222-8222-222222222222",
+          booking_office_id: "22660454",
+          booked_at: "2026-10-25T10:00:00Z",
+        },
+      ]
+    );
+    await assignToDraft(
+      fake.client as never,
+      "org",
+      ["11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222"],
+      { now: new Date("2026-11-01T12:00:00Z") }
+    );
+    expect(fake.calls).toEqual([
+      expect.objectContaining({ name: "manifest_add_shipments", p_date: "2026-10-27", p_office_id: "22660454" }),
+      expect.objectContaining({ name: "manifest_add_shipments", p_date: "2026-10-25", p_office_id: "22660454" }),
+    ]);
+  });
+});
+
+describe("draft booking day", () => {
+  it("flags an open draft only when the booking day differs", () => {
+    expect(isDraftBookingMismatch({ status: "DRAFT", date: "2026-10-27" }, "2026-10-26T10:00:00Z")).toBe(true);
+    expect(isDraftBookingMismatch({ status: "DRAFT", date: "2026-10-27" }, "2026-10-26T20:00:00Z")).toBe(false);
+    expect(isDraftBookingMismatch({ status: "DRAFT", date: "2026-10-27" }, null)).toBe(false);
+    expect(isDraftBookingMismatch({ status: "CLOSED", date: "2026-10-27" }, "2026-10-26T10:00:00Z")).toBe(false);
+    expect(isDraftBookingMismatch({ status: "HANDED_OVER", date: "2026-10-27" }, "2026-10-25T10:00:00Z")).toBe(false);
   });
 });
 
