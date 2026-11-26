@@ -23,6 +23,7 @@ import { handleTariffRoutes } from "@/lib/api/v1/tariff";
 import { handleMerchantTutorials } from "@/lib/api/v1/tutorials";
 import { handleUiRoutes } from "@/lib/api/v1/ui";
 import { handleTeamRoutes } from "@/lib/api/v1/team";
+import { handleVmsRoutes } from "@/lib/api/v1/vms";
 import { handleWorkspaceRoutes } from "@/lib/api/v1/workspace";
 import { permissionForTenantRoute } from "@/lib/api/v1-permissions";
 import { assertAnyPlanFeature, assertPlanFeature, FEATURE, lockedFeatureForApi } from "@/modules/billing/entitlements";
@@ -56,6 +57,7 @@ export async function dispatchTenantRoutes(
     (await handleAddonRoutes(request, supabase, ctx, key)) ??
     (await handleAiAccountantRoutes(request, supabase, ctx, key, method, slugs)) ??
     (await handleTeamRoutes(request, supabase, ctx, method, slugs)) ??
+    (await handleVmsRoutes(request, supabase, ctx, method, slugs)) ??
     (await handleWorkspaceRoutes(request, supabase, ctx, key, method, slugs)) ??
     (await handleSupportRoutes(request, supabase, ctx, method, slugs)) ??
     (await handleUiRoutes(request, supabase, ctx, method, slugs)) ??

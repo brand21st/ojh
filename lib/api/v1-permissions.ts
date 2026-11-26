@@ -168,6 +168,8 @@ export function permissionForTenantRoute(
   if (root === "team") return "team.read";
   // Packing station: scan a parcel to mark it packed.
   if (root === "packing") return "packing.scan";
+  // Packing videos: packers record; anyone who can see orders can find and download videos.
+  if (root === "vms") return method === "GET" ? "orders.read" : "packing.scan";
 
   if (key === "GET settings/notifications") return undefined;
   if (key === "GET settings/policies") return undefined;

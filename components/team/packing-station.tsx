@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { api } from "@/lib/hooks/use-api";
 import { formatRelative } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { PackingVideoPanel, type PackingVideoHandle } from "@/components/vms/packing-video-panel";
 import type { PackScanResult, TeamActivityItem } from "@/types/team";
 
 type Today = { day: string; mine: number; team: number; recent: TeamActivityItem[] };
@@ -46,6 +47,7 @@ function beep(ok: boolean) {
 export function PackingStation() {
   const queryClient = useQueryClient();
   const inputRef = useRef<HTMLInputElement>(null);
+  const videoRef = useRef<PackingVideoHandle>(null);
   const [code, setCode] = useState("");
   const [shown, setShown] = useState<Shown | null>(null);
   // Dashboard pages mount after hydration, so reading the saved choice up front is safe.
@@ -99,6 +101,13 @@ export function PackingStation() {
     event.preventDefault();
     const value = code.trim();
     if (!value || scan.isPending) return;
+    // With packing video on, the first scan starts recording and the second stops it
+    // (and then marks the parcel packed through onSaved).
+    if (videoRef.current?.onScan(value)) {
+      setCode("");
+      inputRef.current?.focus();
+      return;
+    }
     scan.mutate(value);
   }
 
@@ -151,6 +160,15 @@ export function PackingStation() {
               </p>
             </CardContent>
           </Card>
+
+          <PackingVideoPanel
+            ref={videoRef}
+            onSaved={(value) => scan.mutate(value)}
+            onBeep={(ok) => {
+              if (sound) beep(ok);
+            }}
+            refocus={() => inputRef.current?.focus()}
+          />
 
           <ScanResult shown={shown} onUndo={(orderId) => undo.mutate(orderId)} undoing={undo.isPending} />
         </div>

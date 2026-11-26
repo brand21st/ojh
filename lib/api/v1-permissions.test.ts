@@ -9,6 +9,9 @@ describe("permissionForTenantRoute", () => {
       "orders.write"
     );
     expect(permissionForTenantRoute("GET", "ai-credits", ["ai-credits"])).toBe("orders.read");
+    expect(permissionForTenantRoute("POST", "vms/start", ["vms", "start"])).toBe("packing.scan");
+    expect(permissionForTenantRoute("GET", "vms", ["vms"])).toBe("orders.read");
+    expect(permissionForTenantRoute("GET", "vms/zip", ["vms", "zip"])).toBe("orders.read");
     expect(permissionForTenantRoute("GET", "ai-credits/ledger", ["ai-credits", "ledger"])).toBe("orders.read");
     expect(permissionForTenantRoute("POST", "ai-credits/quote", ["ai-credits", "quote"])).toBe("orders.read");
     expect(permissionForTenantRoute("GET", "shipment-presets", ["shipment-presets"])).toBe("orders.read");

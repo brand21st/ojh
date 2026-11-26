@@ -79,6 +79,10 @@ export const env = {
     if (!configured || configured === "/data/invoices") return "/data/labels/invoices";
     return configured;
   })(),
+  // Packing videos (VMS). Files go on the Coolify labels volume unless VMS_STORAGE_PATH
+  // points at another persistent volume.
+  vmsEnabled: optional(process.env.VMS_ENABLED).toLowerCase() === "true",
+  vmsStoragePath: optional(process.env.VMS_STORAGE_PATH) || "/data/labels/vms",
   coolifyBaseUrl: optional(process.env.COOLIFY_BASE_URL),
   coolifyApplicationUuid: optional(process.env.COOLIFY_APPLICATION_UUID),
   coolifyApiToken: optional(process.env.COOLIFY_API_TOKEN),
