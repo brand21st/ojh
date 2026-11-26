@@ -3,6 +3,7 @@ import type {
   FulfillmentStatus,
   IntegrationStatus,
   MemberRole,
+  Permission,
   OrderSource,
   OrderStatus,
   PaymentStatus,
@@ -16,6 +17,7 @@ export type MeUser = {
   fullName: string | null;
   avatarUrl: string | null;
   whatsappNumber?: string | null;
+  indiaPostContractualCustomer?: boolean | null;
   indiaPostOnboardingDismissedAt?: string | null;
   indiaPostBookingGuideHiddenAt?: string | null;
 };
@@ -33,6 +35,7 @@ export type MeMembership = {
   name: string;
   slug?: string | null;
   role?: MemberRole;
+  status?: string | null;
 };
 
 export type MeSubscription = {
@@ -50,6 +53,9 @@ export type MeResponse = {
   user: MeUser;
   organization: MeOrganization | null;
   role?: MemberRole | null;
+  /** Effective permissions: role, plus this member's feature switches. */
+  permissions?: Permission[];
+  member?: { status: string; team: string | null; title: string | null } | null;
   organizations?: MeMembership[];
   memberships?: MeMembership[];
   subscription?: MeSubscription | null;
@@ -105,6 +111,18 @@ export type DashboardPipeline = {
 
 export type AnalyticsRange = "today" | "month" | "year";
 
+export type AnalyticsFocusId = AnalyticsRange | "yesterday" | "custom";
+
+export type AnalyticsFocus = {
+  id: AnalyticsFocusId;
+  label: string;
+  from: string;
+  to: string;
+  period: AnalyticsPeriodKpi;
+  sources: AnalyticsSourceShare[];
+  series: AnalyticsSeriesPoint[];
+};
+
 export type AnalyticsPeriodKpi = {
   shipments: number;
   revenue: number;
@@ -152,6 +170,7 @@ export type DashboardAnalytics = {
   topSource: AnalyticsSourceShare | null;
   sources: Record<AnalyticsRange, AnalyticsSourceShare[]>;
   series: Record<AnalyticsRange, AnalyticsSeriesPoint[]>;
+  focus: AnalyticsFocus;
 };
 
 export type CustomerSummary = {
@@ -657,6 +676,10 @@ export type LabelRecord = {
   tracking_number?: string | null;
   orderNumber?: string | null;
   order_number?: string | null;
+  orderSource?: string | null;
+  order_source?: string | null;
+  downloadedAt?: string | null;
+  downloaded_at?: string | null;
   printStatus?: string | null;
   print_status?: string | null;
   printError?: string | null;

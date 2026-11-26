@@ -18,7 +18,10 @@ import {
   LifeBuoy,
   Calculator,
   Store,
+  PackageCheck,
+  Users,
 } from "lucide-react";
+import type { Permission } from "@/types/domain";
 import { YoutubeIcon } from "@/components/icons/youtube-icon";
 
 export type NavChildItem = {
@@ -32,36 +35,42 @@ export type NavItem = {
   icon: ComponentType<{ className?: string }>;
   tour?: string;
   children?: NavChildItem[];
+  /** Hidden from members without this permission (role plus their feature switches). */
+  permission?: Permission;
 };
 
 export const sidebarNav: NavItem[] = [
-  { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-  { label: "Analytics", href: "/dashboard/analytics", icon: BarChart3 },
+  { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard, permission: "orders.read" },
+  { label: "Analytics", href: "/dashboard/analytics", icon: BarChart3, permission: "orders.read" },
   {
     label: "Orders",
     href: "/dashboard/orders",
     icon: ShoppingBag,
     tour: "nav-orders",
+    permission: "orders.read",
     children: [{ label: "Bulk Excel Booking", href: "/dashboard/orders/bulk-excel" }],
   },
-  { label: "Inventory", href: "/dashboard/inventory", icon: Package },
-  { label: "Store Builder", href: "/dashboard/store-builder", icon: Store },
-  { label: "Shipments", href: "/dashboard/shipments", icon: Truck, tour: "nav-shipments" },
-  { label: "NDR & RTO", href: "/dashboard/ndr-rto", icon: PackageX },
+  { label: "Inventory", href: "/dashboard/inventory", icon: Package, permission: "products.read" },
+  { label: "Store Builder", href: "/dashboard/store-builder", icon: Store, permission: "products.write" },
+  { label: "Shipments", href: "/dashboard/shipments", icon: Truck, tour: "nav-shipments", permission: "shipments.read" },
+  { label: "NDR & RTO", href: "/dashboard/ndr-rto", icon: PackageX, permission: "shipments.read" },
   {
     label: "Labels",
     href: "/dashboard/labels",
     icon: Tag,
     tour: "nav-labels",
+    permission: "labels.read",
     children: [{ label: "Multi print", href: "/dashboard/labels/multi-print" }],
   },
-  { label: "Invoices", href: "/dashboard/invoices", icon: Receipt },
-  { label: "Manifest", href: "/dashboard/manifests", icon: ClipboardList },
-  { label: "Tracking", href: "/dashboard/tracking", icon: Radio },
-  { label: "Automation", href: "/dashboard/automation", icon: Workflow },
-  { label: "Support Center", href: "/dashboard/support", icon: MessageCircle },
-  { label: "Integrations", href: "/dashboard/integrations", icon: Plug, tour: "nav-integrations" },
-  { label: "Billing", href: "/dashboard/billing", icon: CreditCard },
+  { label: "Packing", href: "/dashboard/packing", icon: PackageCheck, permission: "packing.scan" },
+  { label: "Invoices", href: "/dashboard/invoices", icon: Receipt, permission: "orders.read" },
+  { label: "Manifest", href: "/dashboard/manifests", icon: ClipboardList, permission: "manifests.read" },
+  { label: "Tracking", href: "/dashboard/tracking", icon: Radio, permission: "tracking.read" },
+  { label: "Automation", href: "/dashboard/automation", icon: Workflow, permission: "automation.manage" },
+  { label: "Support Center", href: "/dashboard/support", icon: MessageCircle, permission: "support.read" },
+  { label: "Integrations", href: "/dashboard/integrations", icon: Plug, tour: "nav-integrations", permission: "integrations.manage" },
+  { label: "Team", href: "/dashboard/team", icon: Users, permission: "team.read" },
+  { label: "Billing", href: "/dashboard/billing", icon: CreditCard, permission: "org.billing" },
   { label: "Settings", href: "/dashboard/settings", icon: Settings },
 ];
 

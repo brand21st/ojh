@@ -10,8 +10,10 @@ import {
 import { organizationHasPaidPlan, pickDashboardTopBanner } from "@/lib/dashboard/top-banner";
 import { getOrganizationEntitlements } from "@/modules/billing/entitlements";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { siteConfig } from "@/lib/site-config";
 
 export const metadata: Metadata = {
+  metadataBase: new URL(siteConfig.url),
   title: {
     default: "Dashboard",
     template: "%s · PostBus",

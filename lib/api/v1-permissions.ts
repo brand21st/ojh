@@ -1,4 +1,5 @@
-import type { Permission } from "@/types/domain";
+import { canAssignRole } from "@/lib/permissions/rbac";
+import type { MemberRole, Permission } from "@/types/domain";
 
 export function permissionForTenantRoute(
   method: string,
@@ -163,6 +164,10 @@ export function permissionForTenantRoute(
 
   if (key === "GET members") return undefined;
   if (root === "members") return "members.manage";
+  // Team performance: who booked, packed and printed what, per day.
+  if (root === "team") return "team.read";
+  // Packing station: scan a parcel to mark it packed.
+  if (root === "packing") return "packing.scan";
 
   if (key === "GET settings/notifications") return undefined;
   if (key === "GET settings/policies") return undefined;
@@ -204,11 +209,6 @@ export function permissionForTenantRoute(
   return undefined;
 }
 
-export function canAssignMemberRole(
-  actorRole: "OWNER" | "ADMIN" | "MANAGER" | "OPERATOR" | "VIEWER",
-  assignedRole: "OWNER" | "ADMIN" | "MANAGER" | "OPERATOR" | "VIEWER"
-) {
-  if (actorRole === "OWNER") return true;
-  if (actorRole === "ADMIN") return assignedRole !== "OWNER" && assignedRole !== "ADMIN";
-  return false;
+export function canAssignMemberRole(actorRole: MemberRole, assignedRole: MemberRole) {
+  return canAssignRole(actorRole, assignedRole);
 }

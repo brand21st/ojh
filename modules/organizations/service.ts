@@ -1,11 +1,13 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { AppError, ERROR_CODES } from "@/lib/api/errors";
 import { logError, logInfo } from "@/lib/logger";
+import { createAdminClient, hasAdminClient } from "@/lib/supabase/admin";
 import { provisionTrackingPage } from "@/modules/tracking-pages/service";
 import { scheduleSheetsCrmEvent } from "@/modules/sheets-crm/enqueue";
 
 type MembershipRow = {
   role: string;
+  status?: string | null;
   organization_id: string;
   organizations:
     | { id: string; name: string; slug: string; created_at?: string }
@@ -32,6 +34,21 @@ async function ensureTrackingPage(
   }
 }
 
+/** True when the user joined a workspace through an invite and no longer belongs to any. */
+async function wasRemovedFromTeam(userId: string) {
+  if (!hasAdminClient()) return false;
+  try {
+    const { data } = await createAdminClient()
+      .from("organization_invites")
+      .select("id")
+      .eq("accepted_by", userId)
+      .limit(1);
+    return Boolean(data?.length);
+  } catch {
+    return false;
+  }
+}
+
 function orgFromMembership(item: MembershipRow) {
   const org = Array.isArray(item.organizations) ? item.organizations[0] : item.organizations;
   return org ? { id: org.id, name: org.name, slug: org.slug, role: item.role } : null;
@@ -48,7 +65,7 @@ function defaultWorkspaceName(fullName?: string | null, email?: string | null) {
 export async function listMemberships(supabase: SupabaseClient, userId: string) {
   const { data, error } = await supabase
     .from("organization_members")
-    .select("role, organization_id, organizations(id, name, slug, created_at)")
+    .select("role, status, organization_id, organizations(id, name, slug, created_at)")
     .eq("user_id", userId);
   if (error) throw new AppError(ERROR_CODES.VALIDATION_ERROR, error.message);
   return (data ?? []).sort((a, b) => {
@@ -130,6 +147,13 @@ export async function ensureActiveWorkspace(
   }
 ) {
   let memberships = await listMemberships(supabase, userId);
+  if (memberships.length === 0 && (await wasRemovedFromTeam(userId))) {
+    // Staff who were removed from a team should not silently get an empty workspace of their own.
+    throw new AppError(
+      ERROR_CODES.TENANT_ACCESS_DENIED,
+      "You were removed from your team's workspace. Ask the owner to invite you again."
+    );
+  }
   if (memberships.length === 0) {
     const named = options?.workspaceName?.trim();
     const created = await createOrganization(
@@ -151,7 +175,10 @@ export async function ensureActiveWorkspace(
     }
   }
 
+  const active = memberships.filter((item) => (item.status ?? "ACTIVE") === "ACTIVE");
   const canonical =
+    active.find((item) => item.organization_id === options?.activeOrganizationId) ??
+    active[0] ??
     memberships.find((item) => item.organization_id === options?.activeOrganizationId) ??
     memberships[0];
   if (canonical && canonical.organization_id !== options?.activeOrganizationId) {
@@ -165,7 +192,14 @@ export async function ensureActiveWorkspace(
 
   return {
     memberships: canonical ? [canonical] : [],
+    all: memberships
+      .map((item) => {
+        const org = orgFromMembership(item);
+        return org ? { ...org, status: item.status ?? "ACTIVE" } : null;
+      })
+      .filter((item): item is NonNullable<typeof item> => Boolean(item)),
     current,
     role: canonical?.role ?? null,
+    status: canonical?.status ?? "ACTIVE",
   };
 }

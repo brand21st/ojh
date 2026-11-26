@@ -4,17 +4,13 @@ import type { TenantContext } from "@/lib/api/context";
 import { AppError, ERROR_CODES } from "@/lib/api/errors";
 import { orIlike } from "@/lib/api/filters";
 import { searchPhoneNeedles } from "@/lib/phone/india-whatsapp";
-import { hasPermission } from "@/lib/permissions/rbac";
 import { getSystemHealth } from "@/lib/api/health";
-import { canAssignMemberRole } from "@/lib/api/v1-permissions";
 import {
   createApiKeySchema,
-  memberInviteSchema,
   updateOrganizationPoliciesSchema,
   updateOrganizationSchema,
 } from "@/lib/api/v1-schemas";
 import { isBillingConfiguredAsync } from "@/modules/razorpay/config";
-import { hashSecret, randomToken } from "@/lib/security/crypto";
 import { isMerchantApiOpenForOrg } from "@/modules/merchant-api/flags";
 import { mintMerchantApiKey } from "@/modules/merchant-api/keys";
 import { merchantApiUsage } from "@/modules/merchant-api/logs";
@@ -189,59 +185,6 @@ export async function handleWorkspaceRoutes(
                 : null,
       })),
     };
-  }
-
-  if (key === "GET members") {
-    const { data: members } = await supabase
-      .from("organization_members")
-      .select("id, role, created_at, user_id")
-      .eq("organization_id", ctx.organizationId);
-    const userIds = (members ?? []).map((row) => row.user_id);
-    const { data: profiles } = userIds.length
-      ? await supabase.from("profiles").select("id, email, full_name").in("id", userIds)
-      : { data: [] };
-    const byId = new Map((profiles ?? []).map((profile) => [profile.id, profile]));
-    return {
-      items: (members ?? []).map((row) => ({
-        id: row.id,
-        userId: row.user_id,
-        role: row.role,
-        email: byId.get(row.user_id)?.email,
-        fullName: byId.get(row.user_id)?.full_name,
-        createdAt: row.created_at,
-      })),
-    };
-  }
-
-  if (key === "GET members/invites") {
-    const { data } = await supabase
-      .from("organization_invites")
-      .select("*")
-      .eq("organization_id", ctx.organizationId)
-      .is("accepted_at", null);
-    return { items: data ?? [] };
-  }
-
-  if (key === "POST members/invites") {
-    const body = memberInviteSchema.parse(await request.json());
-    if (!canAssignMemberRole(ctx.role, body.role)) {
-      throw new AppError(ERROR_CODES.FORBIDDEN, "You cannot assign that workspace role.");
-    }
-    const token = randomToken(16);
-    const { data, error } = await supabase
-      .from("organization_invites")
-      .insert({
-        organization_id: ctx.organizationId,
-        email: body.email,
-        role: body.role,
-        token_hash: hashSecret(token),
-        invited_by: ctx.userId,
-        expires_at: new Date(Date.now() + 7 * 86400000).toISOString(),
-      })
-      .select()
-      .single();
-    if (error) throw new AppError(ERROR_CODES.VALIDATION_ERROR, error.message);
-    return data;
   }
 
   if (key === "GET settings/notifications") {
@@ -543,7 +486,7 @@ export async function handleWorkspaceRoutes(
     ]
       .filter(Boolean)
       .join(",") || null;
-    const canReadSupport = hasPermission(ctx.role, "support.read");
+    const canReadSupport = ctx.permissions.includes("support.read");
     if (!orderFilter && !shipmentFilter && !customerFilter && !(canReadSupport && supportFilter)) return { items: [] };
 
     const [orderResult, shipmentResult, customerResult, supportResult] = await Promise.all([

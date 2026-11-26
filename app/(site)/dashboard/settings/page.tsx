@@ -5,36 +5,34 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/dashboard/page-header";
 import { PrintAgentDevices } from "@/components/dashboard/print-agent-devices";
+import { RolesOverview } from "@/components/team/roles-overview";
+import { TeamMembersSection } from "@/components/team/team-members-section";
 import { PrintingSettings } from "@/components/dashboard/printing-settings";
 import { PoliciesSettings } from "@/components/dashboard/policies-settings";
 import { IndiaPostParcelDefaultsSettings } from "@/components/dashboard/india-post-parcel-defaults-settings";
-import { StatusBadge } from "@/components/dashboard/status-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { IndiaMobileInput } from "@/components/auth/india-whatsapp-field";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { asList } from "@/lib/dashboard/records";
 import { api } from "@/lib/hooks/use-api";
 import { indiaMobileInputDigits } from "@/lib/phone/india-whatsapp";
 import { useMe } from "@/lib/hooks/use-me";
-import { hasPermission } from "@/lib/permissions/rbac";
-import { MEMBER_ROLES, type MemberRole } from "@/types/domain";
-import type { InviteRecord, MemberRecord, OrganizationSettings } from "@/types/api";
+import { meCan } from "@/lib/permissions/me";
+import type { OrganizationSettings } from "@/types/api";
 
 function initialSettingsTab() {
   if (typeof window === "undefined") return "organization";
   const tabParam = new URLSearchParams(window.location.search).get("tab");
-  if (tabParam === "printing" || tabParam === "shipping" || tabParam === "policies") {
+  if (
+    tabParam === "printing" ||
+    tabParam === "shipping" ||
+    tabParam === "policies" ||
+    tabParam === "members" ||
+    tabParam === "roles"
+  ) {
     return tabParam;
   }
   return "organization";
@@ -47,12 +45,12 @@ export default function SettingsPage() {
     <div className="space-y-6">
       <PageHeader
         title="Settings"
-        description="Organization, access, security, notifications, printing, shipping, and policies."
+        description="Organization, team and roles, security, notifications, printing, shipping, and policies."
       />
       <Tabs value={tab} onValueChange={setTab} className="space-y-6">
         <TabsList className="flex h-auto w-full flex-wrap justify-start">
           <TabsTrigger value="organization">Organization</TabsTrigger>
-          <TabsTrigger value="members">Members</TabsTrigger>
+          <TabsTrigger value="members">Team</TabsTrigger>
           <TabsTrigger value="roles">Roles</TabsTrigger>
           <TabsTrigger value="security">Security</TabsTrigger>
           <TabsTrigger value="notifications">Notifications</TabsTrigger>
@@ -64,10 +62,10 @@ export default function SettingsPage() {
           <OrganizationSection />
         </TabsContent>
         <TabsContent value="members">
-          <MembersSection />
+          <TeamMembersSection />
         </TabsContent>
         <TabsContent value="roles">
-          <RolesSection />
+          <RolesOverview />
         </TabsContent>
         <TabsContent value="security">
           <SecuritySection />
@@ -96,7 +94,7 @@ export default function SettingsPage() {
 function OrganizationSection() {
   const queryClient = useQueryClient();
   const me = useMe();
-  const canManage = hasPermission((me.data?.role ?? "VIEWER") as MemberRole, "org.manage");
+  const canManage = meCan(me.data, "org.manage");
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [line1, setLine1] = useState("");
@@ -264,137 +262,6 @@ function OrganizationSection() {
         <Button type="button" onClick={() => mutation.mutate()} disabled={!canManage || mutation.isPending}>
           Save organization
         </Button>
-      </CardContent>
-    </Card>
-  );
-}
-
-function MembersSection() {
-  const queryClient = useQueryClient();
-  const [email, setEmail] = useState("");
-  const [role, setRole] = useState("OPERATOR");
-
-  const members = useQuery({
-    queryKey: ["members"],
-    queryFn: () => api<MemberRecord[] | { items: MemberRecord[] }>("/api/v1/members"),
-  });
-  const invites = useQuery({
-    queryKey: ["invites"],
-    queryFn: () => api<InviteRecord[] | { items: InviteRecord[] }>("/api/v1/members/invites"),
-  });
-
-  const invite = useMutation({
-    mutationFn: () =>
-      api("/api/v1/members/invites", {
-        method: "POST",
-        body: JSON.stringify({ email, role }),
-      }),
-    onSuccess: () => {
-      toast.success("Invite sent.");
-      setEmail("");
-      queryClient.invalidateQueries({ queryKey: ["invites"] });
-    },
-    onError: (error: Error) => toast.error(error.message),
-  });
-
-  const memberRows = asList<MemberRecord>(members.data);
-  const inviteRows = asList<InviteRecord>(invites.data);
-
-  return (
-    <div className="space-y-4">
-      <Card>
-        <CardHeader>
-          <CardTitle>Invite member</CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-3 md:flex-row">
-          <Input
-            type="email"
-            placeholder="colleague@store.com"
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-          />
-          <Select value={role} onValueChange={setRole}>
-            <SelectTrigger className="md:w-44">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {MEMBER_ROLES.map((item) => (
-                <SelectItem key={item} value={item}>
-                  {item}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Button type="button" onClick={() => invite.mutate()} disabled={!email || invite.isPending}>
-            Invite
-          </Button>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Members</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {members.isError ? (
-            <p className="text-sm text-error">{members.error.message}</p>
-          ) : memberRows.length === 0 ? (
-            <p className="text-sm text-muted">No members returned.</p>
-          ) : (
-            memberRows.map((member) => (
-              <div key={member.id} className="flex items-center justify-between rounded-xl border border-border px-4 py-3">
-                <div>
-                  <p className="text-sm font-medium">{member.fullName ?? member.full_name ?? member.email}</p>
-                  <p className="text-xs text-muted">{member.email}</p>
-                </div>
-                <StatusBadge value={member.role} />
-              </div>
-            ))
-          )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Pending invites</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {inviteRows.length === 0 ? (
-            <p className="text-sm text-muted">No pending invites.</p>
-          ) : (
-            inviteRows.map((item) => (
-              <div key={item.id} className="flex items-center justify-between rounded-xl border border-border px-4 py-3">
-                <span className="text-sm">{item.email}</span>
-                <StatusBadge value={item.role} />
-              </div>
-            ))
-          )}
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
-
-function RolesSection() {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Roles</CardTitle>
-        <CardDescription>Permission map enforced by the API and RLS.</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-3 text-sm">
-        {[
-          ["OWNER", "Full access including billing and ownership transfer."],
-          ["ADMIN", "Manage members, settings, and operations. Billing-sensitive actions stay with owner."],
-          ["MANAGER", "Orders, shipments, automation, and operational settings."],
-          ["OPERATOR", "Create and process orders, shipments, labels, and manifests."],
-          ["VIEWER", "Read-only access across the workspace."],
-        ].map(([role, description]) => (
-          <div key={role} className="rounded-xl border border-border px-4 py-3">
-            <p className="font-medium">{role}</p>
-            <p className="mt-1 text-muted">{description}</p>
-          </div>
-        ))}
       </CardContent>
     </Card>
   );

@@ -3,6 +3,7 @@ export const MEMBER_ROLES = [
   "ADMIN",
   "MANAGER",
   "OPERATOR",
+  "PACKER",
   "VIEWER",
 ] as const;
 export type MemberRole = (typeof MEMBER_ROLES)[number];
@@ -272,7 +273,9 @@ export type Permission =
   | "support.manage"
   | "support.settings"
   | "accounting.read"
-  | "accounting.write";
+  | "accounting.write"
+  | "packing.scan"
+  | "team.read";
 
 export const SUPPORT_TICKET_STATUSES = [
   "open",

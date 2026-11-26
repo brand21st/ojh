@@ -12,8 +12,11 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { isTransientAuthClass } from "@/lib/auth/session/classify";
 import { getRequestAuthUser } from "@/lib/supabase/request-auth";
 import { isMerchantApiOpenForOrg } from "@/modules/merchant-api/flags";
+import { setIndiaPostBookingGuideHiddenForUser } from "@/lib/dashboard/india-post-booking-guide";
 import { dismissIndiaPostOnboardingForUser } from "@/lib/dashboard/india-post-onboarding";
 import { shouldWritePresence } from "@/lib/admin/user-presence";
+import { effectivePermissions } from "@/lib/permissions/rbac";
+import type { MemberRole } from "@/types/domain";
 
 export async function handleSessionRoutes(
   request: NextRequest,
@@ -44,6 +47,21 @@ export async function handleSessionRoutes(
       ? await getOrganizationEntitlements(supabase, organization.id)
       : null;
     const addons = organization ? await listOrganizationAddonEntitlements(supabase, organization.id) : [];
+    const { data: memberRow } = organization
+      ? await supabase
+          .from("organization_members")
+          .select("role, status, team, title, extra_permissions, revoked_permissions")
+          .eq("organization_id", organization.id)
+          .eq("user_id", user.id)
+          .maybeSingle()
+      : { data: null };
+    const role = (memberRow?.role ?? ensured.role ?? null) as MemberRole | null;
+    const permissions = role
+      ? effectivePermissions(role, {
+          extra: memberRow?.extra_permissions as string[] | null,
+          revoked: memberRow?.revoked_permissions as string[] | null,
+        })
+      : [];
     return {
       user: {
         id: user.id,
@@ -51,13 +69,31 @@ export async function handleSessionRoutes(
         fullName: profile?.full_name,
         avatarUrl: profile?.avatar_url,
         whatsappNumber: profile?.whatsapp_number ?? null,
+        indiaPostContractualCustomer: profile?.india_post_contractual_customer ?? null,
         indiaPostOnboardingDismissedAt: profile?.india_post_onboarding_dismissed_at ?? null,
+        indiaPostBookingGuideHiddenAt: profile?.india_post_booking_guide_hidden_at ?? null,
       },
       organization,
       role: ensured.role,
-      organizations: organization
-        ? [{ id: organization.id, name: organization.name, slug: organization.slug, role: ensured.role }]
-        : [],
+      permissions: memberRow?.status === "SUSPENDED" ? [] : permissions,
+      member: memberRow
+        ? {
+            status: memberRow.status ?? "ACTIVE",
+            team: memberRow.team ?? null,
+            title: memberRow.title ?? null,
+          }
+        : null,
+      organizations: ensured.all.length
+        ? ensured.all.map((item) => ({
+            id: item.id,
+            name: item.name,
+            slug: item.slug,
+            role: item.role,
+            status: item.status,
+          }))
+        : organization
+          ? [{ id: organization.id, name: organization.name, slug: organization.slug, role: ensured.role }]
+          : [],
       subscription: {
         planCode: entitlements?.planSlug,
         planName: entitlements?.planName,
@@ -79,6 +115,17 @@ export async function handleSessionRoutes(
           status: row.status,
         })),
     };
+  }
+
+  if (key === "POST invites/accept") {
+    const auth = await getRequestAuthUser();
+    if (auth.classification && isTransientAuthClass(auth.classification)) {
+      throw new AppError(ERROR_CODES.AUTH_UNAVAILABLE, "Authentication is temporarily unavailable. Try again shortly.");
+    }
+    if (!auth.user) throw new AppError(ERROR_CODES.AUTH_REQUIRED, "Please sign in to continue.");
+    const body = z.object({ token: z.string().trim().min(16).max(200) }).parse(await request.json().catch(() => ({})));
+    const { acceptInviteAsUser } = await import("@/modules/team/service");
+    return acceptInviteAsUser(body.token, { id: auth.user.id, email: auth.user.email });
   }
 
   if (key === "POST me/presence") {
@@ -123,8 +170,32 @@ export async function handleSessionRoutes(
     }
     if (!user) throw new AppError(ERROR_CODES.AUTH_REQUIRED, "Please sign in to continue.");
     const body = await request.json().catch(() => ({}));
-    z.object({ indiaPostOnboardingDismissedAt: z.literal(true) }).parse(body);
-    return dismissIndiaPostOnboardingForUser(supabase, user.id);
+    const parsed = z
+      .object({
+        indiaPostOnboardingDismissedAt: z.literal(true).optional(),
+        indiaPostBookingGuideHidden: z.boolean().optional(),
+      })
+      .refine(
+        (value) =>
+          value.indiaPostOnboardingDismissedAt === true || typeof value.indiaPostBookingGuideHidden === "boolean",
+        { message: "No preference to save" },
+      )
+      .parse(body);
+    const result: {
+      dismissed?: true;
+      indiaPostOnboardingDismissedAt?: string;
+      indiaPostBookingGuideHiddenAt?: string | null;
+    } = {};
+    if (parsed.indiaPostOnboardingDismissedAt) {
+      Object.assign(result, await dismissIndiaPostOnboardingForUser(supabase, user.id));
+    }
+    if (typeof parsed.indiaPostBookingGuideHidden === "boolean") {
+      Object.assign(
+        result,
+        await setIndiaPostBookingGuideHiddenForUser(supabase, user.id, parsed.indiaPostBookingGuideHidden),
+      );
+    }
+    return result;
   }
 
   if (key === "POST organizations") {

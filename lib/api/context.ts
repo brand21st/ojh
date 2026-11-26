@@ -1,7 +1,7 @@
 import { cache } from "react";
 import { isTransientAuthClass } from "@/lib/auth/session/classify";
 import { AppError, ERROR_CODES } from "@/lib/api/errors";
-import { hasPermission, permissionsFor } from "@/lib/permissions/rbac";
+import { effectivePermissions } from "@/lib/permissions/rbac";
 import { getRequestAuthUser } from "@/lib/supabase/request-auth";
 import type { MemberRole, Permission } from "@/types/domain";
 
@@ -46,7 +46,7 @@ const resolveRequestTenant = cache(async (): Promise<TenantContext> => {
 
   const { data: membership, error: memberError } = await supabase
     .from("organization_members")
-    .select("role, organizations(id, name)")
+    .select("role, status, extra_permissions, revoked_permissions, organizations(id, name)")
     .eq("organization_id", organizationId)
     .eq("user_id", user.id)
     .maybeSingle();
@@ -55,6 +55,13 @@ const resolveRequestTenant = cache(async (): Promise<TenantContext> => {
     throw new AppError(
       ERROR_CODES.TENANT_ACCESS_DENIED,
       "You do not have access to this workspace."
+    );
+  }
+
+  if (membership.status === "SUSPENDED") {
+    throw new AppError(
+      ERROR_CODES.TENANT_ACCESS_DENIED,
+      "Your access to this workspace is paused. Ask the workspace owner to turn it back on."
     );
   }
 
@@ -70,17 +77,25 @@ const resolveRequestTenant = cache(async (): Promise<TenantContext> => {
     organizationId,
     organizationName: organization?.name ?? "Workspace",
     role,
-    permissions: permissionsFor(role),
+    permissions: effectivePermissions(role, {
+      extra: membership.extra_permissions as string[] | null,
+      revoked: membership.revoked_permissions as string[] | null,
+    }),
   };
 });
 
 export async function requireTenant(permission?: Permission): Promise<TenantContext> {
   const ctx = await resolveRequestTenant();
-  if (permission && !hasPermission(ctx.role, permission)) {
+  if (permission && !can(ctx, permission)) {
     throw new AppError(
       ERROR_CODES.FORBIDDEN,
       "You do not have permission to perform this action."
     );
   }
   return ctx;
+}
+
+/** Whether this member may do something: their role, plus per-member feature switches. */
+export function can(ctx: Pick<TenantContext, "permissions">, permission: Permission) {
+  return ctx.permissions.includes(permission);
 }

@@ -22,9 +22,9 @@ import { handleSupportRoutes } from "@/lib/api/v1/support";
 import { handleTariffRoutes } from "@/lib/api/v1/tariff";
 import { handleMerchantTutorials } from "@/lib/api/v1/tutorials";
 import { handleUiRoutes } from "@/lib/api/v1/ui";
+import { handleTeamRoutes } from "@/lib/api/v1/team";
 import { handleWorkspaceRoutes } from "@/lib/api/v1/workspace";
 import { permissionForTenantRoute } from "@/lib/api/v1-permissions";
-import { hasPermission } from "@/lib/permissions/rbac";
 import { assertAnyPlanFeature, assertPlanFeature, FEATURE, lockedFeatureForApi } from "@/modules/billing/entitlements";
 
 export type TenantRoute = { key: string; path: string; method: string; slugs: string[] };
@@ -42,7 +42,7 @@ export async function dispatchTenantRoutes(
 ) {
   const { key, path, method, slugs } = route;
   const permission = permissionForTenantRoute(method, path, slugs);
-  if (permission && !hasPermission(ctx.role, permission)) {
+  if (permission && !ctx.permissions.includes(permission)) {
     throw new AppError(ERROR_CODES.FORBIDDEN, "You do not have permission to perform this action.");
   }
   const planFeature = lockedFeatureForApi(method, path, slugs);
@@ -55,6 +55,7 @@ export async function dispatchTenantRoutes(
     (await handleBillingRoutes(request, supabase, ctx, key)) ??
     (await handleAddonRoutes(request, supabase, ctx, key)) ??
     (await handleAiAccountantRoutes(request, supabase, ctx, key, method, slugs)) ??
+    (await handleTeamRoutes(request, supabase, ctx, method, slugs)) ??
     (await handleWorkspaceRoutes(request, supabase, ctx, key, method, slugs)) ??
     (await handleSupportRoutes(request, supabase, ctx, method, slugs)) ??
     (await handleUiRoutes(request, supabase, ctx, method, slugs)) ??
