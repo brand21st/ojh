@@ -392,6 +392,7 @@ export class IndiaPostProvider implements ShippingProvider {
       if (!response.ok) {
         const error = new Error("Unable to fetch India Post offices. Please try again.");
         (error as { status?: number }).status = response.status;
+        (error as { code?: string }).code = "TEMPORARY_PROVIDER_FAILURE";
         throw error;
       }
       return indiaPostOfficesFromPincodeResponse(json);

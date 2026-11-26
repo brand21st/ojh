@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { AppError, ERROR_CODES } from "@/lib/api/errors";
-import { orIlike } from "@/lib/api/filters";
+import { orderCustomerSearchFilter, orderListSearchOr } from "@/modules/orders/list-search";
 import type { OrderStatus } from "@/types/domain";
 import type { TenantContext } from "@/lib/api/context";
 import type { z } from "zod";
@@ -101,13 +101,29 @@ async function nextOrderNumber(supabase: SupabaseClient, organizationId: string,
 
 type OrderDateRange = "list" | "none" | { from?: string; to?: string };
 
+const CUSTOMER_SEARCH_LIMIT = 200;
+
+async function matchingCustomerIds(supabase: SupabaseClient, organizationId: string, q?: string) {
+  const filter = q ? orderCustomerSearchFilter(q) : null;
+  if (!filter) return [];
+  const { data, error } = await supabase
+    .from("customers")
+    .select("id")
+    .eq("organization_id", organizationId)
+    .or(filter)
+    .limit(CUSTOMER_SEARCH_LIMIT);
+  if (error) throw new AppError(ERROR_CODES.VALIDATION_ERROR, error.message);
+  return (data ?? []).map((row) => String(row.id));
+}
+
 function applyOrderListFilters(
   // PostgREST filter builders are not exported as a stable public type.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   builder: any,
   ctx: TenantContext,
   query: OrderListQuery,
-  dates: OrderDateRange = "list"
+  dates: OrderDateRange = "list",
+  customerIds: string[] = []
 ) {
   builder = builder.eq("organization_id", ctx.organizationId);
   if (query.status) builder = builder.eq("status", query.status);
@@ -118,7 +134,7 @@ function applyOrderListFilters(
   if (from) builder = builder.gte("created_at", orderDateBoundary(from, false));
   if (to) builder = builder.lte("created_at", orderDateBoundary(to, true));
   if (query.q) {
-    const filter = orIlike(["order_number", "source_order_id"], query.q);
+    const filter = orderListSearchOr(query.q, customerIds);
     if (filter) builder = builder.or(filter);
   }
   return builder;
@@ -149,13 +165,15 @@ async function countOrders(
   supabase: SupabaseClient,
   ctx: TenantContext,
   query: OrderListQuery,
-  dates: OrderDateRange = "list"
+  dates: OrderDateRange = "list",
+  customerIds: string[] = []
 ) {
   const builder = applyOrderListFilters(
     supabase.from("orders").select("id", { count: "exact", head: true }),
     ctx,
     query,
-    dates
+    dates,
+    customerIds
   );
   const { count, error } = await builder;
   if (error) throw new AppError(ERROR_CODES.VALIDATION_ERROR, error.message);
@@ -169,22 +187,23 @@ export async function listOrders(
 ) {
   const from = (query.page - 1) * query.pageSize;
   const to = from + query.pageSize - 1;
+  const customerIds = await matchingCustomerIds(supabase, ctx.organizationId, query.q);
 
   const listBuilder = applyOrderListSort(
-    applyOrderListFilters(supabase.from("orders").select(ORDER_LIST_SELECT), ctx, query),
+    applyOrderListFilters(supabase.from("orders").select(ORDER_LIST_SELECT), ctx, query, "list", customerIds),
     query.sort
   ).range(from, to);
 
   const includeCounts = wantsOrderCounts(query);
   const [listed, total, all, today, yesterday] = await Promise.all([
     listBuilder,
-    countOrders(supabase, ctx, query, "list"),
-    includeCounts ? countOrders(supabase, ctx, query, "none") : Promise.resolve(0),
+    countOrders(supabase, ctx, query, "list", customerIds),
+    includeCounts ? countOrders(supabase, ctx, query, "none", customerIds) : Promise.resolve(0),
     includeCounts && query.todayFrom && query.todayTo
-      ? countOrders(supabase, ctx, query, { from: query.todayFrom, to: query.todayTo })
+      ? countOrders(supabase, ctx, query, { from: query.todayFrom, to: query.todayTo }, customerIds)
       : Promise.resolve(0),
     includeCounts && query.yesterdayFrom && query.yesterdayTo
-      ? countOrders(supabase, ctx, query, { from: query.yesterdayFrom, to: query.yesterdayTo })
+      ? countOrders(supabase, ctx, query, { from: query.yesterdayFrom, to: query.yesterdayTo }, customerIds)
       : Promise.resolve(0),
   ]);
 
@@ -1003,22 +1022,19 @@ export async function exportOrdersCsv(
   ctx: TenantContext,
   query: z.infer<typeof orderListQuery>
 ) {
-  let builder = applyOrderListSort(
-    supabase
-      .from("orders")
-      .select("order_number, source, status, total_amount, payment_status, created_at, customers(name)")
-      .eq("organization_id", ctx.organizationId),
+  const customerIds = await matchingCustomerIds(supabase, ctx.organizationId, query.q);
+  const builder = applyOrderListSort(
+    applyOrderListFilters(
+      supabase
+        .from("orders")
+        .select("order_number, source, status, total_amount, payment_status, created_at, customers(name)"),
+      ctx,
+      query,
+      "list",
+      customerIds
+    ),
     query.sort
   ).limit(5000);
-  if (query.status) builder = builder.eq("status", query.status);
-  if (query.source) builder = builder.eq("source", query.source);
-  if (query.paymentStatus) builder = builder.eq("payment_status", query.paymentStatus);
-  if (query.from) builder = builder.gte("created_at", orderDateBoundary(query.from, false));
-  if (query.to) builder = builder.lte("created_at", orderDateBoundary(query.to, true));
-  if (query.q) {
-    const filter = orIlike(["order_number", "source_order_id"], query.q);
-    if (filter) builder = builder.or(filter);
-  }
   const { data, error } = await builder;
   if (error) throw new AppError(ERROR_CODES.VALIDATION_ERROR, error.message);
   const header = "order_number,source,status,total_amount,payment_status,customer,created_at";

@@ -562,6 +562,64 @@ function issueMessages(errors: unknown) {
 const FORMATTING_REVIEW_NOTE =
   /repeated locality or address line removed|extra commas or spaces removed|address lines were corrected for india post/i;
 
+const RECIPIENT_SOURCE_NOTE =
+  /mobile number may belong to the buyer rather than the shipping recipient|recipient name was taken from the buyer account, not the shipping address/i;
+
+function recipientSourceIssue(issue: unknown) {
+  if (typeof issue === "string") return RECIPIENT_SOURCE_NOTE.test(issue);
+  if (!issue || typeof issue !== "object") return false;
+  const row = issue as { code?: unknown; message?: unknown; blocking?: unknown };
+  if (row.blocking === true) return false;
+  const code = String(row.code ?? "");
+  if (code === "phone_not_recipient" || code === "name_not_recipient") return true;
+  return RECIPIENT_SOURCE_NOTE.test(String(row.message ?? ""));
+}
+
+function formattingReviewIssue(issue: unknown) {
+  if (typeof issue === "string") return FORMATTING_REVIEW_NOTE.test(issue);
+  if (!issue || typeof issue !== "object") return false;
+  const row = issue as { code?: unknown; message?: unknown; blocking?: unknown };
+  if (row.blocking === true) return false;
+  const code = String(row.code ?? "");
+  if (code === "address_formatting" || code === "address_auto_corrected") return true;
+  return FORMATTING_REVIEW_NOTE.test(String(row.message ?? ""));
+}
+
+const PHONE_OR_PIN_NOTE =
+  /mobile number|10-digit indian|pin\s*code|pincode|exactly six digits|not found by india post|pin verification/i;
+
+/** Address check only fails a booking for the mobile number or the PIN code. */
+export function phoneOrPincodeIssue(issue: unknown) {
+  if (typeof issue === "object" && issue) {
+    const code = String((issue as { code?: unknown }).code ?? "");
+    if (code === "phone_not_recipient" || code === "name_not_recipient") return false;
+  }
+  if (recipientSourceIssue(issue)) return false;
+  if (typeof issue === "string") return PHONE_OR_PIN_NOTE.test(issue);
+  if (!issue || typeof issue !== "object") return false;
+  const row = issue as { code?: unknown; message?: unknown };
+  const code = String(row.code ?? "");
+  if (
+    code === "missing_phone" ||
+    code === "invalid_phone" ||
+    code === "missing_pincode" ||
+    code === "invalid_pincode" ||
+    code === "pin_not_found" ||
+    code === "pin_state_mismatch" ||
+    code === "pin_unavailable" ||
+    code === "INVALID_PINCODE"
+  ) {
+    return true;
+  }
+  return PHONE_OR_PIN_NOTE.test(String(row.message ?? ""));
+}
+
+/** Buyer-phone notes and formatting cleanups. They are not an address error and do not block booking. */
+export function recipientSourceAdvisoryOnly(errors: unknown) {
+  if (!Array.isArray(errors) || errors.length === 0) return false;
+  return errors.every((issue) => recipientSourceIssue(issue) || formattingReviewIssue(issue));
+}
+
 /** True when every stored note is a safe cleanup, with nothing the merchant still has to confirm. */
 export function formattingReviewOnly(errors: unknown) {
   if (!Array.isArray(errors) || errors.length === 0) return false;
@@ -664,11 +722,18 @@ export function shippingAddressBookingBlock(address?: StoredShippingFields | nul
     if (stored === "VALIDATION_UNAVAILABLE") {
       return "India Post PIN verification is temporarily unavailable. Retry the address check before booking.";
     }
-    if (stored === "NEEDS_REVIEW" && formattingReviewOnly(address.address_validation_errors)) {
+    if (
+      stored === "NEEDS_REVIEW" &&
+      (formattingReviewOnly(address.address_validation_errors) ||
+        recipientSourceAdvisoryOnly(address.address_validation_errors))
+    ) {
       const live = classifyStoredShippingAddress(address);
       if (live.status === "READY") return null;
     }
     if (stored === "NEEDS_REVIEW" || stored === "INVALID") {
+      const live = classifyStoredShippingAddress(address);
+      const storedErrors = Array.isArray(address.address_validation_errors) ? address.address_validation_errors : [];
+      if (live.status === "READY" && !storedErrors.some((issue) => phoneOrPincodeIssue(issue))) return null;
       return bookingBlockMessage(stored, address.address_validation_errors);
     }
     return "Shipping address validation is incomplete. Correct it before India Post booking.";

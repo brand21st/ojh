@@ -133,6 +133,10 @@ export function classifyProviderError(error: unknown): ClassifiedError {
     return { retryable: false, code: "CEPT_UNKNOWN", message, httpStatus };
   }
 
+  if (/unable to fetch india post offices/i.test(message) || code === "TEMPORARY_PROVIDER_FAILURE") {
+    return { retryable: true, code: "TEMPORARY_PROVIDER_FAILURE", message, httpStatus };
+  }
+
   if (isUndiciNetworkFailure(error)) {
     return {
       retryable: true,

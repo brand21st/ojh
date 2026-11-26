@@ -1,4 +1,5 @@
 import { GETTER_TIMEOUT_MESSAGE, READ_ONLY_CODE_GETTER } from "@/lib/jobs/retry";
+import { phoneOrPincodeIssue, recipientSourceAdvisoryOnly } from "@/modules/shopify/shipping-contact";
 import { indiaPostUnknownPincodeCopy, isIndiaPostUnknownPincodeMessage } from "@/modules/india-post/error-text";
 
 export type ErrorFactKind = "provider" | "order" | "payment" | "invoice" | "shipment" | "address" | "parcel";
@@ -141,8 +142,15 @@ export function collectErrorFacts(input: FactSource): ErrorFact[] {
 
   const address = input.shippingAddress;
   const addressStatus = text(address?.address_validation_status).toUpperCase();
-  if (addressStatus === "INVALID" || addressStatus === "NEEDS_REVIEW" || addressStatus === "VALIDATION_UNAVAILABLE") {
-    const stored = messages(address?.address_validation_errors);
+  const storedErrors = Array.isArray(address?.address_validation_errors) ? address.address_validation_errors : [];
+  const phoneOrPin = storedErrors.filter((issue) => phoneOrPincodeIssue(issue));
+  const advisoryOnly =
+    addressStatus === "NEEDS_REVIEW" && recipientSourceAdvisoryOnly(address?.address_validation_errors);
+  if (
+    !advisoryOnly &&
+    (phoneOrPin.length > 0 || addressStatus === "VALIDATION_UNAVAILABLE")
+  ) {
+    const stored = messages(phoneOrPin.length ? phoneOrPin : address?.address_validation_errors);
     facts.push({
       kind: "address",
       message:

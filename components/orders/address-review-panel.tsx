@@ -4,6 +4,7 @@ import { useMutation } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/hooks/use-api";
+import { recipientSourceAdvisoryOnly } from "@/modules/shopify/shipping-contact";
 import type { AddressSummary } from "@/types/api";
 
 function addressStatusLabel(status?: string | null) {
@@ -42,9 +43,10 @@ export function AddressReviewPanel({
   locked: boolean;
   onSaved: () => void;
 }) {
-  const status = String(address?.address_validation_status ?? "");
-  const label = addressStatusLabel(status);
-  const issues = (address?.address_validation_errors ?? []).map(issueText).filter(Boolean);
+  const status = String(address?.address_validation_status ?? "").toUpperCase();
+  const advisoryOnly = recipientSourceAdvisoryOnly(address?.address_validation_errors);
+  const label = advisoryOnly ? "" : addressStatusLabel(status);
+  const issues = advisoryOnly ? [] : (address?.address_validation_errors ?? []).map(issueText).filter(Boolean);
   const original = originalLine(address);
   const action = useMutation({
     mutationFn: (path: "accept" | "restore" | "revalidate") =>
@@ -56,6 +58,7 @@ export function AddressReviewPanel({
     onError: (error: Error) => toast.error(error.message),
   });
 
+  if (advisoryOnly && !original) return null;
   if (status !== "NEEDS_REVIEW" && status !== "INVALID" && !original) return null;
 
   return (

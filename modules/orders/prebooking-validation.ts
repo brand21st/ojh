@@ -15,6 +15,7 @@ import {
   classifyStoredShippingAddress,
   pinOfficeStateConflict,
   formattingReviewOnly,
+  phoneOrPincodeIssue,
   shippingAddressBookingBlock,
   validationPatchFromClassification,
   type AddressIssue,
@@ -379,6 +380,7 @@ export async function lookupDestinationOffices(search: SearchPostOffices, pincod
   if (cached && Date.now() - cached.at < PIN_CACHE_MS) return { ok: true as const, offices: cached.offices };
   try {
     const offices = await search(pin);
+    if (!offices.length) return { ok: false as const, offices: [] as IndiaPostOffice[] };
     pinOfficeCache.set(pin, { at: Date.now(), offices });
     return { ok: true as const, offices };
   } catch {
@@ -826,7 +828,8 @@ function orderResult(row: PrebookingOrderRow, address: StoredShippingFields | nu
     reviewApplies && Array.isArray(address?.address_validation_errors)
       ? (address.address_validation_errors as PrebookingIssue[])
       : [];
-  const issues = [...storedIssues, ...extra].filter((issue) => issue && (issue.message || issue.code));
+  const keptStored = storedIssues.filter((issue) => phoneOrPincodeIssue(issue));
+  const issues = [...keptStored, ...extra].filter((issue) => issue && (issue.message || issue.code));
   const status = !reviewApplies
     ? extra.some((issue) => issue.blocking)
       ? "fix_required"
@@ -838,13 +841,17 @@ function orderResult(row: PrebookingOrderRow, address: StoredShippingFields | nu
           ? "validation_unavailable"
           : "fix_required"
         : prebookingUiStatus(address?.address_validation_status, address?.address_validation_fingerprint, current);
+  const shown =
+    reviewApplies && !extra.some((issue) => issue.blocking) && !keptStored.length && status !== "validation_unavailable"
+      ? "ready"
+      : status;
   return {
     orderId: row.id,
     orderNumber: String(row.order_number ?? ""),
     customerName: customerNameOf(row) || collapse(address?.name),
     source: String(row.source ?? ""),
-    status,
-    blocking: status !== "ready",
+    status: shown,
+    blocking: shown !== "ready",
     fingerprint: String(address?.address_validation_fingerprint ?? current),
     issues,
     address: addressView(address),

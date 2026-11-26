@@ -23,8 +23,10 @@ type OfficeLookup = {
 export type IndiaPostOfficeConnection = {
   pickup_dropoff_office_id?: string | null;
   pickup_dropoff_office_pincode?: string | null;
+  pickup_dropoff_office_name?: string | null;
   pickup_office_id?: string | null;
   pickup_office_pincode?: string | null;
+  pickup_office_name?: string | null;
 };
 
 export function indiaPostSixDigitPin(...values: Array<string | null | undefined>) {
@@ -143,5 +145,93 @@ export async function resolveIndiaPostOrigin(
     city: String(matched.city_name ?? pickup?.city ?? "Ernakulam"),
     state: String(matched.state_name ?? pickup?.state ?? "Kerala"),
     deliveryOfficeName: indiaPostPickDeliveryOffice(destOffices)?.office_name,
+  };
+}
+
+function savedBookingOfficeName(
+  pickupOrDropoff: "PICKUP" | "DROPOFF",
+  connection: IndiaPostOfficeConnection
+) {
+  const dropName = String(connection.pickup_dropoff_office_name ?? "").trim();
+  const pickupName = String(connection.pickup_office_name ?? "").trim();
+  if (pickupOrDropoff === "PICKUP") return pickupName || dropName;
+  return dropName || pickupName;
+}
+
+async function officesOrEmpty(provider: OfficeLookup, pin: string) {
+  if (!pin) return [];
+  try {
+    return await provider.searchPostOffices(pin);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Label PDFs are requested after India Post has already booked the article.
+ * Use the saved booking office. A destination pincode-search must not fail the label.
+ */
+export async function resolveIndiaPostLabelOrigin(
+  provider: OfficeLookup,
+  connection: IndiaPostOfficeConnection,
+  pickup: IndiaPostPickupRow | null,
+  destPin: string,
+  pickupOrDropoff: "PICKUP" | "DROPOFF" = "DROPOFF"
+) {
+  const officeId = indiaPostBookingOfficeId(pickupOrDropoff, connection, pickup);
+  const originPin = indiaPostOriginPincode(pickupOrDropoff, connection, pickup);
+  const dest = indiaPostSixDigitPin(destPin);
+  if (!officeId) {
+    throw Object.assign(
+      new Error(
+        pickupOrDropoff === "PICKUP"
+          ? "Pickup Officeid is required when pickup_or_dropoff is PICKUP. Save Pickup Location on Integrations → India Post."
+          : "Dropoff Officeid is required when pickup_or_dropoff is DROPOFF. Save Drop-off office on Integrations → India Post."
+      ),
+      { code: "VALIDATION_ERROR" }
+    );
+  }
+  if (officeId.length !== 8 || !/^\d+$/.test(officeId)) {
+    throw Object.assign(
+      new Error(
+        pickupOrDropoff === "PICKUP"
+          ? `Pickup Officeid must be exactly 8 digits (got ${officeId}).`
+          : `Dropoff Officeid must be exactly 8 digits (got ${officeId}).`
+      ),
+      { code: "VALIDATION_ERROR" }
+    );
+  }
+  if (!/^\d{6}$/.test(originPin)) {
+    throw Object.assign(
+      new Error(
+        `Sender pincode must be exactly 6 digits (got ${originPin || "empty"}). Save the booking office from its 6-digit pincode on Integrations → India Post.`
+      ),
+      { code: "VALIDATION_ERROR" }
+    );
+  }
+  const originOffices = await officesOrEmpty(provider, originPin);
+  const matched = indiaPostFindOffice(originOffices, officeId);
+  const savedName = savedBookingOfficeName(pickupOrDropoff, connection);
+  const name = String(matched?.office_name ?? savedName);
+  if (!name) {
+    throw Object.assign(new Error("Unable to fetch India Post offices. Please try again."), {
+      code: "TEMPORARY_PROVIDER_FAILURE",
+    });
+  }
+  if (originPin === dest) {
+    throw Object.assign(
+      new Error(
+        `India Post origin pin ${originPin} matched the receiver pin. Set the booking office pincode to the origin office, not the receiver.`
+      ),
+      { code: "VALIDATION_ERROR" }
+    );
+  }
+  return {
+    officeId,
+    pincode: originPin,
+    name,
+    city: String(matched?.city_name ?? pickup?.city ?? "Ernakulam"),
+    state: String(matched?.state_name ?? pickup?.state ?? "Kerala"),
+    deliveryOfficeName: undefined as string | undefined,
   };
 }

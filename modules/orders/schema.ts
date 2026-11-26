@@ -173,7 +173,7 @@ export type OrderListSort = (typeof ORDER_LIST_SORTS)[number];
 export const orderListQuery = z.object({
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
-  q: z.string().optional(),
+  q: z.string().trim().max(200).optional(),
   status: z.enum(ORDER_STATUSES).optional(),
   source: z.enum(ORDER_SOURCES).optional(),
   paymentStatus: z.enum(PAYMENT_STATUSES).optional(),

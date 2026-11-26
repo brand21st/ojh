@@ -82,6 +82,16 @@ export async function POST(request: NextRequest) {
       recovered: 0,
       skipped: 0,
     };
+    if (hasAdminClient() && (!jobTypes || jobTypes.includes("label-generation"))) {
+      try {
+        const { requeueStuckLabelJobs } = await import("@/modules/labels/requeue");
+        await requeueStuckLabelJobs(createAdminClient());
+      } catch (labelError) {
+        logError("label.requeue_failed", {
+          message: labelError instanceof Error ? labelError.message : "Label requeue failed.",
+        });
+      }
+    }
     if ((!jobTypes || jobTypes.includes("shipment-booking")) && hasAdminClient()) {
       try {
         const admin = createAdminClient();

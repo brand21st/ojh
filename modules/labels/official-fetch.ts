@@ -8,7 +8,7 @@ import {
   indiaPostDomesticLabelPayload,
   indiaPostMobile,
 } from "@/modules/india-post/endpoints";
-import { cachedOfficeLookup, resolveIndiaPostOrigin } from "@/modules/india-post/origin";
+import { cachedOfficeLookup, resolveIndiaPostLabelOrigin } from "@/modules/india-post/origin";
 import { persistLabelPdf } from "@/modules/labels/persist";
 import { organizationLabelSender } from "@/modules/organizations/label-sender";
 import { DEFAULT_INDIA_POST_SERVICE } from "@/types/domain";
@@ -85,7 +85,7 @@ export async function fetchOfficialIndiaPostLabelPdf(
   if (!session.reused && session.tokens) {
     await persistIndiaPostTokens(supabase, connection, session.tokens);
   }
-  const origin = await resolveIndiaPostOrigin(
+  const origin = await resolveIndiaPostLabelOrigin(
     cachedOfficeLookup(provider),
     connection,
     {

@@ -1229,6 +1229,8 @@ export default function OrdersPage() {
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             placeholder="Search order number, customer, phone…"
+            aria-label="Search order number, customer, phone"
+            maxLength={200}
             className="h-8 w-full min-w-0 shadow-none lg:max-w-[15rem] xl:max-w-xs"
           />
           <div className="hidden min-w-0 flex-1 grid-cols-3 gap-2 lg:grid">
