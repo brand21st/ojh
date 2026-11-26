@@ -7,7 +7,6 @@ import {
   approveAllWaiting,
   approveItems,
   dispatchItems,
-  dispatchOfficeGroup,
   excludeItems,
   QUEUE_ACTION_MAX_ITEMS,
   revalidateItems,
@@ -21,7 +20,6 @@ import {
   getQueueItem,
   listBookingHistory,
   listQueueItems,
-  listReadyOfficeGroups,
   queueSummary,
 } from "@/modules/booking-queue/service";
 
@@ -94,14 +92,6 @@ export async function handleBookingQueueRoutes(
   if (slugs[0] !== "booking-queue") return null;
   if (method === "GET" && slugs.length === 1) return listQueueItems(supabase, ctx, listQuery(request));
   if (method === "GET" && slugs[1] === "summary" && slugs.length === 2) return queueSummary(supabase, ctx);
-  if (slugs[1] === "office-groups" && slugs.length === 2) {
-    if (method === "GET") return listReadyOfficeGroups(supabase, ctx);
-    if (method === "POST") {
-      const parsed = z.object({ officeId: z.string().trim().min(1).max(32) }).safeParse(await request.json().catch(() => ({})));
-      if (!parsed.success) throw new AppError(ERROR_CODES.VALIDATION_ERROR, "Choose a booking office.");
-      return dispatchOfficeGroup(supabase, ctx, parsed.data.officeId);
-    }
-  }
   if (slugs[1] === "settings" && slugs.length === 2) {
     if (method === "GET") return getBookingAutomationSettings(supabase, ctx);
     if (method === "PATCH") return saveBookingAutomationSettings(supabase, ctx, await request.json().catch(() => ({})));

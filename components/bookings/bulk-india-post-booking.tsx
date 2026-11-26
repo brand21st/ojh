@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 import { Truck } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -12,11 +12,9 @@ import {
   exportRequestBody,
   type BookedExportPlan,
 } from "@/components/booking-queue/export-booked-dialog";
-import { precheckOrderIds } from "@/components/orders/booking-precheck";
 import { PrebookingReviewDialog } from "@/components/orders/prebooking-review-dialog";
 import { api } from "@/lib/hooks/use-api";
-import { needsContactCorrection } from "@/modules/orders/contact-correction";
-import type { AutomationSettings, BulkBookingResult, PrebookingCheckResult } from "@/types/api";
+import type { BulkBookingResult } from "@/types/api";
 
 export function BulkIndiaPostBooking({
   selectedIds,
@@ -30,17 +28,9 @@ export function BulkIndiaPostBooking({
   iconOnly?: boolean;
 }) {
   const [reviewOpen, setReviewOpen] = useState(false);
-  const [reviewIds, setReviewIds] = useState<string[]>([]);
-  const [reviewSeed, setReviewSeed] = useState<PrebookingCheckResult | null>(null);
-  const [preparing, setPreparing] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [exportPlan, setExportPlan] = useState<BookedExportPlan | null>(null);
   const [partsOpen, setPartsOpen] = useState(false);
-  const automation = useQuery({
-    queryKey: ["automation"],
-    queryFn: () => api<AutomationSettings>("/api/v1/automation"),
-  });
-  const allowAi = automation.data?.autoAiAddressCheck ?? automation.data?.auto_ai_address_check ?? false;
 
   const queue = useMutation({
     mutationFn: (orderIds: string[]) =>
@@ -54,29 +44,6 @@ export function BulkIndiaPostBooking({
     },
     onError: (error: Error) => toast.error(error.message),
   });
-
-  async function startBulk() {
-    setPreparing(true);
-    try {
-      const checked = await precheckOrderIds(selectedIds, () => undefined, { allowAi, forceAi: false });
-      const correctable = checked.orders.filter((order) => needsContactCorrection(order.issues));
-      const ready = checked.orders.filter((order) => order.status === "ready").map((order) => order.orderId);
-      if (ready.length) queue.mutate(ready);
-      if (correctable.length) {
-        setReviewIds(correctable.map((order) => order.orderId));
-        setReviewSeed({ ...checked, orders: correctable });
-        setReviewOpen(true);
-        return;
-      }
-      if (!ready.length) {
-        toast.message("No selected orders are ready to book, and none have a mobile number or PIN to correct here.");
-      }
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not check the selected orders.");
-    } finally {
-      setPreparing(false);
-    }
-  }
 
   async function downloadExcel() {
     const filters = { orderIds: selectedIds };
@@ -112,10 +79,10 @@ export function BulkIndiaPostBooking({
         type="button"
         variant="secondary"
         size={iconOnly ? "icon-xs" : size}
-        disabled={selectedIds.length === 0 || preparing || queue.isPending}
+        disabled={selectedIds.length === 0 || queue.isPending}
         title="Bulk book"
         aria-label="Bulk book"
-        onClick={() => void startBulk()}
+        onClick={() => setReviewOpen(true)}
       >
         <Truck className="size-4" />
         {iconOnly ? null : "Bulk book"}
@@ -134,9 +101,11 @@ export function BulkIndiaPostBooking({
       <PrebookingReviewDialog
         open={reviewOpen}
         onOpenChange={setReviewOpen}
-        orderIds={reviewIds}
-        seed={reviewSeed}
-        allowAi={allowAi}
+        orderIds={selectedIds}
+        onBookReady={(ids) => {
+          queue.mutate(ids);
+          setReviewOpen(false);
+        }}
       />
       <BookedExportPartsDialog
         open={partsOpen}
