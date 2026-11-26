@@ -92,6 +92,8 @@ export const ORDER_WEBHOOK_TOPICS = [
   "orders/cancelled",
   "fulfillment_orders/progress_reported",
 ] as const;
+/** Live product + stock sync topics; deliveries are ignored unless the workspace turned sync on. */
+export const PRODUCT_WEBHOOK_TOPICS = ["products/create", "products/update", "products/delete", "inventory_levels/update"] as const;
 export const FULFILLMENT_ORDER_REPORT_PROGRESS = `
   mutation FulfillmentOrderReportProgress($id: ID!, $progressReport: FulfillmentOrderReportProgressInput) {
     fulfillmentOrderReportProgress(id: $id, progressReport: $progressReport) {
@@ -2443,7 +2445,7 @@ export async function registerShopifyOrderWebhooks(shop: string, token: string) 
       .map((hook) => hook.topic)
   );
   let registered = 0;
-  for (const topic of ORDER_WEBHOOK_TOPICS) {
+  for (const topic of [...ORDER_WEBHOOK_TOPICS, ...PRODUCT_WEBHOOK_TOPICS]) {
     if (have.has(topic)) continue;
     const response = await shopifyRequest(shop, token, "/webhooks.json", {
       method: "POST",

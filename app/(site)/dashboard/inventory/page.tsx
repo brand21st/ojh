@@ -9,6 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import styles from "./inventory.module.css";
 import { useMe } from "@/lib/hooks/use-me";
 import { hasPermission } from "@/lib/permissions/rbac";
+import { StoreImportButton } from "./store-import";
 
 /** Storefront, Covers and Coupons moved to /dashboard/store-builder (old ?tab= links redirect in next.config). */
 const TABS = ["overview", "products", "categories"] as const;
@@ -45,6 +46,7 @@ export default function InventoryPage() {
       <PageHeader
         title="Inventory"
         icon={<Package className="size-6 text-brand" />}
+        actions={canWrite ? <StoreImportButton /> : undefined}
       />
       <Tabs value={tab} onValueChange={setTab} className="w-full min-w-0">
         <TabsList className="h-9 w-full min-w-0 max-w-full overflow-x-auto rounded-lg sm:w-auto">

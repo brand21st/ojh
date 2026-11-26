@@ -10,12 +10,15 @@ import { createAdminClient } from "@/lib/supabase/admin";
 
 const COMPLIANCE_TOPICS = new Set(["customers/data_request", "customers/redact", "shop/redact"]);
 export const APP_ORDER_TOPICS = new Set(["orders/create", "orders/updated", "orders/cancelled"]);
+/** Live product + stock sync (see modules/products/store-sync.ts); ignored unless the workspace turned it on. */
+export const APP_PRODUCT_TOPICS = new Set(["products/create", "products/update", "products/delete", "inventory_levels/update"]);
 
 const PUBLIC_APP_TOPICS = new Set([
   "app/uninstalled",
   "app/scopes_update",
   ...COMPLIANCE_TOPICS,
   ...APP_ORDER_TOPICS,
+  ...APP_PRODUCT_TOPICS,
 ]);
 
 const deliveryLocks = new Map<string, Promise<unknown>>();
@@ -77,6 +80,11 @@ async function processDelivery(input: {
     const imported = await importAppOrderWebhook(input);
     if (imported.ignored) {
       return { ignored: true, topic: input.topic, reason: imported.reason };
+    }
+  } else if (APP_PRODUCT_TOPICS.has(input.topic)) {
+    const synced = await syncAppProductWebhook(input);
+    if (synced.ignored) {
+      return { ignored: true, topic: input.topic, reason: synced.reason };
     }
   } else if (input.topic === "app/scopes_update") {
     await updateGrantedScopes(input.shop, input.rawBody);
@@ -206,6 +214,27 @@ async function importAppOrderWebhook(input: { topic: string; shop: string; rawBo
     });
     throw error;
   }
+}
+
+/** Errors propagate so the delivery is not marked SUCCEEDED and Shopify retries it. */
+async function syncAppProductWebhook(input: { topic: string; shop: string; rawBody: string }) {
+  const installation = await installationForShop(input.shop);
+  if (!installation) return { ignored: true, reason: "missing_install" };
+  if (installation.status === "DISCONNECTED") return { ignored: true, reason: "disconnected" };
+  let payload: Record<string, unknown>;
+  try {
+    payload = JSON.parse(input.rawBody) as Record<string, unknown>;
+  } catch {
+    return { ignored: true, reason: "invalid_json" };
+  }
+  const { handleShopifyProductWebhook } = await import("@/modules/products/store-sync");
+  const result = await handleShopifyProductWebhook(createAdminClient(), {
+    organizationId: installation.organization_id,
+    topic: input.topic,
+    payload,
+  });
+  if ("ignored" in result && result.ignored) return { ignored: true, reason: String(result.reason ?? "ignored") };
+  return { ignored: false as const, reason: null };
 }
 
 async function updateGrantedScopes(shop: string, rawBody: string) {

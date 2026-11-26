@@ -313,7 +313,7 @@ export async function createProduct(supabase: SupabaseClient, ctx: TenantContext
     p_cod_enabled: input.codEnabled,
     p_cod_advance_percent: input.codEnabled ? (input.codAdvancePercent ?? 0) : 0,
     p_opening_stock: input.openingStock ?? 0,
-    p_created_by: ctx.userId,
+    p_created_by: ctx.userId || null,
   });
   if (error) rpcError(error);
   if (!data) throw new AppError(ERROR_CODES.VALIDATION_ERROR, "Could not create the product.");
@@ -436,7 +436,7 @@ export async function adjustProductStock(
     p_quantity_delta: input.quantityDelta,
     p_reason: reason,
     p_note: input.note ?? null,
-    p_created_by: ctx.userId,
+    p_created_by: ctx.userId || null,
     p_order_id: null,
     p_order_line_item_id: null,
   });

@@ -9,7 +9,7 @@ type CreateCategory = z.infer<typeof categorySchema>;
 type UpdateCategory = z.infer<typeof categoryUpdateSchema>;
 type Reorder = z.infer<typeof categoryReorderSchema>;
 
-function slugify(name: string) {
+export function slugify(name: string) {
   const slug = name
     .trim()
     .toLowerCase()

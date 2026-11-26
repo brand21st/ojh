@@ -192,7 +192,10 @@ export async function handleInventoryRoutes(
 
   if (method === "POST" && slugs[0] === "products" && slugs[1] && slugs[2] === "adjustments") {
     const body = adjustInventorySchema.parse(await request.json());
-    return adjustProductStock(supabase, ctx, slugs[1], body);
+    const adjusted = await adjustProductStock(supabase, ctx, slugs[1], body);
+    const { queueStockPush } = await import("@/modules/products/store-sync");
+    queueStockPush(ctx.organizationId, [slugs[1]]);
+    return adjusted;
   }
 
   if (key === "GET inventory/analytics") {
@@ -242,6 +245,33 @@ export async function handleInventoryRoutes(
     const body = productRecommendationsSchema.parse(await request.json());
     await getProduct(supabase, ctx, slugs[1]);
     return replaceProductRecommendations(supabase, ctx, slugs[1], body);
+  }
+
+  if (key === "GET inventory/import/sources") {
+    const { listProductImportSources } = await import("@/modules/products/store-import");
+    const { getLiveSyncStates } = await import("@/modules/products/store-sync");
+    const [sources, liveSync] = await Promise.all([
+      listProductImportSources(supabase, ctx.organizationId),
+      getLiveSyncStates(ctx.organizationId),
+    ]);
+    return { sources: sources.map((source) => ({ ...source, liveSync: liveSync[source.source] })) };
+  }
+
+  if (key === "PUT inventory/import/live-sync") {
+    if (!rateLimit(`product-live-sync:${ctx.organizationId}`, 20, 10 * 60_000).ok) {
+      throw new AppError(ERROR_CODES.RATE_LIMITED, "Too many changes. Wait a few minutes and try again.");
+    }
+    const { productSyncToggleSchema, setLiveSync } = await import("@/modules/products/store-sync");
+    return setLiveSync(supabase, ctx, productSyncToggleSchema.parse(await request.json().catch(() => ({}))));
+  }
+
+  if (key === "POST inventory/import") {
+    // Each call is one time-boxed batch; a full catalogue is a few dozen calls at most.
+    if (!rateLimit(`product-import:${ctx.organizationId}`, 120, 10 * 60_000).ok) {
+      throw new AppError(ERROR_CODES.RATE_LIMITED, "Too many import requests. Wait a few minutes and try again.");
+    }
+    const { productImportSchema, runProductImport } = await import("@/modules/products/store-import");
+    return runProductImport(supabase, ctx, productImportSchema.parse(await request.json().catch(() => ({}))));
   }
 
   if (key === "GET inventory/categories") {

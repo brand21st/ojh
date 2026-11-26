@@ -123,7 +123,10 @@ type WooWebhookJobInput = {
 
 export async function processWooWebhookJob(supabase: SupabaseClient, input: WooWebhookJobInput) {
   try {
-    const result = await importWooWebhookOrder(supabase, input);
+    // Product topics reuse the webhook queue; `orderId` carries the product id for them.
+    const result = input.topic.startsWith("product.")
+      ? await syncWooWebhookProduct(supabase, input)
+      : await importWooWebhookOrder(supabase, input);
     logInfo("woocommerce.webhook_processed", {
       organizationId: input.organizationId,
       connectionId: input.connectionId,
@@ -232,6 +235,22 @@ async function loadConnected(supabase: SupabaseClient, connectionId: string, org
     .eq("organization_id", organizationId)
     .maybeSingle();
   return (data as WooConnectionRow | null) ?? null;
+}
+
+async function syncWooWebhookProduct(supabase: SupabaseClient, input: WooWebhookJobInput) {
+  const connection = await loadConnected(supabase, input.connectionId, input.organizationId);
+  if (!connection) {
+    await finishDelivery(supabase, input.deliveryId, "IGNORED");
+    return { skipped: true };
+  }
+  const { handleWooProductWebhook } = await import("@/modules/products/store-sync");
+  const result = await handleWooProductWebhook(supabase, {
+    organizationId: input.organizationId,
+    topic: input.topic,
+    productId: input.orderId,
+  });
+  await finishDelivery(supabase, input.deliveryId, "ignored" in result && result.ignored ? "IGNORED" : "PROCESSED");
+  return result;
 }
 
 async function finishDelivery(supabase: SupabaseClient, deliveryId: string | undefined, status: string) {

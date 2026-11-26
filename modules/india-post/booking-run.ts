@@ -184,7 +184,20 @@ export async function persistBookedShipment(
     try {
       // Stock commits only after a successful BOOKED persist. CANCEL / RTO / RETURN
       // must not auto-restock until a dedicated reversal is added (ORDER_RELEASE / RTO_RETURN).
-      await supabase.rpc("commit_order_inventory", { p_order_id: input.orderId });
+      const { data: committed } = await supabase.rpc("commit_order_inventory", { p_order_id: input.orderId });
+      if (Number((committed as { committed?: number } | null)?.committed ?? 0) > 0) {
+        // Storefront / manual orders took stock in PostBus: tell any live-synced store.
+        const { data: lines } = await supabase
+          .from("order_line_items")
+          .select("product_id")
+          .eq("order_id", input.orderId)
+          .not("product_id", "is", null);
+        const { queueStockPush } = await import("@/modules/products/store-sync");
+        queueStockPush(
+          input.organizationId,
+          (lines ?? []).map((line) => String(line.product_id))
+        );
+      }
     } catch (error) {
       logInfo("booking.inventory_commit_skipped", {
         organizationId: input.organizationId,

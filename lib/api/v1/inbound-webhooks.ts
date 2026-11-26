@@ -147,6 +147,23 @@ export async function handleInboundWebhook(request: NextRequest, path: string) {
         });
         throw error;
       }
+    } else if (topic.startsWith("products/") || topic === "inventory_levels/update") {
+      const { handleShopifyProductWebhook } = await import("@/modules/products/store-sync");
+      try {
+        await handleShopifyProductWebhook(admin, {
+          organizationId: connection.organization_id,
+          topic,
+          payload: JSON.parse(raw) as Record<string, unknown>,
+        });
+      } catch (error) {
+        // Let Shopify retry: drop the idempotency key so the redelivery is processed.
+        await admin
+          .from("idempotency_keys")
+          .delete()
+          .eq("organization_id", connection.organization_id)
+          .eq("key", `shopify:${eventId}`);
+        throw error;
+      }
     } else if (topic.startsWith("orders/")) {
       try {
         const remote = JSON.parse(raw) as ShopifyRemoteOrder;

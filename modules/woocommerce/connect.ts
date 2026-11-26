@@ -17,6 +17,8 @@ import {
 import { measurementUnitsFromSettings, wooSettings, type WooConnectionRow } from "@/modules/woocommerce/orders";
 
 export const WOO_ORDER_TOPICS = ["order.created", "order.updated", "order.deleted"] as const;
+/** Live product + stock sync; deliveries are ignored unless the workspace turned sync on in Inventory. */
+export const WOO_PRODUCT_TOPICS = ["product.created", "product.updated", "product.deleted", "product.restored"] as const;
 
 const AUTH_TTL_MS = 15 * 60 * 1000;
 
@@ -313,7 +315,7 @@ async function installWooWebhooks(
   transport?: WooTransport
 ) {
   const webhookIds: number[] = [];
-  for (const topic of WOO_ORDER_TOPICS) {
+  for (const topic of [...WOO_ORDER_TOPICS, ...WOO_PRODUCT_TOPICS]) {
     const id = await createWooWebhook(
       creds,
       {
