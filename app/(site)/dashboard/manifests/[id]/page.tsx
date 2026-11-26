@@ -32,7 +32,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
-import { manifestOfficeLabel } from "@/lib/dashboard/manifests";
+import { bookingManifestDate, istDate, manifestOfficeLabel } from "@/lib/dashboard/manifests";
 import { ManifestEmailPanel } from "@/components/dashboard/manifest-email-panel";
 import { ManifestWhatsAppPanel } from "@/components/dashboard/manifest-whatsapp-panel";
 import { formatCurrency, formatDate, formatWeightGrams } from "@/lib/format";
@@ -640,7 +640,7 @@ function AddShipmentsDialog({
     onSuccess: (result) => {
       toast.success(
         `${result.added.length} shipment${result.added.length === 1 ? "" : "s"} added${
-          result.skipped ? `, ${result.skipped} skipped (already manifested or not booked)` : ""
+          result.skipped ? `, ${result.skipped} skipped (already manifested, booked on another day, or not booked)` : ""
         }.`
       );
       setSelected(new Set());
@@ -649,7 +649,10 @@ function AddShipmentsDialog({
     onError: (error: Error) => toast.error(error.message),
   });
 
-  const items = eligible.data?.items ?? [];
+  const manifestDate = manifest.date.slice(0, 10);
+  const items = (eligible.data?.items ?? []).filter(
+    (item) => bookingManifestDate(item.bookedAt, istDate()) === manifestDate
+  );
   const toggle = (shipmentId: string, on: boolean) =>
     setSelected((current) => {
       const next = new Set(current);
@@ -664,15 +667,15 @@ function AddShipmentsDialog({
         <DialogHeader>
           <DialogTitle>Add shipments</DialogTitle>
           <DialogDescription>
-            Booked shipments from the last 14 days that are not on any manifest. Shipments booked at another office are
-            marked.
+            Shipments booked on this manifest&apos;s date that are not on any manifest. Shipments booked at another
+            office are marked.
           </DialogDescription>
         </DialogHeader>
         <div className="max-h-[50vh] overflow-y-auto rounded-xl border border-border">
           {eligible.isLoading ? (
             <div className="p-4 text-sm text-muted">Loading…</div>
           ) : !items.length ? (
-            <div className="p-4 text-sm text-muted">No booked shipments are waiting for a manifest.</div>
+            <div className="p-4 text-sm text-muted">No shipments booked on this date are waiting for a manifest.</div>
           ) : (
             <ul className="divide-y divide-border">
               {items.map((item) => {

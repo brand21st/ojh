@@ -15,7 +15,7 @@ export const MANIFEST_ELIGIBLE_STATUSES = [
 /** Statuses a sweep picks up automatically; BOOKED/LABEL_PENDING wait for their label. */
 export const MANIFEST_SWEEP_STATUSES = ["LABEL_READY", "MANIFEST_PENDING", "MANIFEST_READY"] as const;
 
-/** Sweeps and the "add shipments" picker ignore bookings older than this. */
+/** Sweeps look back this far for labelled shipments, then file each one on its own booking day. */
 export const MANIFEST_ELIGIBLE_DAYS = 14;
 
 /** Handed-over shipments still unscanned after this long are flagged. */
