@@ -5,7 +5,6 @@ import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { AlertTriangle, CheckCircle2, Circle, Download, Loader2, RotateCcw, Square, Video, VideoOff, X } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
@@ -24,9 +23,14 @@ import type { PackingVideoBilling, VmsStartResult, VmsSummary } from "@/types/vm
 const CAMERA_KEY = "postbus.packing.camera";
 const DEVICE_KEY = "postbus.packing.cameraDevice";
 
+/** What the panel is doing, so the scan box can say what the next scan will do. */
+export type PackingVideoStatus = "off" | "camera" | "ready" | "recording";
+
 export type PackingVideoHandle = {
   /** Returns true when the scan was used to start or stop a video. */
   onScan: (code: string) => boolean;
+  /** Stops the current recording and saves it. No-op when nothing is recording. */
+  stopAndSave: () => void;
 };
 
 type Active = {
@@ -70,12 +74,14 @@ export function PackingVideoPanel({
   onSaved,
   onBeep,
   refocus,
+  onStatus,
 }: {
   ref?: Ref<PackingVideoHandle>;
   /** Called with the scanned code when a recording is stopped, to mark the parcel packed. */
   onSaved: (code: string) => void;
   onBeep: (ok: boolean) => void;
   refocus: () => void;
+  onStatus?: (status: PackingVideoStatus) => void;
 }) {
   const queryClient = useQueryClient();
   const previewRef = useRef<HTMLDivElement>(null);
@@ -202,6 +208,11 @@ export function PackingVideoPanel({
   }, [available, enabled]);
 
   useEffect(() => () => cameraRef.current?.close(), []);
+
+  const status: PackingVideoStatus = !available || !enabled ? "off" : active ? "recording" : cameraState === "on" ? "ready" : "camera";
+  useEffect(() => {
+    onStatus?.(status);
+  }, [status, onStatus]);
 
   // Elapsed clock and the 20-minute safety stop.
   useEffect(() => {
@@ -335,6 +346,9 @@ export function PackingVideoPanel({
   }
 
   useImperativeHandle(ref, () => ({
+    stopAndSave() {
+      if (activeRef.current && !busyRef.current) void stop(true);
+    },
     onScan(code: string) {
       if (!available || !enabled) return false;
       if (busyRef.current) return true;
@@ -370,25 +384,36 @@ export function PackingVideoPanel({
   const s = summary.data!;
   const minutes = Math.floor(elapsed / 60000);
   const seconds = Math.floor((elapsed % 60000) / 1000);
+  const step = active ? 2 : 1;
+  const steps = ["Scan the barcode", "Pack it on camera", "Scan it again to save"];
 
   return (
-    <Card>
-      <CardContent className="space-y-4 p-5">
+    <Card className={cn("overflow-hidden transition-colors", active && "border-red-500/60")}>
+      <CardContent className="space-y-4 p-4 sm:p-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            {enabled ? <Video className="size-5 text-brand" aria-hidden /> : <VideoOff className="size-5 text-muted" aria-hidden />}
-            <div>
-              <p className="font-semibold">Packing video</p>
+          <div className="flex min-w-0 items-center gap-3">
+            <span
+              className={cn(
+                "grid size-10 shrink-0 place-items-center rounded-xl",
+                enabled ? "bg-brand/10 text-brand" : "bg-surface-soft text-muted"
+              )}
+            >
+              {enabled ? <Video className="size-5" aria-hidden /> : <VideoOff className="size-5" aria-hidden />}
+            </span>
+            <div className="min-w-0">
+              <p className="font-semibold leading-tight">Packing video</p>
               <p className="text-xs text-muted">
-                Scan to start, pack on camera, scan the same barcode to stop.{" "}
                 {s.freeRemaining > 0
-                  ? `${s.freeRemaining} free video${s.freeRemaining === 1 ? "" : "s"} left, then ${rupees(s.priceMicros)} each.`
-                  : `${rupees(s.priceMicros)} per video from your wallet.`}
+                  ? `${s.freeRemaining} free video${s.freeRemaining === 1 ? "" : "s"} left, then ${rupees(s.priceMicros)} each`
+                  : `${rupees(s.priceMicros)} per video from your wallet`}
               </p>
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <Link href="/dashboard/packing/videos" className="text-sm font-medium text-brand hover:underline">
+            <Link
+              href="/dashboard/packing/videos"
+              className="rounded-md text-sm font-medium text-brand hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+            >
               All videos
             </Link>
             <Switch checked={enabled} onCheckedChange={toggle} aria-label="Record packing videos" />
@@ -397,16 +422,70 @@ export function PackingVideoPanel({
 
         {enabled ? (
           <>
-            <div className={cn("relative overflow-hidden rounded-xl border-2 bg-black", active ? "border-red-500" : "border-border")}>
+            <ol className="grid grid-cols-3 gap-2" aria-label="How packing video works">
+              {steps.map((label, index) => {
+                const number = index + 1;
+                const done = Boolean(active) && number === 1;
+                const current = cameraState === "on" && (active ? number === 2 : number === step);
+                return (
+                  <li
+                    key={label}
+                    aria-current={current ? "step" : undefined}
+                    className={cn(
+                      "flex items-center gap-2 rounded-lg border px-2.5 py-2 text-xs font-medium transition-colors sm:text-sm",
+                      done
+                        ? "border-success/40 bg-success/5 text-ink"
+                        : current
+                          ? "border-brand/40 bg-brand/5 text-ink"
+                          : "border-border text-muted"
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        "grid size-5 shrink-0 place-items-center rounded-full text-[11px] font-semibold",
+                        done ? "bg-success text-white" : current ? "bg-brand text-white" : "bg-surface-soft text-muted"
+                      )}
+                    >
+                      {done ? <CheckCircle2 className="size-3.5" aria-hidden /> : number}
+                    </span>
+                    <span className="min-w-0 leading-tight">{label}</span>
+                  </li>
+                );
+              })}
+            </ol>
+
+            <div className={cn("relative overflow-hidden rounded-xl border-2 bg-black", active ? "border-red-500" : "border-transparent")}>
               <div ref={previewRef} className="aspect-video w-full" />
+              {active ? (
+                <div className="pointer-events-none absolute right-3 top-3 flex items-center gap-2 rounded-full bg-red-600 px-3 py-1.5 text-sm font-semibold tabular-nums text-white shadow-sm">
+                  <Circle className="size-2.5 animate-pulse fill-current" aria-hidden />
+                  REC {String(minutes).padStart(2, "0")}:{String(seconds).padStart(2, "0")}
+                </div>
+              ) : null}
               {cameraState !== "on" ? (
-                <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 p-6 text-center text-sm text-white/80">
-                  {cameraState === "opening" ? <Loader2 className="size-6 animate-spin" aria-hidden /> : null}
-                  {cameraState === "opening" ? "Opening camera…" : null}
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 p-6 text-center text-sm text-white/85">
+                  {cameraState === "opening" ? (
+                    <>
+                      <Loader2 className="size-6 animate-spin" aria-hidden />
+                      Opening camera…
+                    </>
+                  ) : null}
                   {cameraState === "error" ? (
                     <>
                       <AlertTriangle className="size-6 text-amber-400" aria-hidden />
-                      {cameraError}
+                      <span className="max-w-md">{cameraError}</span>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="secondary"
+                        className="mt-1 gap-1.5"
+                        onClick={() => {
+                          setAttempt((n) => n + 1);
+                          refocus();
+                        }}
+                      >
+                        <RotateCcw className="size-3.5" aria-hidden /> Try again
+                      </Button>
                     </>
                   ) : null}
                 </div>
@@ -422,24 +501,28 @@ export function PackingVideoPanel({
             <div className="flex flex-wrap items-center gap-2">
               {active ? (
                 <>
-                  <Badge variant="error" className="gap-1.5 text-sm">
-                    <Circle className="size-2.5 animate-pulse fill-current" aria-hidden />
-                    REC {String(minutes).padStart(2, "0")}:{String(seconds).padStart(2, "0")}
-                  </Badge>
-                  <span className="font-mono text-sm">{active.code}</span>
-                  {active.orderNumber ? <span className="text-sm text-muted">Order {active.orderNumber}</span> : null}
+                  <div className="min-w-0">
+                    <p className="truncate font-mono text-sm font-semibold">{active.code}</p>
+                    <p className="text-xs text-muted">{active.orderNumber ? `Order ${active.orderNumber}` : "Not linked to an order"}</p>
+                  </div>
                   <div className="ml-auto flex gap-2">
-                    <Button type="button" variant="secondary" className="gap-1.5" onClick={() => void stop(false)}>
+                    <Button type="button" variant="secondary" className="h-11 gap-1.5" onClick={() => void stop(false)}>
                       <X className="size-4" aria-hidden /> Cancel
                     </Button>
-                    <Button type="button" className="gap-1.5" onClick={() => void stop(true)}>
-                      <Square className="size-4 fill-current" aria-hidden /> Stop & save
+                    <Button type="button" className="h-11 gap-1.5 bg-red-600 text-white hover:bg-red-700" onClick={() => void stop(true)}>
+                      <Square className="size-4 fill-current" aria-hidden /> Stop &amp; save
                     </Button>
                   </div>
                 </>
               ) : (
                 <>
-                  <span className="text-sm text-muted">{cameraState === "on" ? "Ready. Scan a barcode to start recording." : ""}</span>
+                  <p className="text-sm text-muted">
+                    {cameraState === "on"
+                      ? "Camera ready. Scan a barcode to start recording."
+                      : cameraState === "opening"
+                        ? "Starting camera…"
+                        : ""}
+                  </p>
                   {devices.length > 1 ? (
                     <select
                       className="ml-auto h-9 rounded-lg border border-border bg-card px-2 text-sm"
@@ -466,7 +549,11 @@ export function PackingVideoPanel({
               )}
             </div>
           </>
-        ) : null}
+        ) : (
+          <p className="rounded-lg bg-surface-soft px-3 py-2.5 text-sm text-muted">
+            Turn on to record every parcel as proof against &ldquo;missing item&rdquo; and damage claims. Works with a laptop or USB webcam.
+          </p>
+        )}
 
         {uploads.length > 0 ? (
           <ul className="space-y-1.5">
