@@ -73,6 +73,35 @@ export async function listCameras() {
   return devices.filter((device) => device.kind === "videoinput");
 }
 
+type CameraChoice = { deviceId: string; label: string };
+
+/** Built-in laptop cameras. USB packing webcams and virtual cameras are not. */
+export function looksLikeLaptopCamera(label: string) {
+  const text = label.trim().toLowerCase();
+  if (!text) return false;
+  if (/(obs|snap camera|manycam|droidcam|ndi|elgato|capture card|virtual)/.test(text)) return false;
+  if (/(integrated|built[- ]?in|internal|facetime|ishutter|laptop)/.test(text)) return true;
+  if (/(truevision|realtek|azurewave|chicony|microdia|easywebcam)/.test(text)) return true;
+  return false;
+}
+
+export function pickLaptopCameraId(devices: CameraChoice[]) {
+  return devices.find((device) => device.deviceId && looksLikeLaptopCamera(device.label))?.deviceId ?? null;
+}
+
+/**
+ * Camera to open: a just-plugged USB cam, else the operator's saved pick, else the laptop webcam.
+ */
+export function resolvePackingCameraId(
+  devices: CameraChoice[],
+  options: { preferred?: string | null; plugged?: string | null } = {}
+) {
+  const ids = new Set(devices.map((device) => device.deviceId).filter(Boolean));
+  if (options.plugged && ids.has(options.plugged)) return options.plugged;
+  if (options.preferred && ids.has(options.preferred)) return options.preferred;
+  return pickLaptopCameraId(devices) ?? devices.find((device) => device.deviceId)?.deviceId ?? null;
+}
+
 export class PackingCamera {
   readonly canvas: HTMLCanvasElement;
   private video: HTMLVideoElement;
@@ -101,22 +130,64 @@ export class PackingCamera {
     return this.recording ? Date.now() - this.startedAt : 0;
   }
 
-  async open(deviceId?: string | null) {
-    this.close();
-    this.stream = await navigator.mediaDevices.getUserMedia({
+  /** Called when the camera stops sending frames (unplugged, or taken by another app). */
+  onEnded: (() => void) | null = null;
+
+  /**
+   * Opens the chosen camera, or the laptop webcam when none is chosen or the chosen one is gone.
+   * Swapping cameras mid-recording keeps the recording going.
+   */
+  async open(deviceId?: string | null): Promise<string | null> {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      throw Object.assign(new Error("The camera needs a secure (https) connection."), { name: "InsecureContext" });
+    }
+    const constraints = (id?: string | null): MediaStreamConstraints => ({
       audio: false,
       video: {
         width: { ideal: WIDTH },
         height: { ideal: HEIGHT },
         frameRate: { ideal: FPS },
-        ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
+        ...(id ? { deviceId: { exact: id } } : {}),
       },
     });
-    this.video.srcObject = this.stream;
+    this.releaseStream();
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia(constraints(deviceId));
+    } catch (error) {
+      const name = (error as Error).name;
+      if (!deviceId || (name !== "OverconstrainedError" && name !== "NotFoundError")) throw error;
+      stream = await navigator.mediaDevices.getUserMedia(constraints(null));
+    }
+    this.stream = stream;
+    const track = stream.getVideoTracks()[0];
+    if (track) {
+      track.onended = () => {
+        if (this.stream === stream) this.onEnded?.();
+      };
+    }
+    this.video.srcObject = stream;
     await this.video.play();
-    // setInterval keeps drawing when the tab loses focus; requestAnimationFrame would stop.
-    this.timer = setInterval(() => this.draw(), 1000 / FPS);
+    if (!this.timer) {
+      // setInterval keeps drawing when the tab loses focus; requestAnimationFrame would stop.
+      this.timer = setInterval(() => this.draw(), 1000 / FPS);
+    }
     this.draw();
+    return track?.getSettings().deviceId ?? null;
+  }
+
+  private releaseStream() {
+    const stream = this.stream;
+    this.stream = null;
+    stream?.getTracks().forEach((track) => {
+      track.onended = null;
+      track.stop();
+    });
+    this.video.srcObject = null;
+  }
+
+  get live() {
+    return this.stream?.getVideoTracks().some((track) => track.readyState === "live") ?? false;
   }
 
   close() {
@@ -124,17 +195,15 @@ export class PackingCamera {
     this.timer = null;
     if (this.recorder && this.recorder.state !== "inactive") this.recorder.stop();
     this.recorder = null;
-    this.stream?.getTracks().forEach((track) => track.stop());
-    this.stream = null;
-    this.video.srcObject = null;
+    this.releaseStream();
   }
 
   get isOpen() {
-    return this.stream !== null;
+    return this.live;
   }
 
   start(mark: Watermark) {
-    if (!this.stream) throw new Error("Turn the camera on first.");
+    if (!this.live) throw new Error("Turn the camera on first.");
     const mimeType = pickMimeType();
     if (!mimeType) throw new Error("This browser cannot record video. Use Chrome or Edge.");
     this.mark = mark;

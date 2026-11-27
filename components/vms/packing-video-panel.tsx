@@ -11,7 +11,14 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { api } from "@/lib/hooks/use-api";
 import { cn } from "@/lib/utils";
-import { listCameras, MAX_RECORDING_MS, PackingCamera, recordsMp4, uploadRecording } from "@/lib/vms/recorder";
+import {
+  listCameras,
+  MAX_RECORDING_MS,
+  PackingCamera,
+  recordsMp4,
+  resolvePackingCameraId,
+  uploadRecording,
+} from "@/lib/vms/recorder";
 import type { PackingVideoBilling, VmsStartResult, VmsSummary } from "@/types/vms";
 
 const CAMERA_KEY = "postbus.packing.camera";
@@ -80,6 +87,12 @@ export function PackingVideoPanel({
   const [cameraResult, setCameraResult] = useState<{ key: string; state: "on" | "error"; error?: string } | null>(null);
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [deviceId, setDeviceId] = useState(() => (typeof window === "undefined" ? "" : window.localStorage.getItem(DEVICE_KEY) ?? ""));
+  // USB (or other) camera that appeared after the page loaded; not saved, so unplugging returns to the laptop.
+  const [pluggedId, setPluggedId] = useState<string | null>(null);
+  const pluggedIdRef = useRef<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  const inUseRef = useRef<string | null>(null);
+  const knownIdsRef = useRef<Set<string>>(new Set());
   const [active, setActive] = useState<Active | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const [uploads, setUploads] = useState<Upload[]>([]);
@@ -97,7 +110,8 @@ export function PackingVideoPanel({
     setActive(next);
   };
 
-  const cameraKey = available && enabled ? deviceId || "default" : null;
+  const targetId = resolvePackingCameraId(devices, { preferred: deviceId || null, plugged: pluggedId });
+  const cameraKey = available && enabled ? `${targetId || "default"}#${attempt}` : null;
   const cameraState: "off" | "opening" | "on" | "error" = !cameraKey
     ? "off"
     : cameraResult?.key === cameraKey
@@ -105,44 +119,87 @@ export function PackingVideoPanel({
       : "opening";
   const cameraError = cameraResult?.key === cameraKey ? (cameraResult.error ?? null) : null;
 
-  // Camera lifecycle follows the switch and the chosen camera.
+  // Opens the laptop webcam by default. A plugged-in camera, or a saved pick, wins while it is present.
   useEffect(() => {
     if (!cameraKey) {
       cameraRef.current?.close();
+      inUseRef.current = null;
       return;
     }
     let cancelled = false;
     const camera = cameraRef.current ?? new PackingCamera();
     cameraRef.current = camera;
+    camera.onEnded = () => {
+      toast.warning(activeRef.current ? "Camera disconnected. Reconnecting; the recording continues." : "Camera disconnected. Reconnecting…");
+      setAttempt((n) => n + 1);
+    };
+    const preferred = cameraKey.split("#")[0];
     camera
-      .open(cameraKey === "default" ? null : cameraKey)
-      .then(async () => {
+      .open(preferred === "default" ? null : preferred)
+      .then(async (usedId) => {
         if (cancelled) return;
+        inUseRef.current = usedId;
         setCameraResult({ key: cameraKey, state: "on" });
         const container = previewRef.current;
         if (container && camera.canvas.parentElement !== container) {
           camera.canvas.className = "block h-auto w-full";
           container.replaceChildren(camera.canvas);
         }
-        setDevices(await listCameras());
+        const list = await listCameras();
+        knownIdsRef.current = new Set(list.map((device) => device.deviceId).filter(Boolean));
+        setDevices(list);
       })
       .catch((error: Error) => {
         if (cancelled) return;
+        inUseRef.current = null;
         setCameraResult({
           key: cameraKey,
           state: "error",
           error:
-            error.name === "NotAllowedError"
-              ? "Camera permission was blocked. Allow the camera for this site in the browser's address bar."
+            error.name === "NotAllowedError" || error.name === "SecurityError"
+              ? "Camera permission was blocked. Click the camera icon in the address bar, allow the camera, then press Try again."
               : error.name === "NotFoundError" || error.name === "OverconstrainedError"
-                ? "No camera found. Plug in a USB webcam and try again."
-                : error.message,
+                ? "No camera found. The laptop webcam is used when it is available; a USB camera is picked up when you plug it in."
+                : error.name === "NotReadableError" || error.name === "AbortError"
+                  ? "The camera is in use by another app (Zoom, Meet, Teams or another tab). Close it there, then press Try again."
+                  : error.message,
         });
       });
     return () => {
       cancelled = true;
     };
   }, [cameraKey]);
+
+  // Plug in a USB camera → switch to it. Unplug it → back to the laptop webcam.
+  useEffect(() => {
+    if (!available || !enabled || !navigator.mediaDevices?.addEventListener) return;
+    const onChange = async () => {
+      const list = await listCameras();
+      setDevices(list);
+      const ids = list.map((device) => device.deviceId).filter(Boolean);
+      const known = knownIdsRef.current;
+      const added = known.size > 0 ? list.find((device) => device.deviceId && !known.has(device.deviceId)) : undefined;
+      const removed = [...known].filter((id) => !ids.includes(id));
+      knownIdsRef.current = new Set(ids);
+      if (added) {
+        pluggedIdRef.current = added.deviceId;
+        setPluggedId(added.deviceId);
+        toast.success(`Using ${added.label || "the plugged-in camera"}.`);
+        return;
+      }
+      if (pluggedIdRef.current && removed.includes(pluggedIdRef.current)) {
+        pluggedIdRef.current = null;
+        setPluggedId(null);
+        toast.message("Camera unplugged. Switched to the laptop webcam.");
+      }
+      if (inUseRef.current && removed.includes(inUseRef.current)) {
+        setAttempt((n) => n + 1);
+      }
+    };
+    const listener = () => void onChange();
+    navigator.mediaDevices.addEventListener("devicechange", listener);
+    return () => navigator.mediaDevices.removeEventListener("devicechange", listener);
+  }, [available, enabled]);
 
   useEffect(() => () => cameraRef.current?.close(), []);
 
@@ -386,16 +443,18 @@ export function PackingVideoPanel({
                   {devices.length > 1 ? (
                     <select
                       className="ml-auto h-9 rounded-lg border border-border bg-card px-2 text-sm"
-                      value={deviceId}
+                      value={pluggedId || (devices.some((device) => device.deviceId === deviceId) ? deviceId : "")}
                       aria-label="Camera"
                       onChange={(event) => {
+                        pluggedIdRef.current = null;
+                        setPluggedId(null);
                         setCameraResult(null);
                         setDeviceId(event.target.value);
                         window.localStorage.setItem(DEVICE_KEY, event.target.value);
                         refocus();
                       }}
                     >
-                      <option value="">Default camera</option>
+                      <option value="">Laptop webcam (default)</option>
                       {devices.map((device, index) => (
                         <option key={device.deviceId} value={device.deviceId}>
                           {device.label || `Camera ${index + 1}`}
