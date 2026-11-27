@@ -17,6 +17,7 @@ import { LabelCountStrip } from "@/components/labels/label-count-strip";
 import { LabelDateFilter, toLabelDateFilterValue } from "@/components/labels/label-date-filter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   committedSearchChanged,
@@ -36,8 +37,8 @@ import { DEFAULT_LABEL_TIMEZONE, formatZonedDateTime } from "@/modules/labels/da
 import { ApiError, api } from "@/lib/hooks/use-api";
 import { useMe } from "@/lib/hooks/use-me";
 import { usePlanEntitlements } from "@/lib/hooks/use-plan-entitlements";
-import { hasPermission } from "@/lib/permissions/rbac";
-import type { MemberRole } from "@/types/domain";
+import { meCan } from "@/lib/permissions/me";
+import { ORDER_SOURCE_LABELS, ORDER_SOURCES } from "@/types/domain";
 import { FEATURE } from "@/modules/billing/entitlements";
 import {
   defaultLabelTemplatePage,
@@ -82,7 +83,7 @@ async function downloadMergedShippingSlips(ids: string[]) {
   const response = await fetch("/api/v1/labels/bulk-download", {
     method: "POST",
     credentials: "same-origin",
-    headers: { "Content-Type": "application/json", Accept: "application/pdf" },
+    headers: { "Content-Type": "application/json", Accept: "application/pdf", "X-Label-Download": "1" },
     body: JSON.stringify({ ids }),
   });
   const { blob, filename } = await readPdfResponse(response, "shipping-slips.pdf");
@@ -153,16 +154,23 @@ async function readPdfResponse(response: Response, fallbackName: string) {
   };
 }
 
-async function fetchLabelPdf(id: string, source: "latest" | "shipping-slip") {
+function downloadHeaders(track = false): HeadersInit {
+  return track ? { Accept: "application/pdf", "X-Label-Download": "1" } : { Accept: "application/pdf" };
+}
+
+async function fetchLabelPdf(id: string, source: "latest" | "shipping-slip", track = false) {
   const response = await fetch(`/api/v1/labels/${id}/${source}`, {
     credentials: "same-origin",
     cache: "no-store",
-    headers: { Accept: "application/pdf" },
+    headers: downloadHeaders(track),
   });
   return readPdfResponse(response, source === "shipping-slip" ? "shipping-slip.pdf" : "india-post-label.pdf");
 }
 
-async function fetchOfficialIndiaPostLabelPdf(input: { shipmentId?: string | null; labelId?: string | null }) {
+async function fetchOfficialIndiaPostLabelPdf(
+  input: { shipmentId?: string | null; labelId?: string | null },
+  track = false
+) {
   const shipmentId = input.shipmentId?.trim();
   const labelId = input.labelId?.trim();
   const response = shipmentId
@@ -170,13 +178,13 @@ async function fetchOfficialIndiaPostLabelPdf(input: { shipmentId?: string | nul
         method: "POST",
         credentials: "same-origin",
         cache: "no-store",
-        headers: { Accept: "application/pdf" },
+        headers: downloadHeaders(track),
       })
     : await fetch(`/api/v1/labels/${labelId}/india-post`, {
         method: "POST",
         credentials: "same-origin",
         cache: "no-store",
-        headers: { Accept: "application/pdf" },
+        headers: downloadHeaders(track),
       });
   return readPdfResponse(response, "india-post-label.pdf");
 }
@@ -236,13 +244,13 @@ async function downloadPdfBlob(blob: Blob, filename: string) {
 }
 
 async function downloadLabelPdf(id: string, source: "latest" | "shipping-slip") {
-  const { blob, filename, sourceHeader } = await fetchLabelPdf(id, source);
+  const { blob, filename, sourceHeader } = await fetchLabelPdf(id, source, true);
   await downloadPdfBlob(blob, filename);
   return sourceHeader;
 }
 
 async function downloadOfficialIndiaPostLabel(input: { shipmentId?: string | null; labelId?: string | null }) {
-  const { blob, filename, sourceHeader } = await fetchOfficialIndiaPostLabelPdf(input);
+  const { blob, filename, sourceHeader } = await fetchOfficialIndiaPostLabelPdf(input, true);
   await downloadPdfBlob(blob, filename);
   return sourceHeader;
 }
@@ -262,7 +270,7 @@ function LabelsDashboard() {
   const entitlements = usePlanEntitlements();
   const printStation = usePrintStation();
   const me = useMe();
-  const canWriteLabels = hasPermission((me.data?.role ?? "VIEWER") as MemberRole, "labels.write");
+  const canWriteLabels = meCan(me.data, "labels.write");
   const canBulk = entitlements.allows(FEATURE.bulk);
   const canOfficialIndiaPostLabel = !entitlements.loading && entitlements.showsOfficialIndiaPostLabel;
 
@@ -327,7 +335,10 @@ function LabelsDashboard() {
 
   const bulk = useMutation({
     mutationFn: downloadMergedShippingSlips,
-    onSuccess: () => toast.success("Shipping slips downloaded as one PDF."),
+    onSuccess: () => {
+      toast.success("Shipping slips downloaded as one PDF.");
+      void queryClient.invalidateQueries({ queryKey: ["labels"] });
+    },
     onError: (error: Error) => toast.error(error.message),
   });
 
@@ -360,7 +371,10 @@ function LabelsDashboard() {
 
   const downloadShippingSlip = useMutation({
     mutationFn: (id: string) => downloadLabelPdf(id, "shipping-slip"),
-    onSuccess: () => toast.success("Shipping slip downloaded."),
+    onSuccess: () => {
+      toast.success("Shipping slip downloaded.");
+      void queryClient.invalidateQueries({ queryKey: ["labels"] });
+    },
     onError: (error: Error) => toast.error(error.message),
   });
 
@@ -483,6 +497,13 @@ function LabelsDashboard() {
     onError: (error: Error) => toast.error(error.message),
   });
 
+  const filtersActive =
+    listState.date !== "all" ||
+    Boolean(listState.q) ||
+    listState.kind !== "ALL" ||
+    listState.source !== "all" ||
+    listState.downloaded !== "all";
+
   const rows: LabelTableRow[] = list.items.map((row, index) => ({
     ...row,
     rowNumber: (list.page - 1) * list.pageSize + index + 1,
@@ -504,11 +525,15 @@ function LabelsDashboard() {
         onToggle: toggleOrderNumberSort,
         title: "Sort by order number",
       },
-      cell: (row) => (
-        <div className="min-w-[7rem]">
-          <p className="font-semibold text-foreground">{row.orderNumber ?? row.order_number ?? row.id.slice(0, 8)}</p>
-        </div>
-      ),
+      cell: (row) => {
+        const source = row.orderSource ?? row.order_source;
+        return (
+          <div className="flex min-w-[7rem] flex-wrap items-center gap-2">
+            <p className="font-semibold text-foreground">{row.orderNumber ?? row.order_number ?? row.id.slice(0, 8)}</p>
+            {source ? <StatusBadge value={source} /> : null}
+          </div>
+        );
+      },
     },
     {
       id: "generated",
@@ -516,6 +541,15 @@ function LabelsDashboard() {
       cell: (row) => (
         <p className="whitespace-nowrap text-sm text-muted">
           {formatZonedDateTime(row.createdAt ?? row.created_at, timezone, true)}
+        </p>
+      ),
+    },
+    {
+      id: "downloaded",
+      header: "Downloaded",
+      cell: (row) => (
+        <p className="whitespace-nowrap text-sm text-muted">
+          {formatZonedDateTime(row.downloadedAt ?? row.downloaded_at, timezone, true)}
         </p>
       ),
     },
@@ -715,6 +749,7 @@ function LabelsDashboard() {
         filtered={list.total}
       />
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <LabelDateFilter
           value={toLabelDateFilterValue(listState)}
           onChange={(next) => {
@@ -728,6 +763,26 @@ function LabelsDashboard() {
             });
           }}
         />
+        <Select
+          value={listState.source}
+          onValueChange={(value) => {
+            setSelected(selectionAfterFilterChange());
+            replaceListState({ page: 1, source: value as typeof listState.source });
+          }}
+        >
+          <SelectTrigger className="h-9 w-full shadow-none sm:w-44" aria-label="Order source">
+            <SelectValue placeholder="Source" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All sources</SelectItem>
+            {ORDER_SOURCES.map((item) => (
+              <SelectItem key={item} value={item}>
+                {ORDER_SOURCE_LABELS[item]}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        </div>
         <div className="flex w-full max-w-sm items-center gap-2">
           <Button
             type="button"
@@ -774,6 +829,27 @@ function LabelsDashboard() {
             onClick={() => {
               setSelected(selectionAfterFilterChange());
               replaceListState({ kind: value, page: 1 });
+            }}
+          >
+            {label}
+          </Button>
+        ))}
+        <span className="mx-1 hidden h-8 w-px self-center bg-border sm:block" aria-hidden />
+        {(
+          [
+            ["all", "All downloads"],
+            ["yes", "Downloaded"],
+            ["no", "Not downloaded"],
+          ] as const
+        ).map(([value, label]) => (
+          <Button
+            key={value}
+            type="button"
+            size="sm"
+            variant={listState.downloaded === value ? "primary" : "secondary"}
+            onClick={() => {
+              setSelected(selectionAfterFilterChange());
+              replaceListState({ downloaded: value, page: 1 });
             }}
           >
             {label}
@@ -836,14 +912,14 @@ function LabelsDashboard() {
         loading={query.isLoading}
         fetching={query.isFetching}
         error={query.error instanceof Error ? query.error : null}
-        emptyTitle={listState.date !== "all" || listState.q || listState.kind !== "ALL" ? "No labels match these filters" : "No labels yet"}
+        emptyTitle={filtersActive ? "No labels match these filters" : "No labels yet"}
         emptyDescription={
-          listState.date !== "all" || listState.q || listState.kind !== "ALL"
-            ? "Try a different date, search, or document status."
+          filtersActive
+            ? "Try a different date, source, download status, search, or document status."
             : "When a shipment is booked, the India Post barcode and packing slip appear on one row."
         }
         emptyAction={
-          listState.date !== "all" || listState.q || listState.kind !== "ALL" ? null : (
+          filtersActive ? null : (
             <div className="flex items-center gap-2 text-muted">
               <Tag className="size-4" />
               Connect India Post to generate labels.

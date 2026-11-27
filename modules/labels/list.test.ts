@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { matchesLabelKindFilter, normalizeLabelKindFilter, resolveLabelListSort } from "@/modules/labels/list";
+import {
+  matchesLabelKindFilter,
+  normalizeLabelDownloadedFilter,
+  normalizeLabelKindFilter,
+  normalizeLabelSourceFilter,
+  resolveLabelListSort,
+} from "@/modules/labels/list";
 
 describe("label list sort", () => {
   it("accepts numeric order-id sorts and ignores junk", () => {
@@ -8,6 +14,18 @@ describe("label list sort", () => {
     expect(resolveLabelListSort("created_at")).toBe("created_at");
     expect(resolveLabelListSort("amount")).toBeNull();
     expect(resolveLabelListSort(undefined)).toBeNull();
+  });
+});
+
+describe("label source and download filters", () => {
+  it("keeps known order sources and yes/no download flags", () => {
+    expect(normalizeLabelSourceFilter("shopify")).toBe("SHOPIFY");
+    expect(normalizeLabelSourceFilter("manual")).toBe("MANUAL");
+    expect(normalizeLabelSourceFilter("woocommerce")).toBe("WOOCOMMERCE");
+    expect(normalizeLabelSourceFilter("other")).toBeNull();
+    expect(normalizeLabelDownloadedFilter("YES")).toBe("yes");
+    expect(normalizeLabelDownloadedFilter("no")).toBe("no");
+    expect(normalizeLabelDownloadedFilter("all")).toBeNull();
   });
 });
 

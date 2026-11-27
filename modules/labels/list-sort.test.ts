@@ -45,6 +45,18 @@ describe("listGroupedLabels sort", () => {
     expect(client.calls[0]?.p_sort).toBe("-order_number");
   });
 
+  it("passes source and downloaded filters to label_shipment_groups", async () => {
+    const client = listClient();
+    await listGroupedLabels(client as never, ctx, {
+      page: 1,
+      pageSize: 20,
+      source: "SHOPIFY",
+      downloaded: "no",
+    });
+    expect(client.calls[0]?.p_source).toBe("SHOPIFY");
+    expect(client.calls[0]?.p_downloaded).toBe("no");
+  });
+
   it("omits unknown sort values", async () => {
     const client = listClient();
     await listGroupedLabels(client as never, ctx, { page: 1, pageSize: 20, sort: "amount" });

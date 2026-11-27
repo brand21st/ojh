@@ -41,6 +41,7 @@ import {
   indiaPostLabelRequestError,
 } from "@/modules/labels/official-fetch";
 import { fetchReceiptPdf } from "@/modules/labels/receipt";
+import { markLabelsDownloaded, shouldTrackLabelDownload } from "@/modules/labels/download-track";
 import { getLabelDashboardCounts, listGroupedLabels } from "@/modules/labels/list";
 import { getLabelTemplate } from "@/modules/labels/template-service";
 import { defaultLabelTemplateId } from "@/modules/labels/template-schema";
@@ -90,7 +91,8 @@ function dateRange(request: NextRequest) {
 async function officialIndiaPostLabelPdfResponse(
   supabase: SupabaseClient,
   organizationId: string,
-  shipmentId: string
+  shipmentId: string,
+  options?: { track?: boolean }
 ) {
   const filename = `india-post-label-${shipmentId}.pdf`;
   try {
@@ -99,6 +101,9 @@ async function officialIndiaPostLabelPdfResponse(
       organizationId,
       shipmentId
     );
+    if (options?.track && official.labelId) {
+      await markLabelsDownloaded(supabase, organizationId, [official.labelId]);
+    }
     const response = labelPdfFileResponse(official.pdf, filename);
     response.headers.set("X-Label-Source", "india-post");
     return response;
@@ -425,7 +430,9 @@ export async function handleCommerceRoutes(
       .eq("id", slugs[1])
       .maybeSingle();
     if (!shipment?.id) throw new AppError(ERROR_CODES.RESOURCE_NOT_FOUND, "Shipment not found.");
-    return officialIndiaPostLabelPdfResponse(supabase, ctx.organizationId, String(shipment.id));
+    return officialIndiaPostLabelPdfResponse(supabase, ctx.organizationId, String(shipment.id), {
+      track: shouldTrackLabelDownload(request),
+    });
   }
 
   if (method === "PATCH" && slugs[0] === "shipments" && slugs[1] && !slugs[2]) {
@@ -453,6 +460,8 @@ export async function handleCommerceRoutes(
       on: params.get("on"),
       from: params.get("from"),
       to: params.get("to"),
+      source: params.get("source"),
+      downloaded: params.get("downloaded"),
     });
   }
 
@@ -493,7 +502,9 @@ export async function handleCommerceRoutes(
       .eq("id", slugs[1])
       .maybeSingle();
     if (!row?.shipment_id) throw new AppError(ERROR_CODES.RESOURCE_NOT_FOUND, "Label not found.");
-    return officialIndiaPostLabelPdfResponse(supabase, ctx.organizationId, String(row.shipment_id));
+    return officialIndiaPostLabelPdfResponse(supabase, ctx.organizationId, String(row.shipment_id), {
+      track: shouldTrackLabelDownload(request),
+    });
   }
 
   if (method === "POST" && slugs[0] === "labels" && slugs[1] && slugs[2] === "india-post") {
@@ -504,7 +515,9 @@ export async function handleCommerceRoutes(
       .eq("id", slugs[1])
       .maybeSingle();
     if (!row?.shipment_id) throw new AppError(ERROR_CODES.RESOURCE_NOT_FOUND, "Label not found.");
-    return officialIndiaPostLabelPdfResponse(supabase, ctx.organizationId, String(row.shipment_id));
+    return officialIndiaPostLabelPdfResponse(supabase, ctx.organizationId, String(row.shipment_id), {
+      track: shouldTrackLabelDownload(request),
+    });
   }
 
   if (method === "GET" && slugs[0] === "labels" && slugs[1] && slugs[2] === "shipping-slip") {
@@ -540,6 +553,9 @@ export async function handleCommerceRoutes(
       templateId: defaultLabelTemplateId(stored),
     });
     const articleId = rendered.data.articleId?.trim() || shipmentId;
+    if (shouldTrackLabelDownload(request)) {
+      await markLabelsDownloaded(supabase, ctx.organizationId, [String(row.id)]);
+    }
     return labelPdfFileResponse(rendered.pdf, `shipping-slip-${articleId}.pdf`);
   }
 
@@ -566,6 +582,7 @@ export async function handleCommerceRoutes(
     const body = await request.json().catch(() => ({}));
     const ids = parseBulkPrintIds((body as { ids?: unknown }).ids);
     const prepared = await prepareBulkShippingSlips(supabase, ctx, ids);
+    await markLabelsDownloaded(supabase, ctx.organizationId, ids);
     return labelPdfFileResponse(prepared.merged.pdf, "shipping-slips.pdf", "attachment");
   }
 

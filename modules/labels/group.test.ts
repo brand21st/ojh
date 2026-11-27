@@ -54,6 +54,29 @@ describe("groupLabelsByShipment", () => {
     expect(grouped[0].packingLabelId).toBe("pack-1");
   });
 
+  it("keeps the latest download time and the order source on the grouped row", () => {
+    const grouped = groupLabelsByShipment([
+      mapped({
+        id: "pack-1",
+        kind: "MERCHANT",
+        status: "READY",
+        shipment_id: "ship-1",
+        downloaded_at: "2026-11-26T10:00:00Z",
+        shipments: { orders: { order_number: "#1001", source: "SHOPIFY" } },
+      }),
+      mapped({
+        id: "bar-1",
+        kind: "INDIA_POST",
+        status: "READY",
+        shipment_id: "ship-1",
+        downloaded_at: "2026-11-26T08:00:00Z",
+        shipments: { orders: { order_number: "#1001", source: "SHOPIFY" } },
+      }),
+    ]);
+    expect(grouped[0].downloadedAt).toBe("2026-11-26T10:00:00Z");
+    expect(grouped[0].orderSource).toBe("SHOPIFY");
+  });
+
   it("filters complete versus incomplete shipment rows", () => {
     const grouped = groupLabelsByShipment([
       mapped({ id: "bar-1", kind: "INDIA_POST", shipment_id: "ship-1", status: "READY" }),
